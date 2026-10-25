@@ -3,6 +3,16 @@
   "entries": [
     {
       "chainId": 31611,
+      "area": "core",
+      "kind": "wsmusd-deposit",
+      "tx": "0x947d865b889a996660a6f5f552de38dc8e061093d9b230ef05f0d0d05e730be4",
+      "block": 16364336,
+      "summary": "wsMUSD seeded with 1 MUSD of dead shares, deposited into the real sMUSD.",
+      "proves": "The ERC-4626 wrapper composes with Mezo's live claim-based sMUSD and is protected against first-depositor inflation."
+    },
+    {
+      "chainId": 31611,
+      "area": "core",
       "kind": "deploy",
       "tx": "0xea4778fcafea34da033cd061501f2e2df28c1197fc1d65933dff91171b3b24f4",
       "block": 16364338,
@@ -11,6 +21,7 @@
     },
     {
       "chainId": 31611,
+      "area": "core",
       "kind": "create-market",
       "tx": "0x4810d36183cda01097e07258b1b692477ae07ff1449a7abdac134fab03172da5",
       "block": 16364340,
@@ -19,14 +30,16 @@
     },
     {
       "chainId": 31611,
+      "area": "core",
       "kind": "supply",
       "tx": "0x29d883635a6e485f9ea5c358c1c6142dfab07607e57bf6ca2f9f03bf4d815fae",
       "block": 16364342,
       "summary": "Team supplied 3,000 MUSD of liquidity to M1.",
-      "proves": "Judges can borrow immediately; in Wave 2 this liquidity moves into the vMUSD lending vault."
+      "proves": "Judges can borrow immediately; vMUSD now tops this liquidity up through its allocator."
     },
     {
       "chainId": 31611,
+      "area": "core",
       "kind": "borrow",
       "tx": "0x4b25c6e57ebec23866fdba5f020bd2d1cb40a745f2c07cb83892ccbafaefa5f6",
       "block": 16364355,
@@ -35,6 +48,7 @@
     },
     {
       "chainId": 31611,
+      "area": "core",
       "kind": "repay-exit",
       "tx": "0x98996d663b29140990502713f1bfb582ae3ceac7fe444dfa0d5ea458ec5adae1",
       "block": 16364364,
@@ -43,11 +57,174 @@
     },
     {
       "chainId": 31611,
-      "kind": "wsmusd-deposit",
-      "tx": "0x947d865b889a996660a6f5f552de38dc8e061093d9b230ef05f0d0d05e730be4",
-      "block": 16364336,
-      "summary": "wsMUSD seeded with 1 MUSD of dead shares, deposited into the real sMUSD.",
-      "proves": "The ERC-4626 wrapper composes with Mezo's live claim-based sMUSD and is protected against first-depositor inflation."
+      "area": "judge-journey",
+      "kind": "dispenser-claim",
+      "tx": "0x5175013c14b9fc6bc27ffa348e0b3db02e1b7ba430bcfe753a41fc9028195563",
+      "block": 16365846,
+      "summary": "Judge journey (e2e harness, real signing wallet): claimed 25 test MUSD from the dispenser in the Get test funds card.",
+      "proves": "The faucet top-up a judge needs for interest and the fee works from the UI."
+    },
+    {
+      "chainId": 31611,
+      "area": "judge-journey",
+      "kind": "wsmusd-permit-deposit",
+      "tx": "0x64c55972abc591db6bfb989a3196c7ebcaba39c51aa538c4a1794d20bf6ccc7c",
+      "block": 16365852,
+      "summary": "Judge journey: one MUSD permit signature, then depositWithPermit put 5 MUSD into wsMUSD (5 shares) in one transaction.",
+      "proves": "The Save flow needs no separate approval for EOAs: permit and deposit land together on Mezo testnet."
+    },
+    {
+      "chainId": 31611,
+      "area": "judge-journey",
+      "kind": "wsmusd-redeem-in-kind",
+      "tx": "0xe576fe1bb519ae321fa33e23320c860485a127ea408c9da1b5b10687eb189a7b",
+      "block": 16365865,
+      "summary": "Judge journey: redeemInKind burned the remaining 3 wsMUSD for 3 sMUSD sent straight to the wallet.",
+      "proves": "wsMUSD’s exit that bypasses sMUSD deposits and withdrawals works on the live sMUSD."
+    },
+    {
+      "chainId": 31611,
+      "area": "judge-journey",
+      "kind": "permit-repay-exit",
+      "tx": "0xe12a69726cbedd83437e48df9fc862326ffc298ae24930567ed7377105e06e26",
+      "block": 16365875,
+      "summary": "Judge journey: one permit, then repayAndWithdrawWithPermit repaid 21.76 MUSD and returned 0.0009 native BTC.",
+      "proves": "The oracle-free, one-transaction exit works from the UI with a MUSD permit, to the wei."
+    },
+    {
+      "chainId": 31611,
+      "area": "lend",
+      "kind": "create-vmusd",
+      "tx": "0x37d5279dd0501dfbac52cb7cf931d151c276c6aaae2023ebe5111b433ed9deef",
+      "block": 16366237,
+      "summary": "vMUSD created through Mezo’s own VaultV2Factory (Morpho Vault V2, MUSD asset).",
+      "proves": "The lending vault is a standard Morpho Vault V2 instance that Mezo’s factory recognises."
+    },
+    {
+      "chainId": 31611,
+      "area": "lend",
+      "kind": "deploy-ws-adapter",
+      "tx": "0xf9a7c7ff104888333c701f3fed71311cdc753e66a2eded5c7039894433861e41",
+      "block": 16366246,
+      "summary": "WsMusdLiquidityAdapter deployed: vMUSD’s liquidity adapter that parks idle MUSD in wsMUSD.",
+      "proves": "Deposits earn sMUSD yield until borrowers need the MUSD, and a full wsMUSD cannot block deposits."
+    },
+    {
+      "chainId": 31611,
+      "area": "lend",
+      "kind": "deploy-allocator",
+      "tx": "0x0a1dc51cb3813d28ba2a8267193b4989cd79e4fa31ae3a8102699f92642e562f",
+      "block": 16366247,
+      "summary": "BaserateAllocator deployed: no owner, a 2,000 MUSD / 15% M1 buffer, at most 1,000 MUSD per move, 1-hour cooldown.",
+      "proves": "Allocation follows a fixed public policy anyone can trigger, inside the curator’s caps."
+    },
+    {
+      "chainId": 31611,
+      "area": "lend",
+      "kind": "vmusd-seed",
+      "tx": "0x24fbb3429fa97ab42891dcbeb6b2cfdc267efd661011b5c800b1fe322195d95e",
+      "block": 16366262,
+      "summary": "vMUSD seeded with 100 MUSD of dead shares, allocated straight into wsMUSD by the liquidity adapter.",
+      "proves": "The vault is inflation-protected and the deposit → wsMUSD path works on the live contracts."
+    },
+    {
+      "chainId": 31611,
+      "area": "lend",
+      "kind": "vmusd-timelocks",
+      "tx": "0x3d1674b23d43baca1b74693faad9361eadc4d82666e97d97c94e9c24294b073d",
+      "block": 16366263,
+      "summary": "Deployer’s temporary allocator role removed; adapter, cap, allocator and fee changes put behind a 48-hour timelock.",
+      "proves": "Only BaserateAllocator can move vMUSD funds; adapter and cap changes are visible two days ahead."
+    },
+    {
+      "chainId": 31611,
+      "area": "lend",
+      "kind": "vmusd-deposit",
+      "tx": "0xd89c582ec4b6d30aba3cc556c07cb5bbd46ef9a2bb78034eb434b7f1d1568ddb",
+      "block": 16366279,
+      "summary": "3,000 MUSD deposited into vMUSD (3,000 vMUSD minted); the liquidity adapter moved it into wsMUSD in the same call.",
+      "proves": "Lenders get vMUSD 1:1 and their MUSD earns sMUSD yield from the first block."
+    },
+    {
+      "chainId": 31611,
+      "area": "lend",
+      "kind": "vmusd-rebalance",
+      "tx": "0x46cb78974ec1c5d8471a02b37604d9b75e0d6abad903cdc27fbdbedaf428aa4d",
+      "block": 16366283,
+      "summary": "First permissionless rebalance: BUFFER_TOP_UP moved 1,000 MUSD from wsMUSD into M1 (M1 liquidity was 876 vs a 2,000 target).",
+      "proves": "The allocator keeps borrowers’ M1 buffer filled from the vault without any privileged key."
+    },
+    {
+      "chainId": 31611,
+      "area": "liquidations",
+      "kind": "deploy-backstop",
+      "tx": "0xf960a3ee1d0710bf59caf2a845e03963bde5190568cd22a27f9b30b7e29c0746",
+      "block": 16365855,
+      "summary": "Backstop (bMUSD) deployed: an ERC-4626 over MUSD that buys seized BTC at the oracle price less half the 7.41% incentive.",
+      "proves": "Liquidations have a buyer of last resort on testnet that does not depend on DEX depth."
+    },
+    {
+      "chainId": 31611,
+      "area": "liquidations",
+      "kind": "deploy-flash-liquidator",
+      "tx": "0x0c31794424f9897d99895b405d8b70056e4af43389e7830b1bfc7c4f6ada317c",
+      "block": 16365856,
+      "summary": "FlashLiquidator deployed, bound to M1 and the backstop, with the vAMM venue and a 6.89% maximum price impact.",
+      "proves": "Anyone can liquidate M1 with zero capital: the seized BTC is sold inside Morpho’s callback."
+    },
+    {
+      "chainId": 31611,
+      "area": "liquidations",
+      "kind": "backstop-seed",
+      "tx": "0x1c13a1feb9fbb3a7c85d4761d7492594725b3de268be5ef286944429583c0bc3",
+      "block": 16365858,
+      "summary": "Backstop seeded with 1 MUSD of dead shares, parked in wsMUSD.",
+      "proves": "The backstop is live, protected against first-depositor inflation, and earns sMUSD yield on idle cash."
+    },
+    {
+      "chainId": 31611,
+      "area": "liquidations",
+      "kind": "canary-open",
+      "tx": "0x3b4bf6885e6d708fcba59ba8b3469e52ab5375f3887e7e3b2ee18d20f8cd1a34",
+      "block": 16365903,
+      "summary": "openCanary: 0.002 BTC posted and 123.47 MUSD borrowed at ≈76.7% LTV against the 77% LLTV (CANARY profile).",
+      "proves": "A live position sits one small BTC dip from liquidation, so the liquidation path can be exercised on real state."
+    },
+    {
+      "chainId": 31611,
+      "area": "fees",
+      "kind": "deploy-fee-router",
+      "tx": "0x212946af67ad29cc5853b296da13532972ecf9baef5335a1f8addb6a98c1e7dd",
+      "block": 16365872,
+      "summary": "FeeRouter deployed: an ownerless 40/40/20 splitter to sMUSD yield, the testnet BTC/MUSD gauge’s bribe and the treasury.",
+      "proves": "The bribe target was checked against PoolsVoter.gaugeToBribe at construction; the split cannot be changed."
+    },
+    {
+      "chainId": 31611,
+      "area": "fees",
+      "kind": "fee-switch-submit",
+      "tx": "0xeedbd310e90a95d9c3d6ecf6223c26b870b53d8ca33f7cb347e21b960fc37575",
+      "block": 16365880,
+      "summary": "Governor submitted setFeeRecipient(FeeRouter) on the factory; executable after the 48-hour timelock (27 Oct 19:02 UTC).",
+      "proves": "Fee changes go through the factory’s public timelock: anyone can see them coming two days ahead."
+    },
+    {
+      "chainId": 31611,
+      "area": "fees",
+      "kind": "fee-distribution",
+      "tx": "0x76fe18e5b6df88d0e7c081d9387882788941691a19a91a1f6c0dcf5b5f8b130a",
+      "block": 16365890,
+      "summary": "distribute(): 20 MUSD split into an 8 MUSD bribe on the BTC/MUSD gauge for epoch 1792627200, 8 MUSD to sMUSD, 4 to treasury.",
+      "proves": "Fees reach veBTC voters (claimable after the Thursday flip) and sMUSD holders through Mezo’s own contracts."
+    },
+    {
+      "chainId": 31611,
+      "area": "risk",
+      "kind": "deploy-risk-lens",
+      "tx": "0xe8831351cb771ce905e91dfe494a98f8224c99de3aefe7861fbb6faf914c385c",
+      "block": 16365873,
+      "summary": "RiskLens deployed: one eth_call returns oracle, market, caps, backstop, depth quotes and the trove queue.",
+      "proves": "The Risk page reads everything from one stateless contract within Mezo’s precompile limit."
     }
   ]
 }

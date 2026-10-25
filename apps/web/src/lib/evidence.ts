@@ -1,18 +1,36 @@
 import {
+  backstopAbi,
+  baserateAllocatorAbi,
   blockscoutApi,
   borrowAccountAbi,
   borrowAccountFactoryAbi,
   btcMusdOracleAbi,
+  feeRouterAbi,
+  flashLiquidatorAbi,
   morphoAbi,
   musdDispenserAbi,
+  riskLensAbi,
+  vaultV2Abi,
   wsMusdAbi,
 } from '@baserate/sdk'
 import { type AbiFunction, toFunctionSelector } from 'viem'
 import raw from '../evidence.json'
 
+export const EVIDENCE_AREAS = [
+  'core',
+  'judge-journey',
+  'lend',
+  'liquidations',
+  'fees',
+  'risk',
+] as const
+export type EvidenceArea = (typeof EVIDENCE_AREAS)[number]
+
 /** One curated piece of on-chain evidence (schema: src/evidence.schema.json). */
 export interface EvidenceEntry {
   chainId: 31611 | 31612
+  /** Page section; rows without one are listed under "core". */
+  area?: EvidenceArea
   kind: string
   tx: `0x${string}`
   block: number
@@ -35,6 +53,7 @@ export function parseEvidence(input: unknown): { entries: EvidenceEntry[]; error
     const e = item as Partial<EvidenceEntry>
     const problems: string[] = []
     if (e.chainId !== 31611 && e.chainId !== 31612) problems.push('chainId must be 31611 or 31612')
+    if (e.area !== undefined && !EVIDENCE_AREAS.includes(e.area)) problems.push('area')
     if (typeof e.kind !== 'string' || !/^[a-z0-9-]{2,40}$/.test(e.kind)) problems.push('kind')
     if (typeof e.tx !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(e.tx)) problems.push('tx hash')
     if (typeof e.block !== 'number' || !Number.isInteger(e.block) || e.block < 1)
@@ -101,6 +120,12 @@ function selectorNames(): Map<string, string> {
     musdDispenserAbi,
     btcMusdOracleAbi,
     morphoAbi,
+    backstopAbi,
+    flashLiquidatorAbi,
+    feeRouterAbi,
+    riskLensAbi,
+    baserateAllocatorAbi,
+    vaultV2Abi,
   ]
   for (const abi of abis)
     for (const item of abi)
@@ -198,21 +223,26 @@ export interface AddressInfo {
   isVerified: boolean
   /** Which service holds the verified source. Sourcify is checked when Blockscout has none. */
   verifiedBy: 'blockscout' | 'sourcify' | null
+  /** Sourcify's verdict: an exact match also reproduces the metadata hash; a (partial) match the bytecode only. */
+  sourcifyMatch?: 'exact' | 'partial'
   name?: string | null
 }
 
 /**
- * Whether Sourcify holds a (partial or exact) match. Only a 404 means "not verified"; rate limits, 5xx and network
- * failures throw, so a transient Sourcify hiccup is retried and never shown as a false "Unverified".
+ * Sourcify's match for an address, or null. Only a 404 means "not verified"; rate limits, 5xx and network failures
+ * throw, so a transient Sourcify hiccup is retried and never shown as a false "Unverified".
  */
-async function sourcifyMatch(chainId: number, address: string): Promise<boolean> {
+async function sourcifyMatch(
+  chainId: number,
+  address: string,
+): Promise<'exact' | 'partial' | null> {
   const res = await fetch(`https://sourcify.dev/server/v2/contract/${chainId}/${address}`, {
     signal: timeoutSignal(EXPLORER_TIMEOUT_MS),
   })
-  if (res.status === 404) return false
+  if (res.status === 404) return null
   if (!res.ok) throw new Error(`Sourcify ${res.status}`)
   const s = (await res.json()) as { match?: string | null }
-  return s.match === 'exact_match' || s.match === 'match'
+  return s.match === 'exact_match' ? 'exact' : s.match === 'match' ? 'partial' : null
 }
 
 export async function fetchAddressInfo(chainId: number, address: string): Promise<AddressInfo> {
@@ -226,11 +256,12 @@ export async function fetchAddressInfo(chainId: number, address: string): Promis
     : {}
   if (a.is_verified)
     return { isContract: true, isVerified: true, verifiedBy: 'blockscout', name: a.name }
-  const onSourcify = await sourcifyMatch(chainId, address)
+  const match = await sourcifyMatch(chainId, address)
   return {
-    isContract: !!a.is_contract || onSourcify,
-    isVerified: onSourcify,
-    verifiedBy: onSourcify ? 'sourcify' : null,
+    isContract: !!a.is_contract || match !== null,
+    isVerified: match !== null,
+    verifiedBy: match !== null ? 'sourcify' : null,
+    sourcifyMatch: match ?? undefined,
     name: a.name,
   }
 }

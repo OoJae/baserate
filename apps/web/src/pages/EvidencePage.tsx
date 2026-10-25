@@ -21,16 +21,33 @@ import {
   type Tone,
 } from '../components/ui'
 import {
+  EVIDENCE_AREAS,
+  type EvidenceArea,
   type EvidenceEntry,
   evidence,
   fetchAddressInfo,
   type TxVerification,
   verifyTx,
 } from '../lib/evidence'
-import { NEXT_RELEASE } from '../lib/roadmap'
+import { NEXT_RELEASE, PLANNED_INFRA } from '../lib/roadmap'
 import { appChain, registry } from '../wagmi'
 
 const CHAIN_NAME: Record<number, string> = { 31611: 'Testnet', 31612: 'Mainnet' }
+
+const AREA_TITLE: Record<EvidenceArea, { title: string; blurb: string }> = {
+  core: { title: 'Borrow and save', blurb: 'Wave 1 core: deploys, M1, the first borrow and exit' },
+  'judge-journey': {
+    title: 'Judge journey',
+    blurb: 'Recorded by the e2e harness clicking through the deployed UI with a real wallet',
+  },
+  lend: { title: 'Lend: vMUSD', blurb: 'Morpho Vault V2, its adapters and the allocator' },
+  liquidations: { title: 'Liquidations', blurb: 'Backstop, FlashLiquidator and the live canary' },
+  fees: {
+    title: 'Fees and governance',
+    blurb: 'FeeRouter, the first distribution, the fee switch',
+  },
+  risk: { title: 'Risk', blurb: 'RiskLens' },
+}
 
 export function EvidencePage() {
   return (
@@ -80,11 +97,27 @@ function EvidenceList() {
           </p>
         </div>
       ) : (
-        <ul className="divide-y divide-line">
-          {entries.map((e) => (
-            <EvidenceRow key={`${e.chainId}-${e.tx}-${e.block}-${e.kind}`} entry={e} />
-          ))}
-        </ul>
+        <div className="space-y-6">
+          {EVIDENCE_AREAS.map((area) => {
+            const rows = entries.filter((e) => (e.area ?? 'core') === area)
+            if (rows.length === 0) return null
+            return (
+              <section key={area} aria-labelledby={`area-${area}`}>
+                <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 border-b border-line pb-2">
+                  <h3 id={`area-${area}`} className="text-sm font-semibold text-ink">
+                    {AREA_TITLE[area].title}
+                  </h3>
+                  <p className="text-xs text-muted">{AREA_TITLE[area].blurb}</p>
+                </div>
+                <ul className="divide-y divide-line">
+                  {rows.map((e) => (
+                    <EvidenceRow key={`${e.chainId}-${e.tx}-${e.block}-${e.kind}`} entry={e} />
+                  ))}
+                </ul>
+              </section>
+            )
+          })}
+        </div>
       )}
     </Card>
   )
@@ -108,7 +141,7 @@ function EvidenceRow({ entry }: { entry: EvidenceEntry }) {
   const v = q.data
   const verdict = v ? VERDICT[v.state] : undefined
   return (
-    <li className="py-4 first:pt-0 last:pb-0">
+    <li className="py-4 first:pt-2 last:pb-0">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone="brand">{entry.kind}</Badge>
         <Badge>{CHAIN_NAME[entry.chainId]}</Badge>
@@ -188,7 +221,46 @@ function contractRows(): ContractRow[] {
     },
     { name: 'WsMUSD', role: 'ERC-4626 over sMUSD', address: c.wsMusd.address, ours: true },
     { name: 'MusdDispenser', role: 'Test MUSD faucet', address: c.dispenser.address, ours: true },
+    {
+      name: 'vMUSD (Vault V2)',
+      role: 'MUSD lending vault, created by Mezo’s VaultV2Factory',
+      address: c.vMusd.address,
+      ours: true,
+    },
+    {
+      name: 'WsMusdLiquidityAdapter',
+      role: 'Parks vMUSD’s idle MUSD in wsMUSD',
+      address: c.wsMusdAdapter.address,
+      ours: true,
+    },
+    {
+      name: 'MorphoMarketV1AdapterV2',
+      role: 'Holds vMUSD’s M1 supply',
+      address: c.m1Adapter.address,
+      ours: true,
+    },
+    {
+      name: 'BaserateAllocator',
+      role: 'Permissionless buffer and APY allocator',
+      address: c.allocator.address,
+      ours: true,
+    },
+    {
+      name: 'FlashLiquidator',
+      role: 'Zero-capital M1 liquidations',
+      address: c.flashLiquidator.address,
+      ours: true,
+    },
+    { name: 'Backstop (bMUSD)', role: 'Buys seized BTC', address: c.backstop.address, ours: true },
+    { name: 'FeeRouter', role: '40/40/20 fee splitter', address: c.feeRouter.address, ours: true },
+    { name: 'RiskLens', role: 'One-call risk snapshot', address: c.riskLens.address, ours: true },
     { name: 'Morpho Blue', role: 'Mezo’s official lending core', address: x.morpho, ours: false },
+    {
+      name: 'VaultV2Factory',
+      role: 'Mezo’s Morpho Vault V2 factory',
+      address: x.vaultV2Factory,
+      ours: false,
+    },
     { name: 'AdaptiveCurveIrm', role: 'Interest rate model', address: x.irm, ours: false },
     { name: 'MUSD', role: 'Loan token', address: x.musd, ours: false },
     { name: 'sMUSD', role: 'MUSD savings rate', address: x.smusd, ours: false },
@@ -202,6 +274,7 @@ function contractRows(): ContractRow[] {
     { name: 'Pyth', role: 'Sanity band and MUSD price', address: x.pyth, ours: false },
     { name: 'SortedTroves', role: 'MUSD redemption queue', address: x.sortedTroves, ours: false },
     { name: 'TroveManager', role: 'Trove ratios', address: x.troveManager, ours: false },
+    { name: 'PoolsVoter', role: 'Mezo Earn gauges and bribes', address: x.poolsVoter, ours: false },
   ]
 }
 
@@ -223,7 +296,11 @@ function VerifiedBadge({ row }: { row: ContractRow }) {
   return q.data.isVerified ? (
     <Badge tone="good">
       <IconCheck className="size-3.5" />
-      {q.data.verifiedBy === 'sourcify' ? 'Verified (Sourcify)' : 'Verified source'}
+      {q.data.verifiedBy === 'sourcify'
+        ? q.data.sourcifyMatch === 'partial'
+          ? 'Verified (Sourcify, partial)'
+          : 'Verified (Sourcify)'
+        : 'Verified source'}
     </Badge>
   ) : (
     <Badge tone="warn">Unverified</Badge>
@@ -237,7 +314,7 @@ function ContractsTable() {
       <CardHeader
         id="contracts-title"
         title="Contracts"
-        subtitle={`${appChain.name} · source-verification status read live from Blockscout and Sourcify`}
+        subtitle={`${appChain.name} · source-verification status read live from Blockscout and Sourcify (a partial match reproduces the bytecode but not the metadata hash)`}
       />
       <div className="-mx-4 overflow-x-auto sm:mx-0">
         <table className="w-full min-w-[560px] text-left text-sm">
@@ -293,6 +370,10 @@ function BuiltVsPlanned() {
     'Borrow: openAndBorrow with BTC as msg.value, LTV preview, oracle and redemption panels',
     'Repay & withdraw with a MUSD permit (approve path for contract wallets)',
     'Save: wsMUSD deposit with permit, redeem, redeem in kind, permissionless sync',
+    'Lend: vMUSD (Morpho Vault V2) deposit and withdraw, allocator path, permissionless rebalance',
+    'Liquidate: positions by health, live previews, one-click FlashLiquidator, backstop deposits and exits',
+    'Risk: RiskLens oracle, market, caps, liquidation depth and trove-queue dashboard',
+    'Fees: FeeRouter preview and distribute, gauge bribes, the timelocked fee switch',
     'Get test funds: faucet link, dispenser claim, add MUSD to wallet',
     'Evidence: live Blockscout verification of every recorded transaction',
   ]
@@ -322,7 +403,7 @@ function BuiltVsPlanned() {
             Coming in the next release
           </h3>
           <ul className="space-y-2 text-sm">
-            {NEXT_RELEASE.map((n) => (
+            {[...NEXT_RELEASE, ...PLANNED_INFRA].map((n) => (
               <li key={n.label}>
                 <span className="font-medium text-ink">{n.label}</span>
                 <span className="text-muted"> · {n.blurb}</span>
