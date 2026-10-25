@@ -191,16 +191,25 @@ function EvidenceRow({ entry }: { entry: EvidenceEntry }) {
   )
 }
 
-const KEEPER_JOBS: { job: KeeperJob; label: string; cadence: string; staleAfterS: number }[] = [
-  { job: 'liquidations', label: 'Liquidation scan', cadence: 'every 30 s', staleAfterS: 180 },
-  {
-    job: 'allocator',
-    label: 'Allocator rebalance and checkpoint',
-    cadence: 'hourly',
-    staleAfterS: 7_500,
-  },
-  { job: 'fees', label: 'FeeRouter distribution', cadence: 'every 6 h', staleAfterS: 23_400 },
+/** Plain names for the keeper's jobs, in the order the card lists them. */
+const KEEPER_JOBS: { job: string; label: string }[] = [
+  { job: 'liquidations', label: 'Liquidation scan' },
+  { job: 'allocator', label: 'vMUSD allocator' },
+  { job: 'wsmusd.sync', label: 'wsMUSD harvest' },
+  { job: 'fee.flush', label: 'Fee flush, once per epoch' },
+  { job: 'backstop', label: 'Backstop upkeep' },
+  { job: 'canary', label: 'Canary upkeep' },
+  { job: 'caps.depth', label: 'Liquidation depth vs borrow cap' },
+  { job: 'smusd.watch', label: 'sMUSD upgrade watch' },
+  { job: 'yield.sim', label: 'Testnet yield simulator (labelled ~1% APR)' },
+  { job: 'health', label: 'Oracle and balances' },
 ]
+
+function cadenceLabel(seconds: number): string {
+  if (seconds < 60) return `every ${seconds} s`
+  if (seconds < 3_600) return `every ${Math.round(seconds / 60)} min`
+  return seconds === 3_600 ? 'hourly' : `every ${Math.round(seconds / 3_600)} h`
+}
 
 function KeeperCard() {
   const now = useNow(1_000)
@@ -267,21 +276,36 @@ function KeeperCard() {
               Jobs
             </h3>
             <ul className="divide-y divide-line text-sm">
-              {KEEPER_JOBS.map((j) => {
-                const age = ageS(s.lastRun[j.job])
+              {KEEPER_JOBS.filter((j) => s.jobs?.[j.job] ?? j.job in s.lastRun).map((j) => {
+                const state = s.jobs?.[j.job]
+                const off = state?.note?.startsWith('off:')
+                const age = ageS(state?.lastRun ?? s.lastRun[j.job as KeeperJob])
+                const stale =
+                  !off &&
+                  (age === undefined ||
+                    (state ? age > state.cadenceS * 2.5 + 60 || state.failures >= 3 : age > 7_500))
                 return (
-                  <li
-                    key={j.job}
-                    className="flex flex-wrap items-baseline justify-between gap-x-4 py-2"
-                  >
-                    <span className="text-ink">
-                      {j.label} <span className="text-muted">· {j.cadence}</span>
-                    </span>
-                    <span
-                      className={`num text-xs ${age !== undefined && age < j.staleAfterS ? 'text-muted' : 'text-warn'}`}
-                    >
-                      {age === undefined ? 'not run yet' : `last run ${formatDuration(age)} ago`}
-                    </span>
+                  <li key={j.job} className="py-2">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-4">
+                      <span className="text-ink">
+                        {j.label}
+                        {state ? (
+                          <span className="text-muted"> · {cadenceLabel(state.cadenceS)}</span>
+                        ) : null}
+                      </span>
+                      <span className={`num text-xs ${stale ? 'text-warn' : 'text-muted'}`}>
+                        {off
+                          ? 'off'
+                          : age === undefined
+                            ? 'not run yet'
+                            : `last run ${formatDuration(age)} ago`}
+                      </span>
+                    </div>
+                    {state?.note ? (
+                      <p className="mt-0.5 text-xs text-muted">
+                        {off ? state.note.slice(4).trim() : state.note}
+                      </p>
+                    ) : null}
                   </li>
                 )
               })}
@@ -547,7 +571,7 @@ function BuiltVsPlanned() {
     'Fees: FeeRouter preview and distribute, gauge bribes, the timelocked fee switch',
     'Get test funds: faucet link, dispenser claim, add MUSD to wallet',
     'Evidence: live Blockscout verification of every recorded transaction',
-    'Keeper on Railway: allocator upkeep, liquidation scan, fee distribution, public status',
+    'Keeper on Railway: liquidations, vault and wsMUSD upkeep, backstop, once-per-epoch fee flush, canaries, depth and sMUSD watch, public status',
   ]
   return (
     <Card aria-labelledby="built-title">

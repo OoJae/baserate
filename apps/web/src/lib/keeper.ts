@@ -12,6 +12,15 @@ export interface KeeperAction {
   block: number
 }
 
+/** One keeper job's run state, as `/status` reports it (keeper v2). */
+export interface KeeperJobState {
+  cadenceS: number
+  lastRun: string | null
+  lastSuccess: string | null
+  failures: number
+  note: string | null
+}
+
 export interface KeeperStatus {
   keeper: Address
   gasBalanceBtc: string | null
@@ -19,6 +28,8 @@ export interface KeeperStatus {
   lastRun: Partial<Record<KeeperJob, string>>
   accounts: { account: Address; ltvPct: number; liquidatable: boolean }[]
   actions: KeeperAction[]
+  /** Every job by name (keeper v2); absent on older keepers, which report `lastRun` only. */
+  jobs?: Record<string, KeeperJobState>
 }
 
 /**
@@ -41,5 +52,6 @@ export async function fetchKeeperStatus(signal?: AbortSignal): Promise<KeeperSta
       (a: { account?: string }) => isAddress(a?.account ?? ''),
     ),
     actions: body.actions.filter((a: { tx?: string }) => isHash(a?.tx ?? '')),
+    jobs: body.jobs && typeof body.jobs === 'object' ? body.jobs : undefined,
   }
 }
