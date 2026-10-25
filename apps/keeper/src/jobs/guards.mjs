@@ -1,5 +1,6 @@
 import {
   encodeAbiParameters,
+  encodeFunctionData,
   formatEther,
   formatUnits,
   getAddress,
@@ -28,7 +29,36 @@ export async function canaryJob() {
     functionName: 'isCanaryOperator',
     args: [op],
   })
-  if (!isOperator) return `${op} is not a canary operator`
+  if (!isOperator) {
+    // Canary grants sit behind the factory's 48 h timelock (audit D-7); anyone may execute one once it is due.
+    const grant = encodeFunctionData({
+      abi: abi.factory,
+      functionName: 'setCanaryOperator',
+      args: [op, true],
+    })
+    const at = Number(
+      await pub.readContract({
+        address: registry.factory,
+        abi: abi.factory,
+        functionName: 'executableAt',
+        args: [grant],
+      }),
+    )
+    if (at === 0) return `${op} is not a canary operator and no grant is queued`
+    if (at > nowS()) return `canary grant executable at ${new Date(at * 1000).toISOString()}`
+    const sent = await send(
+      'canary',
+      'canary',
+      {
+        address: registry.factory,
+        abi: abi.factory,
+        functionName: 'setCanaryOperator',
+        args: [op, true],
+      },
+      { note: 'executed the matured canary operator grant' },
+    )
+    return sent?.receipt ? 'executed the canary operator grant' : 'canary grant execution skipped'
+  }
   const [account, deployed] = await pub.readContract({
     address: registry.factory,
     abi: abi.factory,

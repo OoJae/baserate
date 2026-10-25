@@ -1,6 +1,6 @@
 import { abi, events, PROFILE, VENUE } from '../abis.mjs'
 import { alert } from '../alerts.mjs'
-import { pub, send } from '../chain.mjs'
+import { addressOf, pub, send } from '../chain.mjs'
 import { LIMITS, registry, WAD } from '../config.mjs'
 import { readings } from '../scheduler.mjs'
 import { getKv, setKv } from '../store.mjs'
@@ -74,18 +74,25 @@ export async function liquidationsJob() {
       continue
     }
     for (const venue of [VENUE.VAMM, VENUE.BACKSTOP]) {
+      // Simulate first so the real call can demand 90% of the expected profit: a sandwich can't take the incentive.
+      const request = {
+        address: registry.flashLiquidator,
+        abi: abi.liquidator,
+        functionName: 'liquidate',
+        args: [account, 0n, venue, 0n],
+      }
+      const quote = await pub
+        .simulateContract({ ...request, account: addressOf('keeper') })
+        .then((s) => s.result[2])
+        .catch(() => null)
+      if (quote === null) continue
       const sent = await send(
         'keeper',
         'liquidations',
-        {
-          address: registry.flashLiquidator,
-          abi: abi.liquidator,
-          functionName: 'liquidate',
-          args: [account, 0n, venue, 0n],
-        },
+        { ...request, args: [account, 0n, venue, (quote * 9n) / 10n] },
         { note: `${canary ? 'canary' : 'position'} ${account} at ${ltvPct}% LTV` },
       )
-      if (sent?.receipt.status === 'success') {
+      if (sent?.receipt?.status === 'success') {
         await alert(
           `liquidated:${account}:${sent.receipt.transactionHash}`,
           `liquidated ${account} (${ltvPct}% LTV): ${sent.receipt.transactionHash}`,

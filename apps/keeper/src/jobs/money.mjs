@@ -73,36 +73,13 @@ export async function yieldSimJob() {
 }
 
 /**
- * Backstop upkeep, all permissionless: pays out matured 7-day exits, sells BTC inventory on the vAMM when that beats
- * the auction floor (the contract enforces it), and recognises vested gains daily.
+ * Backstop upkeep, all permissionless: sells BTC inventory on the vAMM when that beats the auction floor (the contract
+ * enforces it) and recognises vested gains daily. Matured exits are left to their owners: claiming someone else's exit
+ * at a temporary NAV dip would lock in their loss (round-1 audit note).
  */
 export async function backstopJob() {
   const b = registry.backstop
   const notes = []
-  const next = Number(
-    await pub.readContract({ address: b, abi: abi.backstop, functionName: 'nextRequestId' }),
-  )
-  for (let id = 0; id < next; id++) {
-    const r = await pub.readContract({
-      address: b,
-      abi: abi.backstop,
-      functionName: 'redeemRequest',
-      args: [BigInt(id)],
-    })
-    if (r.shares === 0n || Number(r.claimableAt) > nowS()) continue
-    const sent = await send(
-      'keeper',
-      'backstop',
-      {
-        address: b,
-        abi: abi.backstop,
-        functionName: 'claimRedeem',
-        args: [BigInt(id)],
-      },
-      { note: `exit #${id} for ${r.receiver}` },
-    )
-    if (sent?.receipt) notes.push(`paid exit #${id}`)
-  }
   const [inventory, maxSale] = await Promise.all([
     pub.readContract({ address: b, abi: abi.backstop, functionName: 'inventory' }),
     pub.readContract({ address: b, abi: abi.backstop, functionName: 'MAX_KEEPER_SALE' }),
@@ -143,9 +120,7 @@ export async function backstopJob() {
     })
     if (sent?.receipt) await setKv('backstop:lastSync', nowS())
   }
-  return notes.length
-    ? notes.join(', ')
-    : `inventory ${formatUnits(inventory, 18)} BTC, no matured exits`
+  return notes.length ? notes.join(', ') : `inventory ${formatUnits(inventory, 18)} BTC`
 }
 
 /**

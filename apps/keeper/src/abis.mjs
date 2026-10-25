@@ -15,6 +15,8 @@ export const abi = {
     'function accountOf(address owner, uint8 profile) view returns (address account, bool deployed)',
     'function profileOf(address account) view returns (uint8)',
     'function isCanaryOperator(address) view returns (bool)',
+    'function executableAt(bytes data) view returns (uint256)',
+    'function setCanaryOperator(address operator, bool enabled)',
   ]),
   account: parseAbi([
     'function collateral() view returns (uint256)',
@@ -27,7 +29,7 @@ export const abi = {
     'function status() view returns (Status s)',
   ]),
   liquidator: parseAbi([
-    'function liquidate(address borrower, uint256 seizedAssets, uint8 venue, uint256 minProfit)',
+    'function liquidate(address borrower, uint256 seizedAssets, uint8 venue, uint256 minProfit) returns (uint256 seized, uint256 repaid, uint256 profit)',
     'function quoteVenues(uint256 btcAmount) returns (uint256 oracleValue, uint256[3] proceeds)',
   ]),
   feeRouter: parseAbi([
