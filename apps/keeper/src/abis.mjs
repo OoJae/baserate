@@ -71,6 +71,9 @@ export const abi = {
     'function allocation(bytes32 id) view returns (uint256)',
     'function isSentinel(address) view returns (bool)',
   ]),
+  morpho: parseAbi([
+    'function market(bytes32 id) view returns (uint128 totalSupplyAssets, uint128 totalSupplyShares, uint128 totalBorrowAssets, uint128 totalBorrowShares, uint128 lastUpdate, uint128 fee)',
+  ]),
   erc20: parseAbi([
     'function balanceOf(address) view returns (uint256)',
     'function allowance(address owner, address spender) view returns (uint256)',

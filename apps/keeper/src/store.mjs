@@ -136,14 +136,20 @@ export async function addDepthSample({ depthBtc, depthMusd, freeBackstopMusd }) 
   )
 }
 
-/** Smallest depth (MUSD) seen over the last 24 h: caps follow the worst recent depth, not the latest sample. */
-export async function depthMin24h() {
+/**
+ * Median depth (MUSD) over the last 24 h. A median, not the minimum: one block with skewed pools must not set the cap
+ * for a day (round-2 R2X-8), while a sustained fall still moves it within hours.
+ */
+export async function depthMedian24h() {
   if (!pool) {
     if (mem.depth.length === 0) return null
-    return mem.depth.reduce((m, d) => (Number(d.depthMusd) < m ? Number(d.depthMusd) : m), Infinity)
+    const sorted = mem.depth.map((d) => Number(d.depthMusd)).sort((a, b) => a - b)
+    const mid = Math.floor(sorted.length / 2)
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
   }
   const { rows } = await pool.query(
-    `SELECT min(depth_musd) AS m FROM depth_samples WHERE chain_id = $1 AND ts > now() - interval '24 hours'`,
+    `SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY depth_musd) AS m FROM depth_samples
+     WHERE chain_id = $1 AND ts > now() - interval '24 hours'`,
     [CHAIN_ID],
   )
   return rows[0]?.m == null ? null : Number(rows[0].m)

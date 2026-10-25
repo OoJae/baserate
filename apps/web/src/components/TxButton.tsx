@@ -53,13 +53,18 @@ const PHASE_LABEL: Record<Exclude<Phase, 'idle'>, string> = {
 /** Kinds of preflight failure that mean "this will revert": block the button until inputs change. */
 const BLOCKING: DecodedError['kind'][] = ['contract', 'revert', 'panic', 'funds']
 
-/** gas = estimate × 1.3 */
+/**
+ * gas = max(2 × estimate, 1.5M). Mezo's eth_estimateGas leaves out most of what precompile reads cost on-chain: a
+ * liquidation estimated at 477k used 749k, and one estimate came back at 53k. Only gas used is charged, so the floor
+ * costs nothing.
+ */
 export function withGasHeadroom(estimate: bigint): bigint {
-  return (estimate * 13n) / 10n
+  const padded = estimate * 2n
+  return padded > 1_500_000n ? padded : 1_500_000n
 }
 
 /**
- * Simulate → estimate gas × 1.3 → write → toast with explorer link → wait for the receipt.
+ * Simulate → estimate gas (padded for Mezo) → write → toast with explorer link → wait for the receipt.
  * The decoded revert reason shows under the button before the wallet opens.
  */
 export function TxButton({

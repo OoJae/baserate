@@ -12,7 +12,7 @@ import { alert } from '../alerts.mjs'
 import { addressOf, hasRole, pub, send, signers } from '../chain.mjs'
 import { IS_MAINNET, LIMITS, registry, SWITCHES } from '../config.mjs'
 import { readings } from '../scheduler.mjs'
-import { addDepthSample, depthMin24h, getKv, setKv } from '../store.mjs'
+import { addDepthSample, depthMedian24h, getKv, setKv } from '../store.mjs'
 
 const nowS = () => Math.floor(Date.now() / 1000)
 const E36 = 10n ** 36n
@@ -134,7 +134,8 @@ export async function canaryJob() {
 
 /**
  * Liquidation depth vs the borrow cap. Depth = largest BTC sale whose best venue price is within 4% of the oracle.
- * cap = min(2 × free backstop cash, free backstop cash + 24 h minimum depth), never above the proof-mode ceiling. On
+ * cap = min(2 × free backstop cash, free backstop cash + 24 h median depth), never above the proof-mode ceiling nor
+ * below current borrows. On
  * mainnet a lower cap is applied at once with the sentinel role (decrease-only); a higher one is an alert for the
  * Safe (48 h timelock). Testnet runs fixed labelled caps, so it is a dry run there.
  */
@@ -172,11 +173,19 @@ export async function capsDepthJob() {
     depthMusd: formatUnits(depthMusd, 18),
     freeBackstopMusd: formatUnits(free, 18),
   })
-  const minDepth = parseEther(
-    ((await depthMin24h()) ?? Number(formatUnits(depthMusd, 18))).toFixed(6),
+  const medianDepth = parseEther(
+    ((await depthMedian24h()) ?? Number(formatUnits(depthMusd, 18))).toFixed(6),
   )
-  let cap = 2n * free < free + minDepth ? 2n * free : free + minDepth
+  let cap = 2n * free < free + medianDepth ? 2n * free : free + medianDepth
   if (cap > LIMITS.capCeiling) cap = LIMITS.capCeiling
+  // Never cut below what is already borrowed: a cap cut can't shrink loans, and the Safe needs 48 h to undo it.
+  const [, , borrowed] = await pub.readContract({
+    address: registry.morpho,
+    abi: abi.morpho,
+    functionName: 'market',
+    args: [registry.marketId],
+  })
+  if (cap < borrowed) cap = borrowed
   const current = await pub.readContract({
     address: registry.factory,
     abi: abi.factory,
@@ -185,7 +194,8 @@ export async function capsDepthJob() {
   readings.capsDepth = {
     depthBtc: formatEther(depthBtc),
     depthMusd: formatUnits(depthMusd, 18),
-    minDepth24hMusd: formatUnits(minDepth, 18),
+    medianDepth24hMusd: formatUnits(medianDepth, 18),
+    borrowedMusd: formatUnits(borrowed, 18),
     freeBackstopMusd: formatUnits(free, 18),
     recommendedCapMusd: formatUnits(cap, 18),
     currentCapMusd: formatUnits(current, 18),

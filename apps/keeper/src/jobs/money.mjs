@@ -125,7 +125,8 @@ export async function backstopJob() {
 
 /**
  * FeeRouter `distribute()` once per Mezo Earn epoch, from Thursday 01:05 UTC (so the bribe pays this epoch's voters
- * and stands for the whole vote), never in the epoch's last hour, and only if no MUSD bribe is posted yet.
+ * and stands for the whole vote), never in the epoch's last hour. "Once" is the keeper's own record: a bribe someone
+ * else posted (even 1 wei) does not stop it (round-2 R2X-7), and the router itself carries bribes it can't post.
  */
 export async function feeFlushJob() {
   const now = nowS()
@@ -144,23 +145,6 @@ export async function feeFlushJob() {
     return `router holds ${formatUnits(balance, 18)} MUSD (min ${formatUnits(LIMITS.feeMinMusd, 18)})`
   const idemKey = `flush:${epochStart}`
   if (await hasIdem(idemKey)) return 'already flushed this epoch'
-  const targets = await pub.readContract({
-    address: registry.feeRouter,
-    abi: abi.feeRouter,
-    functionName: 'targets',
-  })
-  for (const t of targets) {
-    const posted = await pub
-      .readContract({
-        address: t.bribe,
-        abi: abi.bribe,
-        functionName: 'tokenRewardsPerEpoch',
-        args: [registry.musd, BigInt(epochStart)],
-      })
-      .catch(() => 0n)
-    if (posted > 0n)
-      return `a MUSD bribe of ${formatUnits(posted, 18)} is already posted this epoch`
-  }
   const sent = await send(
     'keeper',
     'fees',

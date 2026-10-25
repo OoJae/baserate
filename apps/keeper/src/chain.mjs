@@ -9,6 +9,8 @@ export const chain = defineChain({
   name: IS_MAINNET ? 'Mezo' : 'Mezo Testnet',
   nativeCurrency: { name: 'Bitcoin', symbol: 'BTC', decimals: 18 },
   rpcUrls: { default: { http: [RPC_URL] } },
+  // Multicall3 is deployed on both networks (testnet from block 3,669,328, mainnet from 351,760).
+  contracts: { multicall3: { address: '0xcA11bde05977b3631167028862bE2a173976CA11' } },
 })
 const transport = http(RPC_URL, { retryCount: 3, retryDelay: 1_000, timeout: 20_000 })
 export const pub = createPublicClient({ chain, transport })

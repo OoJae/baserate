@@ -39,11 +39,25 @@ export async function liquidationsJob() {
   })
   const lltv = BigInt(registry.lltv)
   const snapshot = []
-  for (const [account, meta] of accounts) {
-    const [collateral, debt] = await Promise.all([
-      pub.readContract({ address: account, abi: abi.account, functionName: 'collateral' }),
-      pub.readContract({ address: account, abi: abi.account, functionName: 'debt' }),
-    ])
+  // One multicall per 200 accounts (2 reads each), so empty accounts created to slow the scan cost it almost nothing.
+  const list = [...accounts]
+  const reads = []
+  for (let i = 0; i < list.length; i += 200) {
+    const chunk = list.slice(i, i + 200)
+    const res = await pub.multicall({
+      allowFailure: true,
+      contracts: chunk.flatMap(([account]) => [
+        { address: account, abi: abi.account, functionName: 'collateral' },
+        { address: account, abi: abi.account, functionName: 'debt' },
+      ]),
+    })
+    for (let j = 0; j < chunk.length; j++) {
+      const [c, d] = [res[2 * j], res[2 * j + 1]]
+      if (c.status === 'success' && d.status === 'success')
+        reads.push([chunk[j], c.result, d.result])
+    }
+  }
+  for (const [[account, meta], collateral, debt] of reads) {
     if (debt === 0n) continue
     const value = (collateral * price) / 10n ** 36n
     const maxBorrow = (value * lltv) / WAD
