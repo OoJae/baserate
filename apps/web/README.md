@@ -35,8 +35,9 @@ Calls that spend Skip precompile reads (`RiskLens.snapshot`, `FlashLiquidator.pr
 through `directClient` in `src/wagmi.ts`, a client without multicall batching: Mezo allows 20 precompile calls per
 `eth_call`, so they must not be aggregated with other reads.
 
-History (allocator moves, distributions and the fee-switch submission, borrow accounts, backstop exit requests, the
-walkthrough's wsMUSD deposit check) comes from the Baserate subgraph (`packages/subgraph`) when
+History (allocator moves, distributions with their carried bribe and sMUSD shares, the fee-switch submission and its
+status, borrow accounts, backstop exit requests and their partial payments, the walkthrough's wsMUSD deposit check)
+comes from the Baserate subgraph (`packages/subgraph`) when
 `BASERATE_PUBLIC_SUBGRAPH_URL` is set: one GraphQL request, plus a log read of the blocks the subgraph has not indexed
 yet so the newest events still show (`src/lib/subgraph.ts`). When it is unset, on a local fork, or when a query fails,
 the same hooks read logs in 10,000-block windows (`src/lib/logs.ts`). Live state (positions, request status) is
@@ -46,7 +47,9 @@ always read on-chain.
 
 `pnpm --filter web e2e` runs the judge journey and the Wave 2 pages live on Mezo testnet with a funded test key
 (see `playwright.config.ts` for the environment variables). It sends real transactions (borrow, save, repay, a 3 MUSD
-vMUSD deposit and withdrawal) and only sends a liquidation if a position is actually liquidatable.
+vMUSD deposit and withdrawal) and only sends a liquidation if a position is actually liquidatable. On a fresh
+deployment, before the 48-hour canary-operator grant clears, the Liquidate step checks the canary re-arm notice
+against `executableAt` on the factory instead; the Fees step checks the history against the router's events.
 
 ## How transactions work
 

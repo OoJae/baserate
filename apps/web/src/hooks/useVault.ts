@@ -41,12 +41,20 @@ export interface AllocatorSnapshot {
   m1BorrowAssets: bigint
   m1Liquidity: bigint
   bufferTarget: bigint
+  /** Spot M1 supply APY: sizes a rate-driven move. */
   m1SupplyApy: bigint
+  /** wsMUSD share-price growth over `apyWindow`, annualised. */
   wsMusdApy: bigint
   apyWindow: bigint
   vaultMarketAssets: bigint
   vaultIdle: bigint
   liquidityAvailable: bigint
+  /** M1 supply-share price growth over `apyWindow`, annualised: with `wsMusdApy` it picks the direction. */
+  m1TrailingApy: bigint
+  /** vMUSD's M1 supply plus the lowest outside M1 liquidity of the last day; `TO_LIQUIDITY` is sized on it. */
+  conservativeLiquidity: bigint
+  /** M1 was touched earlier in this block: no rate-driven move (buffer top-ups still run). */
+  marketTouched: boolean
 }
 
 export interface VaultView {
@@ -56,8 +64,9 @@ export interface VaultView {
   sharePrice?: bigint
   snapshot?: AllocatorSnapshot
   preview?: { action: AllocatorActionId; amount: bigint }
-  /** Earliest next rebalance (unix seconds; 0 = now). */
+  /** Earliest time `rebalance` can move funds (unix seconds; 0 = now): now while a buffer top-up is due. */
   readyAt?: bigint
+  /** Last rate-driven move (buffer top-ups do not set it). */
   lastRebalance?: bigint
   /** wsMUSD adapter: wsMUSD value + idle MUSD it holds for the vault. */
   heldAssets?: bigint

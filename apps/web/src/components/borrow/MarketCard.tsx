@@ -69,6 +69,7 @@ export function MarketCard({ market }: { market: MarketView }) {
         />
         <Row
           label="Per-position cap"
+          tip="Limits borrowing: a position with more collateral than this cannot borrow. Adding collateral is never capped, so a position can always be defended."
           value={`${formatBtc(market.risk.positionCap, { minDp: 2 })} BTC`}
         />
         <Row

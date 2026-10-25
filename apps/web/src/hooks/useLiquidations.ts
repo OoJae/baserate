@@ -7,8 +7,8 @@ import {
   Profile,
 } from '@baserate/sdk'
 import { useQueries, useQuery } from '@tanstack/react-query'
-import { type Address, getAddress, type PublicClient } from 'viem'
-import { usePublicClient } from 'wagmi'
+import { type Address, encodeFunctionData, getAddress, type PublicClient, zeroAddress } from 'viem'
+import { usePublicClient, useReadContracts } from 'wagmi'
 import { getEventsChunked } from '../lib/logs'
 import { querySubgraph, readHistory } from '../lib/subgraph'
 import { appChain, deployed, directClient, registry } from '../wagmi'
@@ -243,4 +243,48 @@ export function useLiquidatorConfig() {
       return { maxImpactBps, incentive, clAvailable: /[1-9a-f]/i.test(clRouter.slice(2)) }
     },
   })
+}
+
+/** The keeper's canary key (from the SDK registry; null where the registry records none). */
+export const CANARY_OPERATOR: Address | null = registry.canaryOperator
+
+/** `setCanaryOperator(operator, true)`: the timelocked factory call that lets the keeper open a canary (audit D-7). */
+export const CANARY_GRANT_CALL = encodeFunctionData({
+  abi: borrowAccountFactoryAbi,
+  functionName: 'setCanaryOperator',
+  args: [CANARY_OPERATOR ?? zeroAddress, true],
+})
+
+export interface CanaryGrant {
+  operator: Address | null
+  /** True once the grant has been executed. */
+  isOperator?: boolean
+  /** `executableAt(setCanaryOperator(operator, true))`: 0 unless the grant is queued and live. */
+  executableAt?: number
+  isLoading: boolean
+  isError: boolean
+}
+
+/**
+ * State of the canary-operator grant on the factory. Since audit fix D-7 a grant is a 48 h timelocked raise, so
+ * after a redeploy there is no canary until it matures: the keeper then executes it and opens a canary.
+ */
+export function useCanaryGrant(enabled: boolean): CanaryGrant {
+  const f = { address: registry.contracts.factory.address, abi: borrowAccountFactoryAbi } as const
+  const q = useReadContracts({
+    contracts: [
+      { ...f, functionName: 'isCanaryOperator', args: [CANARY_OPERATOR ?? zeroAddress] },
+      { ...f, functionName: 'executableAt', args: [CANARY_GRANT_CALL] },
+    ],
+    allowFailure: true,
+    query: { enabled: enabled && deployed.factory && !!CANARY_OPERATOR, refetchInterval: 60_000 },
+  })
+  const [op, at] = q.data ?? []
+  return {
+    operator: CANARY_OPERATOR,
+    isOperator: op?.status === 'success' ? op.result : undefined,
+    executableAt: at?.status === 'success' ? Number(at.result) : undefined,
+    isLoading: q.isLoading,
+    isError: q.isError || (!!q.data && q.data.some((x) => x.status === 'failure')),
+  }
 }

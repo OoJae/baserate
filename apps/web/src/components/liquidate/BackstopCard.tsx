@@ -1,19 +1,31 @@
 import {
   backstopAbi,
   erc20PermitAbi,
+  erc4626ToAssets,
   erc4626ToShares,
   explorerAddressUrl,
   formatBtc,
   formatDuration,
   formatMusd,
   formatPercentWad,
+  minBig,
+  mulDivDown,
   parseAmount,
   toFixedDecimal,
   toInputString,
+  WAD,
 } from '@baserate/sdk'
 import { useState } from 'react'
-import { type BackstopView, useBackstop, useRedeemRequests } from '../../hooks/useBackstop'
+import { isAddressEqual, parseEventLogs, type TransactionReceipt } from 'viem'
+import {
+  type BackstopView,
+  type RedeemRequestView,
+  useBackstop,
+  useRedeemRequests,
+} from '../../hooks/useBackstop'
+import { useOracle } from '../../hooks/useOracle'
 import { useWallet } from '../../hooks/useWallet'
+import { formatUtc } from '../../lib/time'
 import { useNow } from '../../lib/useNow'
 import { appChain, deployed, registry } from '../../wagmi'
 import { IconShield } from '../icons'
@@ -36,6 +48,23 @@ const BACKSTOP = registry.contracts.backstop.address
 const MUSD = registry.external.musd
 
 type Wallet = ReturnType<typeof useWallet>
+
+/** Inventory below `DUST_INVENTORY` counts as 0 in NAV, so it needs no oracle. */
+function isDust(b: BackstopView): boolean {
+  return (
+    b.inventory !== undefined &&
+    b.dustInventory !== undefined &&
+    b.inventory > 0n &&
+    b.inventory < b.dustInventory
+  )
+}
+
+/** True when NAV depends on the oracle: at least `DUST_INVENTORY` of BTC is held. */
+function holdsPricedBtc(b: BackstopView): boolean {
+  return (
+    b.inventory !== undefined && b.dustInventory !== undefined && b.inventory >= b.dustInventory
+  )
+}
 
 /** The backstop (bMUSD): NAV, cash, inventory and auction, plus deposit and the 7-day exit queue. */
 export function BackstopCard() {
@@ -102,7 +131,7 @@ export function BackstopCard() {
               ) : null}
             </Value>
           }
-          sub="BTC for sale"
+          sub={isDust(b) ? 'BTC: dust, valued at 0' : 'BTC for sale'}
         />
       </div>
       <dl className="mt-4 divide-y divide-line border-t border-line pt-2">
@@ -122,7 +151,7 @@ export function BackstopCard() {
         />
         <Row
           label="Realisable value"
-          tip="Cash plus BTC inventory marked at the oracle price × 0.95."
+          tip="Cash plus BTC inventory marked at the oracle price × 0.95 (0 while the oracle is down or the inventory is dust, under 0.00001 BTC). New deposits are priced at this value."
           value={
             <Value loading={loading}>
               {b.grossAssets !== undefined ? `${formatMusd(b.grossAssets)} MUSD` : null}
@@ -177,10 +206,21 @@ function BackstopDeposit({ b, wallet }: { b: BackstopView; wallet: Wallet }) {
   const owner = wallet.address
   const balance = wallet.musdBalance
   const amount = parseAmount(input) ?? 0n
+  // Same as `previewDeposit`: deposits are priced at book + unvested gains (`grossAssets`), not at `totalAssets`.
   const shares =
-    b.totalAssets !== undefined && b.totalSupply !== undefined
-      ? erc4626ToShares(amount, b.totalAssets, b.totalSupply)
+    b.grossAssets !== undefined && b.totalSupply !== undefined
+      ? erc4626ToShares(amount, b.grossAssets, b.totalSupply)
       : undefined
+  // What those shares read at the recognised NAV until the gains still vesting are released.
+  const readsAs =
+    shares !== undefined && b.totalAssets !== undefined && b.totalSupply !== undefined
+      ? erc4626ToAssets(shares, b.totalAssets, b.totalSupply)
+      : undefined
+  const unvested =
+    b.grossAssets !== undefined && b.totalAssets !== undefined && b.grossAssets > b.totalAssets
+      ? b.grossAssets - b.totalAssets
+      : 0n
+  const vestEnd = b.vesting ? Number(b.vesting.periodEnd) : 0
   const needsApproval = (b.musdAllowance ?? 0n) < amount
   let reason: string | null = null
   if (!deployed.backstop) reason = 'The backstop is not deployed on this network.'
@@ -205,6 +245,15 @@ function BackstopDeposit({ b, wallet }: { b: BackstopView; wallet: Wallet }) {
             : 'Exits take 7 days and pay the lower of the NAV at request and at claim.'
         }
       />
+      {amount > 0n && unvested > 0n && readsAs !== undefined ? (
+        <Notice title="Priced at book plus unvested gains">
+          {formatMusd(unvested)} MUSD of gains is still vesting, and a new share pays for its part
+          of it, so your bMUSD will read ≈ {formatMusd(readsAs)} MUSD at first and rise toward what
+          you paid as those gains vest
+          {vestEnd > 0 ? ` (by ${formatUtc(vestEnd)})` : ''}. A deposit cannot capture gains made
+          before it arrived.
+        </Notice>
+      ) : null}
       {needsApproval && owner ? (
         <TxButton
           variant="secondary"
@@ -253,6 +302,9 @@ function BackstopExit({ b, wallet, now }: { b: BackstopView; wallet: Wallet; now
   const [input, setInput] = useState('')
   const owner = wallet.address
   const requests = useRedeemRequests(owner)
+  const oracle = useOracle()
+  // The backstop prices BTC with the M1 oracle; while it is down and BTC is held, `claimRedeem` cannot run.
+  const oracleDown = oracle.status !== undefined && !oracle.status.ok && holdsPricedBtc(b)
   const max = b.shares
   const shares =
     max !== undefined && max > 0n && input === toInputString(max, 18, 8)
@@ -282,7 +334,7 @@ function BackstopExit({ b, wallet, now }: { b: BackstopView; wallet: Wallet; now
             ? `${formatMusd(max, { dp: 4 })} bMUSD${b.sharesValue !== undefined ? ` ≈ ${formatMusd(b.sharesValue)} MUSD` : ''}`
             : undefined
         }
-        footer={`Claimable in ${formatDuration(delay)}; your shares are escrowed until then.`}
+        footer={`Claimable in ${formatDuration(delay)}; your shares are escrowed until then. If cash is short at claim time, the claim pays what there is and the rest stays queued.`}
       />
       <TxButton
         size="md"
@@ -310,40 +362,16 @@ function BackstopExit({ b, wallet, now }: { b: BackstopView; wallet: Wallet; now
         <div>
           <p className="mb-1.5 text-xs font-medium text-muted">Your queued exits</p>
           <ul className="space-y-2">
-            {pending.map((r) => {
-              const left = r.claimableAt - now
-              return (
-                <li key={r.id.toString()} className="rounded-xl border border-line p-3 text-sm">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="num text-ink">
-                      #{r.id.toString()} · {formatMusd(r.shares, { dp: 4 })} bMUSD
-                    </span>
-                    <span className="num text-xs text-muted">
-                      up to {formatMusd(r.assets)} MUSD
-                    </span>
-                  </div>
-                  <div className="mt-2">
-                    <TxButton
-                      size="md"
-                      variant="secondary"
-                      label={left > 0 ? `Claimable in ${formatDuration(left)}` : 'Claim'}
-                      disabledReason={
-                        left > 0 ? `Unlocks ${new Date(r.claimableAt * 1000).toUTCString()}.` : null
-                      }
-                      request={{
-                        address: BACKSTOP,
-                        abi: backstopAbi,
-                        functionName: 'claimRedeem',
-                        args: [r.id],
-                      }}
-                      pendingTitle="Claiming"
-                      successTitle="Exit claimed"
-                      onConfirmed={() => void requests.refetch()}
-                    />
-                  </div>
-                </li>
-              )
-            })}
+            {pending.map((r) => (
+              <QueuedExit
+                key={r.id.toString()}
+                r={r}
+                b={b}
+                now={now}
+                oracleDown={oracleDown}
+                onClaimed={() => void requests.refetch()}
+              />
+            ))}
           </ul>
         </div>
       ) : owner && requests.data ? (
@@ -351,6 +379,141 @@ function BackstopExit({ b, wallet, now }: { b: BackstopView; wallet: Wallet; now
       ) : null}
     </div>
   )
+}
+
+/** One queued exit: its claim (in full or, when cash is short, in part) and, during an oracle outage, the owner's
+ * claim with the BTC valued at 0. */
+function QueuedExit({
+  r,
+  b,
+  now,
+  oracleDown,
+  onClaimed,
+}: {
+  r: RedeemRequestView
+  b: BackstopView
+  now: number
+  oracleDown: boolean
+  onClaimed: () => void
+}) {
+  const left = r.claimableAt - now
+  const matured = left <= 0
+  // A claim pays min(NAV at request, NAV now) from cash (all of the cash when it falls short).
+  const owed =
+    b.sharePrice !== undefined
+      ? minBig(r.assets, mulDivDown(r.shares, b.sharePrice, WAD))
+      : r.assets
+  const cash = b.cash
+  const partial = matured && cash !== undefined && cash > 0n && cash < owed
+  // claimRedeemWithoutOracle: shares × min(book, cash) / supply, capped at the request NAV.
+  const withoutOracle =
+    b.vesting && cash !== undefined && b.totalSupply !== undefined
+      ? minBig(
+          r.assets,
+          mulDivDown(r.shares, minBig(b.vesting.book, cash) + 1n, b.totalSupply + 1n),
+        )
+      : undefined
+
+  let reason: string | null = null
+  if (!matured) reason = `Unlocks ${new Date(r.claimableAt * 1000).toUTCString()}.`
+  else if (oracleDown)
+    reason =
+      'The oracle is down and the backstop holds BTC, so a claim cannot value it. Wait for the oracle, or claim without it below.'
+  else if (cash === 0n)
+    reason =
+      'The backstop has no cash right now: its value is held as BTC. Claim again once an auction or a keeper sale refills cash.'
+
+  return (
+    <li className="rounded-xl border border-line p-3 text-sm">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="num text-ink">
+          #{r.id.toString()} · {formatMusd(r.shares, { dp: 4 })} bMUSD
+          {r.partlyPaid ? (
+            <span className="text-muted">
+              {' '}
+              left of {formatMusd(r.requestedShares, { dp: 4 })} (partly paid)
+            </span>
+          ) : null}
+        </span>
+        <span className="num text-xs text-muted">up to {formatMusd(r.assets)} MUSD</span>
+      </div>
+      {r.partlyPaid && r.paidAssets ? (
+        <p className="num mt-1 text-xs text-muted">
+          {formatMusd(r.paidAssets)} MUSD paid so far
+          {r.claimCount ? ` in ${r.claimCount} claim${r.claimCount === 1 ? '' : 's'}` : ''}; the
+          rest is still owed at the request NAV.
+        </p>
+      ) : null}
+      <div className="mt-2">
+        <TxButton
+          size="md"
+          variant="secondary"
+          label={
+            !matured
+              ? `Claimable in ${formatDuration(left)}`
+              : partial && cash !== undefined
+                ? `Claim ≈ ${formatMusd(cash)} MUSD now`
+                : `Claim ≈ ${formatMusd(owed)} MUSD`
+          }
+          disabledReason={reason}
+          request={{
+            address: BACKSTOP,
+            abi: backstopAbi,
+            functionName: 'claimRedeem',
+            args: [r.id],
+          }}
+          pendingTitle="Claiming"
+          successTitle="Exit claimed"
+          successMessage={claimedMessage}
+          onConfirmed={onClaimed}
+        />
+        {partial && !oracleDown && cash !== undefined ? (
+          <p className="mt-1.5 text-xs text-muted">
+            Cash covers ≈ {formatMusd(cash)} of the ≈ {formatMusd(owed)} MUSD due. This claim pays
+            it and keeps the rest queued at the same request NAV, claimable again as BTC sales
+            refill cash.
+          </p>
+        ) : null}
+      </div>
+      {matured && oracleDown ? (
+        <div className="mt-3 border-t border-line pt-3">
+          <TxButton
+            size="md"
+            variant="secondary"
+            label="Claim without the oracle"
+            request={{
+              address: BACKSTOP,
+              abi: backstopAbi,
+              functionName: 'claimRedeemWithoutOracle',
+              args: [r.id],
+            }}
+            pendingTitle="Claiming without the oracle"
+            successTitle="Exit claimed"
+            successMessage={claimedMessage}
+            onConfirmed={onClaimed}
+          />
+          <p className="mt-1.5 text-xs text-muted">
+            Values the backstop’s BTC at 0 for your claim only, so it pays
+            {withoutOracle !== undefined ? ` at most ≈ ${formatMusd(withoutOracle)} MUSD,` : ''}{' '}
+            never more than a normal claim, all from cash. Only you can use it, and it lowers only
+            your own payout.
+          </p>
+        </div>
+      ) : null}
+    </li>
+  )
+}
+
+/** What a claim paid, and what stays queued after a partial one, from the backstop's events. */
+function claimedMessage(receipt: TransactionReceipt): string {
+  const logs = receipt.logs.filter((l) => isAddressEqual(l.address, BACKSTOP))
+  const [paid] = parseEventLogs({ abi: backstopAbi, logs, eventName: 'RedeemClaimed' })
+  const [rest] = parseEventLogs({ abi: backstopAbi, logs, eventName: 'RedeemPartiallyClaimed' })
+  if (!paid) return `Included in block ${receipt.blockNumber}.`
+  const sent = `${formatMusd(paid.args.assets)} MUSD sent.`
+  return rest
+    ? `${sent} ${formatMusd(rest.args.sharesLeft, { dp: 4 })} bMUSD (up to ${formatMusd(rest.args.assetsLeft)} MUSD) stays queued; claim it again as cash comes in.`
+    : sent
 }
 
 function Auction({ b, wallet, now }: { b: BackstopView; wallet: Wallet; now: number }) {

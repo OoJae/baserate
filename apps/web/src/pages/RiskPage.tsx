@@ -34,6 +34,8 @@ import { secondsSince, useNow } from '../lib/useNow'
 import { appChain, deployed, registry } from '../wagmi'
 
 const MAX_UINT = 2n ** 256n - 1n
+/** MUSD's minimum collateral ratio (RiskLens.MCR, 110%): redemptions skip every trove below it. */
+const MCR = 1_100_000_000_000_000_000n
 const STATE_TONE: Record<RiskSourceState, Tone> = { ok: 'good', failed: 'bad', skipped: 'neutral' }
 const STATE_LABEL: Record<RiskSourceState, string> = {
   ok: 'read',
@@ -222,12 +224,14 @@ function DepthCard({ s }: Props) {
 function TroveCard({ s }: Props) {
   const t = s?.troves
   const failed = s ? (s.failed & RiskSource.TROVES) !== 0n : false
+  // A priced trove below 110% is skipped by redemptions and left out of later troves' debt ahead (no price: none).
+  const skipped = (icr: bigint) => icr > 0n && icr < MCR
   return (
     <Card aria-labelledby="troves-title">
       <CardHeader
         id="troves-title"
         title="MUSD redemption queue"
-        subtitle={`The ${TROVE_COUNT.toString()} troves redeemed first (lowest collateral ratio). Baserate positions are never in this queue.`}
+        subtitle={`The first ${TROVE_COUNT.toString()} troves in the redemption queue (lowest collateral ratio). Baserate positions are never in this queue.`}
         action={
           t ? (
             t.recoveryMode ? (
@@ -272,7 +276,7 @@ function TroveCard({ s }: Props) {
               </thead>
               <tbody className="num divide-y divide-line">
                 {t.entries.map((e, i) => (
-                  <tr key={e.borrower}>
+                  <tr key={e.borrower} className={skipped(e.icr) ? 'bg-warn-soft/40' : undefined}>
                     <td className="px-4 py-2 text-muted sm:pl-0">{i + 1}</td>
                     <td className="px-2 py-2">
                       <a
@@ -297,7 +301,13 @@ function TroveCard({ s }: Props) {
                       {formatMusd(e.principal + e.interest, { dp: 0 })} MUSD
                     </td>
                     <td className="px-4 py-2 text-right text-muted sm:pr-0">
-                      {formatMusd(e.debtAhead, { dp: 0 })} MUSD
+                      {skipped(e.icr) ? (
+                        <span className="text-xs text-warn">
+                          skipped by redemptions (below 110%)
+                        </span>
+                      ) : (
+                        `${formatMusd(e.debtAhead, { dp: 0 })} MUSD`
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -305,9 +315,11 @@ function TroveCard({ s }: Props) {
             </table>
           </div>
           <p className="mt-3 text-xs text-muted">
-            A redemption repays these troves’ debt at par and takes their BTC, starting from #1.
-            “Debt ahead” is the MUSD that must be redeemed before a trove is reached. NICR, the
-            queue’s sort key, is BTC of collateral per MUSD of debt.
+            A redemption repays these troves’ debt at par and takes their BTC, starting from the
+            first trove at or above MUSD’s 110% minimum collateral ratio: troves below it are
+            skipped by redemptions and their debt is left out of “Debt ahead”, the MUSD that must be
+            redeemed before a trove is reached. NICR, the queue’s sort key, is BTC of collateral per
+            MUSD of debt.
           </p>
         </>
       ) : (
@@ -552,13 +564,19 @@ function BackstopLensCard({ s }: Props) {
       />
       {b ? (
         <dl className="divide-y divide-line">
-          <Row label="Free MUSD" value={`${formatMusd(b.freeMusd)} MUSD`} strong />
+          <Row
+            label="Free MUSD"
+            tip="The backstop’s available cash: MUSD and wsMUSD it holds, minus the MUSD reserved for queued exits."
+            value={`${formatMusd(b.freeMusd)} MUSD`}
+            strong
+          />
           <Row
             label="Held as"
             value={`${formatMusd(b.musd)} MUSD + ${formatMusd(b.wsMusdAssets)} MUSD in wsMUSD`}
           />
           <Row
             label="BTC held"
+            tip="The backstop’s BTC inventory for sale (BTC donated to it is not counted)."
             value={<span className="text-btc">{formatBtc(b.nativeBtc)} BTC</span>}
           />
           <Row

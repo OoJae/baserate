@@ -41,7 +41,12 @@ import {
   Stat,
   Value,
 } from '../components/ui'
-import { useAllocatorMoves, useVault, type VaultView } from '../hooks/useVault'
+import {
+  type AllocatorSnapshot,
+  useAllocatorMoves,
+  useVault,
+  type VaultView,
+} from '../hooks/useVault'
 import { useWallet } from '../hooks/useWallet'
 import { useNow } from '../lib/useNow'
 import { appChain, deployed, registry } from '../wagmi'
@@ -66,7 +71,7 @@ export function LendPage() {
       <PageHeader
         eyebrow="Lend"
         title="vMUSD: lend MUSD to BTC borrowers"
-        lede="Deposit MUSD into a Morpho Vault V2. A permissionless allocator keeps a standing borrow buffer in market M1 and parks everything else in wsMUSD, moving the excess to whichever pays more."
+        lede="Deposit MUSD into a Morpho Vault V2. A permissionless allocator keeps a standing borrow buffer in market M1 and parks everything else in wsMUSD, moving the excess to whichever has paid more over the trailing week."
       />
 
       <Notice tone="warn" className="mb-5" title="Testnet roles">
@@ -240,18 +245,27 @@ function RatesCard({ vault }: { vault: VaultView }) {
       <dl className="divide-y divide-line">
         <Row
           label="M1 supply APY"
-          tip="borrow rate × utilisation × (1 − fee), annualised (simple). What MUSD lent in M1 earns now."
-          value={<Value loading={loading}>{s ? formatPercentWad(s.m1SupplyApy) : null}</Value>}
+          tip="Spot: borrow rate × utilisation × (1 − fee), annualised (simple), what MUSD lent in M1 earns now; it sizes a move. Trailing: growth of M1’s supply-share price over the same window as wsMUSD’s, annualised; against wsMUSD’s APY it picks the direction of a move. No transaction can move a trailing rate."
+          value={
+            <Value loading={loading}>
+              {s ? (
+                <>
+                  {formatPercentWad(s.m1SupplyApy)} <span className="text-muted">spot</span> ·{' '}
+                  {formatPercentWad(s.m1TrailingApy)} <span className="text-muted">trailing</span>
+                </>
+              ) : null}
+            </Value>
+          }
           hint={util !== undefined ? `utilisation ${formatPercentWad(util, 1)}` : undefined}
         />
         <Row
           label="wsMUSD APY"
-          tip="wsMUSD share-price growth over the allocator’s hourly checkpoints (target window 7 days), annualised (simple)."
+          tip="wsMUSD share-price growth over the allocator’s hourly checkpoints (target window 7 days), annualised (simple). Compared with M1’s trailing APY over the same window."
           value={<Value loading={loading}>{s ? formatPercentWad(s.wsMusdApy) : null}</Value>}
           hint={
             s
               ? short
-                ? `${formatDuration(window)} of history; APY moves need 1 day`
+                ? `${formatDuration(window)} of history; rate-driven moves need 1 day`
                 : `trailing ${formatDuration(window)}`
               : undefined
           }
@@ -261,6 +275,16 @@ function RatesCard({ vault }: { vault: VaultView }) {
           tip="M1 supply minus borrows: what borrowers can draw right now."
           value={<Value loading={loading}>{s ? `${formatMusd(s.m1Liquidity)} MUSD` : null}</Value>}
           hint={s ? `of ${formatMusd(s.m1SupplyAssets, { dp: 0 })} MUSD supplied` : undefined}
+        />
+        <Row
+          label="Conservative liquidity"
+          tip="vMUSD’s own M1 supply plus the lowest outside M1 liquidity seen now and at each checkpoint of the last day. A move from M1 back to wsMUSD is sized on this, so liquidity that appeared in M1 within the last day is never what vMUSD withdraws against."
+          value={
+            <Value loading={loading}>
+              {s ? `${formatMusd(s.conservativeLiquidity)} MUSD` : null}
+            </Value>
+          }
+          hint="sizes moves back to wsMUSD"
         />
         <Row
           label="Buffer target"
@@ -352,12 +376,17 @@ function AllocatorCard({ vault }: { vault: VaultView }) {
   const ready = vault.readyAt !== undefined ? Number(vault.readyAt) : undefined
   const wait = ready !== undefined && ready > now ? ready - now : 0
   const p = vault.preview
-  const idle = vault.snapshot?.vaultIdle ?? 0n
+  const s = vault.snapshot
+  const idle = s?.vaultIdle ?? 0n
   const nothing = p !== undefined && p.action === AllocatorAction.NONE && idle < ALLOCATOR.MIN_MOVE
+  const why = p && s ? nextMoveReason(p.action, s) : undefined
+  const parkIdle =
+    idle >= ALLOCATOR.MIN_MOVE ? `park ${formatMusd(idle)} idle MUSD in wsMUSD` : null
 
   let reason: string | null = null
   if (!deployed.vault) reason = 'vMUSD is not deployed on this network.'
-  else if (wait > 0) reason = `Cooling down after the last move: ready in ${formatDuration(wait)}.`
+  else if (wait > 0)
+    reason = `Cooling down after the last rate-driven move: ready in ${formatDuration(wait)}.`
   else if (nothing)
     reason = 'Nothing to move right now: the buffer is met and rates do not call for a move.'
 
@@ -378,7 +407,7 @@ function AllocatorCard({ vault }: { vault: VaultView }) {
       <dl className="divide-y divide-line">
         <Row
           label="Next move"
-          tip="BaserateAllocator.previewRebalance(): buffer first, then APY, at most 1,000 MUSD per move."
+          tip="BaserateAllocator.previewRebalance(). The M1 borrow buffer comes first and ignores the cooldown. Above it, the trailing APYs (M1’s supply-share price against wsMUSD’s, over the same window) pick the direction and the spot M1 APY sizes the move, at most 1,000 MUSD. No rate-driven move runs with under 1 day of history or when M1 was touched earlier in the same block."
           value={
             <Value loading={vault.isLoading}>
               {p
@@ -389,14 +418,16 @@ function AllocatorCard({ vault }: { vault: VaultView }) {
             </Value>
           }
           hint={
-            idle >= ALLOCATOR.MIN_MOVE
-              ? `and park ${formatMusd(idle)} idle MUSD in wsMUSD`
+            why || parkIdle
+              ? [why, parkIdle ? (why ? `then ${parkIdle}` : `and ${parkIdle}`) : null]
+                  .filter(Boolean)
+                  .join('; ')
               : undefined
           }
         />
         <Row
           label="Cooldown"
-          tip="One hour between moves."
+          tip="One hour after each rate-driven move. Buffer top-ups ignore it and do not start it."
           value={
             ready === undefined ? (
               <Value loading={vault.isLoading}>{null}</Value>
@@ -408,8 +439,8 @@ function AllocatorCard({ vault }: { vault: VaultView }) {
           }
           hint={
             vault.lastRebalance && vault.lastRebalance > 0n
-              ? `last move ${formatDuration(now - Number(vault.lastRebalance))} ago`
-              : 'no move yet'
+              ? `last rate-driven move ${formatDuration(now - Number(vault.lastRebalance))} ago`
+              : 'no rate-driven move yet'
           }
         />
       </dl>
@@ -447,6 +478,22 @@ function AllocatorCard({ vault }: { vault: VaultView }) {
       </div>
     </Card>
   )
+}
+
+/** Why the allocator would (or would not) move funds now, from the snapshot it decides on. */
+function nextMoveReason(action: number, s: AllocatorSnapshot): string {
+  const m1 = formatPercentWad(s.m1TrailingApy)
+  const ws = formatPercentWad(s.wsMusdApy)
+  if (action === AllocatorAction.BUFFER_TOP_UP)
+    return 'M1 liquidity is below the buffer; top-ups ignore the cooldown'
+  if (action === AllocatorAction.TO_MARKET) return `M1 ${m1} trailing beats wsMUSD ${ws}`
+  if (action === AllocatorAction.TO_LIQUIDITY) return `wsMUSD ${ws} beats M1 ${m1} trailing`
+  if (s.marketTouched)
+    return 'M1 was touched earlier in this block: rate moves wait for a later one'
+  if (Number(s.apyWindow) < ALLOCATOR.MIN_APY_WINDOW)
+    return `${formatDuration(Number(s.apyWindow))} of rate history; rate moves need 1 day`
+  if (s.m1TrailingApy === s.wsMusdApy) return `trailing APYs are equal (${m1})`
+  return `${s.m1TrailingApy > s.wsMusdApy ? `M1 ${m1} trailing leads wsMUSD ${ws}` : `wsMUSD ${ws} leads M1 ${m1} trailing`}, but no move of 1 MUSD or more fits the spot rate, the buffer and the caps`
 }
 
 function rebalancedMessage(receipt: TransactionReceipt): string {

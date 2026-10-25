@@ -4,6 +4,7 @@ import {
   borrowAccountAbi,
   borrowAccountFactoryAbi,
   erc20PermitAbi,
+  feeRouterAbi,
   getRegistry,
   minBig,
   musdDispenserAbi,
@@ -252,6 +253,56 @@ export async function canaryAccounts(c: Chain): Promise<Address[]> {
     })
     for (const l of logs)
       if (Number(l.args.profile) === Profile.CANARY && l.args.account) out.push(l.args.account)
+  }
+  return out
+}
+
+/**
+ * The latest factory `Submitted` record of `data` (a timelocked call) from `fromBlock`: its transaction hash, or
+ * null. The Fees page looks for the fee switch from the FeeRouter's deploy block, so callers pass that.
+ */
+export async function timelockSubmission(
+  c: Chain,
+  data: Hex,
+  fromBlock: bigint,
+): Promise<Hex | null> {
+  const r = c.registry
+  const head = await c.client.getBlockNumber()
+  let latest: Hex | null = null
+  for (let from = fromBlock; from <= head; from += 10_000n) {
+    const to = minBig(from + 9_999n, head)
+    const logs = await c.client.getContractEvents({
+      address: r.contracts.factory.address,
+      abi: borrowAccountFactoryAbi,
+      eventName: 'Submitted',
+      fromBlock: from,
+      toBlock: to,
+    })
+    for (const l of logs)
+      if (l.args.data?.toLowerCase() === data.toLowerCase()) latest = l.transactionHash
+  }
+  return latest
+}
+
+/** Every FeeRouter distribution, oldest first: its total and the bribes it posted (Distributed, BribePosted). */
+export async function distributions(c: Chain): Promise<{ total: bigint; bribes: bigint[] }[]> {
+  const r = c.registry
+  const head = await c.client.getBlockNumber()
+  const out: { total: bigint; bribes: bigint[] }[] = []
+  for (let from = BigInt(r.contracts.feeRouter.block); from <= head; from += 10_000n) {
+    const to = minBig(from + 9_999n, head)
+    const range = { address: r.contracts.feeRouter.address, fromBlock: from, toBlock: to }
+    const [dist, posted] = await Promise.all([
+      c.client.getContractEvents({ ...range, abi: feeRouterAbi, eventName: 'Distributed' }),
+      c.client.getContractEvents({ ...range, abi: feeRouterAbi, eventName: 'BribePosted' }),
+    ])
+    for (const d of dist)
+      out.push({
+        total: d.args.total ?? 0n,
+        bribes: posted
+          .filter((b) => b.transactionHash === d.transactionHash)
+          .map((b) => b.args.amount ?? 0n),
+      })
   }
   return out
 }

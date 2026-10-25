@@ -115,6 +115,18 @@ describe('registry', () => {
     bad.external.musd = '0x1234'
     expect(() => parseRegistry(bad, MEZO_TESTNET_ID)).toThrow(/external.musd/)
     expect(() => parseRegistry(testnetJson, MEZO_MAINNET_ID)).toThrow(/chainId/)
+    const badOperator = structuredClone(testnetJson)
+    badOperator.canaryOperator = 'keeper'
+    expect(() => parseRegistry(badOperator, MEZO_TESTNET_ID)).toThrow(/canaryOperator/)
+  })
+
+  it('records the testnet canary operator and leaves it optional elsewhere', () => {
+    expect(getRegistry(MEZO_TESTNET_ID).canaryOperator).toBe(
+      getAddress('0xDB52588fd26744a23e24a70D73579f075Bc50dD9'),
+    )
+    expect(getRegistry(MEZO_MAINNET_ID).canaryOperator).toBeNull()
+    const { canaryOperator: _omitted, ...withoutOperator } = structuredClone(testnetJson)
+    expect(parseRegistry(withoutOperator, MEZO_TESTNET_ID).canaryOperator).toBeNull()
   })
 
   it('computes Morpho market ids (testnet BTC/mUSDC market 0x1a7f…0b2e)', () => {

@@ -14,7 +14,6 @@ import {
   liquidationPrice,
   ltv,
   maxBig,
-  minBig,
   musdAllowanceOverride,
   oraclePriceToWad,
   parseAmount,
@@ -315,16 +314,16 @@ function AddCollateral({
   const [input, setInput] = useState('')
   const amount = parseAmount(input) ?? 0n
   const reserve = gasReserveWei(appChain.id)
-  const room = maxBig(market.risk.positionCap - position.collateral, 0n)
+  // Top-ups are never limited by the position cap (it only stops new borrowing), so Max is the wallet balance.
   const maxByBalance =
     wallet.btcBalance !== undefined ? maxBig(wallet.btcBalance - reserve, 0n) : undefined
-  const max = maxByBalance !== undefined ? minBig(room, maxByBalance) : room
+  const cap = market.risk.positionCap
+  const aboveCap = amount > 0n && position.collateral + amount > cap
 
   let reason: string | null = null
   if (amount === 0n) reason = 'Enter an amount of BTC.'
   else if (maxByBalance !== undefined && amount > maxByBalance)
     reason = 'Not enough BTC in your wallet.'
-  else if (amount > room) reason = `The per-position cap leaves room for ${formatBtc(room)} BTC.`
 
   return (
     <div className="space-y-4">
@@ -335,14 +334,21 @@ function AddCollateral({
         tokenTone="btc"
         value={input}
         onChange={setInput}
-        onMax={() => setInput(toInputString(max))}
+        onMax={maxByBalance !== undefined ? () => setInput(toInputString(maxByBalance)) : undefined}
         maxLabel={
           wallet.btcBalance !== undefined
             ? `Balance ${formatBtc(wallet.btcBalance)} BTC`
             : undefined
         }
-        footer="Lowers your LTV. Never paused, so you can always rescue a position."
+        footer="Lowers your LTV. Never paused and never limited by the position cap, so you can always defend a position."
       />
+      {aboveCap ? (
+        <Notice title={`Above the ${formatBtc(cap, { minDp: 2 })} BTC position cap`}>
+          The top-up goes through: the cap only limits borrowing. With{' '}
+          {formatBtc(position.collateral + amount)} BTC of collateral, this position cannot borrow
+          more until it is back within the cap.
+        </Notice>
+      ) : null}
       <TxButton
         variant="secondary"
         label={amount > 0n ? `Add ${formatBtc(amount)} BTC` : 'Add collateral'}

@@ -15,9 +15,14 @@ export interface BackstopView {
   sharePrice?: bigint
   cash?: bigint
   availableCash?: bigint
-  /** Cash plus inventory marked at oracle × 0.95. */
+  /**
+   * Cash plus inventory marked at oracle × 0.95 (inventory counts 0 while the oracle is down or below
+   * `DUST_INVENTORY`). Deposits are priced at this value (book + unvested gains), not at `totalAssets`.
+   */
   grossAssets?: bigint
   inventory?: bigint
+  /** `DUST_INVENTORY`: BTC inventory below this counts as 0 in NAV and needs no oracle. */
+  dustInventory?: bigint
   auctionFactor?: bigint
   auctionStart?: bigint
   reservedAssets?: bigint
@@ -37,7 +42,7 @@ export interface BackstopView {
 
 /**
  * Backstop reads. NAV, gross assets and the auction quote read the oracle (one Skip call each) only while the
- * backstop holds BTC, so this batch stays far under Mezo's per-call precompile limit.
+ * backstop holds at least `DUST_INVENTORY` of BTC, so this batch stays far under Mezo's per-call precompile limit.
  */
 export function useBackstop(owner: Address | undefined): BackstopView {
   const b = { address: BACKSTOP, abi: backstopAbi } as const
@@ -58,6 +63,7 @@ export function useBackstop(owner: Address | undefined): BackstopView {
       { ...b, functionName: 'vestingState' },
       { ...b, functionName: 'DISCOUNT' },
       { ...b, functionName: 'REDEEM_DELAY' },
+      { ...b, functionName: 'DUST_INVENTORY' },
     ],
     allowFailure: true,
     query: { enabled: deployed.backstop, refetchInterval: 20_000 },
@@ -102,6 +108,7 @@ export function useBackstop(owner: Address | undefined): BackstopView {
     availableCash: r(p?.[4]),
     grossAssets: r(p?.[5]),
     inventory,
+    dustInventory: r(p?.[14]),
     auctionFactor: r(p?.[7]),
     auctionStart: r(p?.[8]),
     reservedAssets: r(p?.[9]),
@@ -128,20 +135,42 @@ export function useBackstop(owner: Address | undefined): BackstopView {
 
 export interface RedeemRequestView {
   id: bigint
+  /** Escrowed shares still queued (live: a partial claim burns part of them). */
+  shares: bigint
+  /** NAV of `shares` at request (live): the most the rest of this exit can pay. */
+  assets: bigint
+  /** Shares escrowed by the original request. */
+  requestedShares: bigint
+  claimableAt: number
+  receiver: Address
+  /** False once fully claimed (the contract zeroes the request). */
+  pending: boolean
+  /** A claim paid part of it from the cash there was; the rest stays queued (`RedeemPartiallyClaimed`). */
+  partlyPaid: boolean
+  /** For a partly paid exit: MUSD paid so far and in how many claims (when known). */
+  paidAssets?: bigint
+  claimCount?: number
+}
+
+/** The subgraph's RedeemStatus. */
+type RedeemStatus = 'PENDING' | 'PARTIALLY_CLAIMED' | 'CLAIMED'
+
+/** A RedeemRequested record (shares and assets as requested), before its live state is read. */
+interface QueuedRequest {
+  id: bigint
   shares: bigint
   assets: bigint
   claimableAt: number
   receiver: Address
-  /** False once claimed (the contract zeroes the request). */
-  pending: boolean
+  /** Subgraph only: fully claimed (final, so its live state need not be read). */
+  closed?: boolean
+  paidAssets?: bigint
+  claimCount?: number
 }
-
-/** A RedeemRequested record, before its live state is read. */
-type QueuedRequest = Omit<RedeemRequestView, 'pending'>
 
 const REQUESTS_QUERY = `query RedeemRequests($owner: Bytes!) {
   redeemRequests(first: 1000, orderBy: requestId, orderDirection: asc, where: { owner: $owner }) {
-    requestId shares assets claimableAt receiver
+    requestId shares assets claimableAt receiver status sharesLeft assetsLeft paidAssets claimCount
   }
   ${META}
 }`
@@ -152,6 +181,11 @@ interface RequestRow {
   assets: string
   claimableAt: string
   receiver: string
+  status: RedeemStatus
+  sharesLeft: string
+  assetsLeft: string
+  paidAssets: string
+  claimCount: number
 }
 
 /** The owner's requests the subgraph indexed, oldest first. */
@@ -166,6 +200,9 @@ async function requestsFromSubgraph(owner: Address) {
       assets: BigInt(r.assets),
       claimableAt: Number(r.claimableAt),
       receiver: getAddress(r.receiver),
+      closed: r.status === 'CLAIMED',
+      paidAssets: BigInt(r.paidAssets),
+      claimCount: r.claimCount,
     }),
   )
   return { items, indexedTo: indexedTo(data) }
@@ -193,10 +230,31 @@ async function requestsFromLogs(
   }))
 }
 
+/** MUSD paid so far and the number of payments per request, from RedeemClaimed logs of `ids`. */
+async function paymentsFromLogs(client: PublicClient, ids: bigint[]) {
+  const logs = await getEventsChunked(client, {
+    address: BACKSTOP,
+    abi: backstopAbi,
+    eventName: 'RedeemClaimed',
+    args: { id: ids },
+    fromBlock: BigInt(registry.contracts.backstop.block),
+  })
+  const paid = new Map<bigint, { assets: bigint; count: number }>()
+  for (const l of logs) {
+    const id = l.args.id ?? 0n
+    const p = paid.get(id) ?? { assets: 0n, count: 0 }
+    paid.set(id, { assets: p.assets + (l.args.assets ?? 0n), count: p.count + 1 })
+  }
+  return paid
+}
+
 /**
- * The owner's backstop exit requests, newest first, with their live state (`redeemRequest(id)` by multicall). The
- * list comes from the subgraph when one is configured (plus the blocks it has not indexed yet), otherwise from
- * RedeemRequested logs.
+ * The owner's backstop exit requests, newest first, with their live state (`redeemRequest(id)` by multicall): a
+ * partial claim leaves the request queued with fewer shares and assets, so what is still owed comes from the live
+ * read (the subgraph's sharesLeft/assetsLeft can trail it by a few blocks). The list comes from the subgraph when one
+ * is configured (plus the blocks it has not indexed yet), otherwise from RedeemRequested logs; requests the subgraph
+ * reports fully claimed are final and skip the live read. What a partly paid exit has paid so far comes from the
+ * subgraph, or from RedeemClaimed logs for the requests that need it.
  */
 export function useRedeemRequests(owner: Address | undefined) {
   const client = usePublicClient({ chainId: appChain.id })
@@ -213,20 +271,50 @@ export function useRedeemRequests(owner: Address | undefined) {
         logs: (fromBlock) => requestsFromLogs(client, owner, fromBlock),
         startBlock: BigInt(registry.contracts.backstop.block),
       })
-      if (requests.length === 0) return []
+      const open = requests.filter((r) => !r.closed)
+      if (open.length === 0) return []
       // Typed loosely: the full backstop ABI makes multicall's inference too deep for TypeScript.
       const live = (await client.multicall({
-        contracts: requests.map((r) => ({
+        contracts: open.map((r) => ({
           address: BACKSTOP,
           abi: backstopAbi,
           functionName: 'redeemRequest',
           args: [r.id],
         })) as never,
         allowFailure: false,
-      })) as unknown as { shares: bigint }[]
-      return requests
-        .map((r, i) => ({ ...r, pending: (live[i] ?? { shares: 0n }).shares > 0n }))
-        .reverse()
+      })) as unknown as { shares: bigint; assets: bigint }[]
+      const views = open.map((r, i): RedeemRequestView => {
+        const now = live[i] ?? { shares: 0n, assets: 0n }
+        const pending = now.shares > 0n
+        return {
+          id: r.id,
+          requestedShares: r.shares,
+          shares: pending ? now.shares : r.shares,
+          assets: pending ? now.assets : r.assets,
+          claimableAt: r.claimableAt,
+          receiver: r.receiver,
+          pending,
+          partlyPaid: pending && now.shares < r.shares,
+          paidAssets: r.paidAssets,
+          claimCount: r.claimCount,
+        }
+      })
+      // Partly paid exits the subgraph has not reported payments for (log path or a lagging index).
+      const unknown = views.filter((v) => v.partlyPaid && !v.paidAssets)
+      if (unknown.length > 0) {
+        const paid = await paymentsFromLogs(
+          client,
+          unknown.map((v) => v.id),
+        ).catch(() => undefined)
+        for (const v of unknown) {
+          const p = paid?.get(v.id)
+          if (p) {
+            v.paidAssets = p.assets
+            v.claimCount = p.count
+          }
+        }
+      }
+      return views.reverse()
     },
   })
 }

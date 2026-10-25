@@ -3,6 +3,7 @@ import {
   flashLiquidatorAbi,
   formatBps,
   formatBtc,
+  formatDuration,
   formatMusd,
   formatPercentWad,
   formatUsd,
@@ -38,9 +39,11 @@ import {
   Value,
 } from '../components/ui'
 import {
+  type CanaryGrant,
   type LiquidationPreview,
   type M1Position,
   positionDebt,
+  useCanaryGrant,
   useLiquidationPreviews,
   useLiquidatorConfig,
   useM1Positions,
@@ -49,6 +52,8 @@ import {
 import { useMarket } from '../hooks/useMarket'
 import { useOracle } from '../hooks/useOracle'
 import { useWallet } from '../hooks/useWallet'
+import { formatUtc } from '../lib/time'
+import { useNow } from '../lib/useNow'
 import { appChain, deployed, registry } from '../wagmi'
 
 const FLASH = registry.contracts.flashLiquidator.address
@@ -92,6 +97,9 @@ export function LiquidatePage() {
 
   const all = positions.data ?? []
   const open = all.filter((p) => p.collateral > 0n || p.borrowShares > 0n)
+  const canaryOpen = open.some((p) => p.canary)
+  // Only needed while no canary is open: when its 48 h operator grant clears (audit fix D-7).
+  const grant = useCanaryGrant(!!positions.data && !canaryOpen)
   const previews = useLiquidationPreviews(open.map((p) => p.account))
   const price = oracle.status?.ok ? oracle.status.price : undefined
   const skip = oracle.status?.skipPrice
@@ -150,10 +158,7 @@ export function LiquidatePage() {
         lede="FlashLiquidator liquidates through Morpho’s callback: it sells the seized BTC to the backstop or the Tigris vAMM, repays the debt from the proceeds and pays you the rest. You need no MUSD, only gas."
       />
 
-      <Notice tone="brand" className="mb-5" title="A live canary is on the book">
-        The team keeps a small canary position just under the 77% liquidation LTV. A keeper watches
-        it and liquidates when BTC dips; anyone can beat it to it from this page.
-      </Notice>
+      <CanaryNotice loaded={!!positions.data} open={canaryOpen} grant={grant} lltv={lltv} />
       {positions.isError ? (
         <ReadError className="mb-5" what="M1 positions" onRetry={() => void positions.refetch()} />
       ) : null}
@@ -218,6 +223,85 @@ export function LiquidatePage() {
         </div>
       </div>
     </>
+  )
+}
+
+/**
+ * Whether there is a canary to liquidate. With one open, how long the keeper leaves it to others; without one, when
+ * it comes back: since audit fix D-7 the canary-operator grant is a 48-hour timelocked raise, so a fresh deployment
+ * has no canary until the grant clears and the keeper opens one.
+ */
+function CanaryNotice({
+  loaded,
+  open,
+  grant,
+  lltv,
+}: {
+  loaded: boolean
+  open: boolean
+  grant: CanaryGrant
+  lltv: bigint
+}) {
+  const now = Math.floor(useNow(1_000) / 1000)
+  if (!loaded) return null
+  if (open)
+    return (
+      <Notice tone="brand" className="mb-5" title="A live canary is on the book">
+        The team keeps a small canary position just under the {formatPercentWad(lltv, 0)}{' '}
+        liquidation LTV. When BTC dips and it becomes liquidatable, the keeper leaves it to anyone
+        for 6 hours (or until its health falls below 0.98) before taking it itself, so you have time
+        to liquidate it from this page.
+      </Notice>
+    )
+  const op = grant.operator
+  if (!op)
+    return (
+      <Notice className="mb-5" title="No canary is open">
+        There is no canary position on this network right now.
+      </Notice>
+    )
+  if (grant.isOperator === undefined || grant.executableAt === undefined)
+    return grant.isError ? <ReadError className="mb-5" what="the canary grant" /> : null
+  const operator = (
+    <AddressLink href={explorerAddressUrl(appChain.id, op)} address={op} label="keeper key" />
+  )
+  if (grant.isOperator)
+    return (
+      <Notice tone="brand" className="mb-5" title="The canary re-opens shortly">
+        The canary operator grant for {operator} has cleared. The keeper opens a new canary just
+        under the {formatPercentWad(lltv, 0)} liquidation LTV about 30 minutes after the grant
+        clears or the last canary is liquidated.
+      </Notice>
+    )
+  const at = grant.executableAt
+  if (at === 0)
+    return (
+      <Notice className="mb-5" title="No canary is open">
+        No canary operator grant is queued for {operator}. Granting one is a 48-hour timelocked
+        raise (audit fix D-7), so there is no canary to liquidate until one is queued and clears.
+      </Notice>
+    )
+  const left = at - now
+  return (
+    <Notice
+      tone="brand"
+      className="mb-5"
+      title="The canary re-arms after its 48-hour operator grant clears (audit fix D-7)"
+    >
+      Granting the canary operator role is a timelocked raise. The grant for {operator}{' '}
+      {left > 0 ? (
+        <>
+          becomes executable <span className="num">{formatUtc(at)}</span> (in{' '}
+          <span className="num">{formatDuration(left)}</span>)
+        </>
+      ) : (
+        <>
+          has been executable since <span className="num">{formatUtc(at)}</span>
+        </>
+      )}
+      ; the keeper then executes it and opens a new canary about 30 minutes later. Until then there
+      is no canary to liquidate.
+    </Notice>
   )
 }
 

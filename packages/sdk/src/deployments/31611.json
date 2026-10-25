@@ -1,5 +1,5 @@
 {
-  "$comment": "Mezo testnet registry. External addresses mirror contracts/script/config/MezoAddresses.sol (zero where testnet lacks one: no Slipstream CL200 pool, QuoterV2 or second gauge). Baserate addresses from contracts/deployments/31611.json, deploy txs and blocks from contracts/broadcast/{Deploy,DeployLiquidation,DeployPeriphery,DeployVault}.s.sol/31611/run-latest.json (vMusd: the VaultV2Factory.createVaultV2 call). The deployer EOA holds governor and sentinel roles, and is vMUSD owner, curator and sentinel, on testnet.",
+  "$comment": "Mezo testnet registry. External addresses mirror contracts/script/config/MezoAddresses.sol (zero where testnet lacks one: no Slipstream CL200 pool, QuoterV2 or second gauge). Baserate addresses from contracts/deployments/31611.json, deploy txs and blocks from contracts/broadcast/{Deploy,DeployLiquidation,DeployPeriphery,DeployVault}.s.sol/31611/run-latest.json (vMusd: the VaultV2Factory.createVaultV2 call). The deployer EOA holds governor and sentinel roles, and is vMUSD owner, curator and sentinel, on testnet. canaryOperator is the keeper's canary key (CANARY_OPERATOR in Deploy.s.sol), whose timelocked grant the deployment queues.",
   "chainId": 31611,
   "version": "w2",
   "startBlock": 16364312,
@@ -36,6 +36,7 @@
     "vaultV2Factory": "0x25eB93DA2F1b5D8f5D60c7563B8009a0330eb239"
   },
   "lltv": "770000000000000000",
+  "canaryOperator": "0xDB52588fd26744a23e24a70D73579f075Bc50dD9",
   "feeds": {
     "pythBtcUsd": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
     "pythMusdUsd": "0x0617a9b725011a126a2b9fd53563f4236501f32cf76d877644b943394606c6de"

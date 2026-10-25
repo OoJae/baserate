@@ -95,8 +95,10 @@ export function BorrowForm({
   const reserve = gasReserveWei(appChain.id)
   const maxByBalance =
     wallet.btcBalance !== undefined ? maxBig(wallet.btcBalance - reserve, 0n) : undefined
+  // This form always borrows, and a borrow needs the position within its cap; top-ups alone are never capped.
   const roomUnderCap = maxBig(market.risk.positionCap - position.collateral, 0n)
   const maxBtc = maxByBalance !== undefined ? minBig(maxByBalance, roomUnderCap) : roomUnderCap
+  const capText = `${formatBtc(market.risk.positionCap, { minDp: 2 })} BTC`
 
   const liquidity = market.state ? availableLiquidity(market.state) : undefined
   const globalRoom = market.state
@@ -116,7 +118,9 @@ export function BorrowForm({
   } else if (maxByBalance !== undefined && btcIn > maxByBalance) {
     reason = `Not enough BTC. Keep ${formatBtc(reserve)} BTC for gas.`
   } else if (position.collateral + btcIn > market.risk.positionCap) {
-    reason = `Above the per-position cap of ${formatBtc(market.risk.positionCap, { minDp: 2 })} BTC.`
+    reason = position.hasPosition
+      ? `Borrowing needs the position within the ${capText} per-position cap. To add BTC without borrowing, use Add collateral above: top-ups are never capped.`
+      : `Borrowing needs the position within the ${capText} per-position cap. Deposit at most ${capText}.`
   } else if (quote && quote.musdOut === 0n) {
     reason = 'Raise the target LTV or add BTC to borrow more.'
   } else if (liquidity !== undefined && needed > liquidity) {
@@ -163,7 +167,7 @@ export function BorrowForm({
           footer={
             skipUsd && btcIn > 0n
               ? `≈ ${formatUsd(btcToUsdWad(btcIn, skipUsd))} at ${formatUsd(skipUsd, 0)} per BTC`
-              : `Per-position cap ${formatBtc(market.risk.positionCap, { minDp: 2 })} BTC`
+              : `Borrowing needs at most ${capText} of collateral per position${position.hasPosition ? '; top-ups alone are never capped' : ''}`
           }
         />
 

@@ -141,6 +141,12 @@ export interface BaserateRegistry {
   feeds: { pythBtcUsd: Hex; pythMusdUsd: Hex }
   contracts: BaserateContracts
   markets: { M1: MarketEntry }
+  /**
+   * The keeper's canary key: the address the deployment queued `setCanaryOperator(address, true)` for. Granting it is
+   * a 48 h timelocked raise, so read `executableAt` / `isCanaryOperator` on the factory for its state. Null when the
+   * registry does not record one (mainnet grants canary operators later, through the Safe).
+   */
+  canaryOperator: Address | null
 }
 
 type RawContract = { address: string; tx: string | null; block: number }
@@ -162,6 +168,7 @@ type RawRegistry = {
       lltv: string
     }
   }
+  canaryOperator?: string | null
 }
 
 function addr(value: unknown, where: string): Address {
@@ -259,6 +266,10 @@ export function parseRegistry(raw: RawRegistry, chainId: SupportedChainId): Base
       pythMusdUsd: bytes32(raw.feeds.pythMusdUsd, 'feeds.pythMusdUsd'),
     },
     contracts,
+    canaryOperator:
+      raw.canaryOperator === undefined || raw.canaryOperator === null
+        ? null
+        : addr(raw.canaryOperator, 'canaryOperator'),
     markets: {
       M1: {
         id: bytes32(m.id, 'markets.M1.id'),

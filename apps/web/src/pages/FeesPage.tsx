@@ -1,4 +1,5 @@
 import {
+  EPOCH_SECONDS,
   epochStart,
   explorerAddressUrl,
   explorerTxUrl,
@@ -29,7 +30,14 @@ import {
   Stat,
   Value,
 } from '../components/ui'
-import { useDistributions, useFeeRouter, useFeeSwitchSubmission } from '../hooks/useFeeRouter'
+import {
+  type CarryReason,
+  type Distribution,
+  type TimelockStatus,
+  useDistributions,
+  useFeeRouter,
+  useFeeSwitchSubmission,
+} from '../hooks/useFeeRouter'
 import { formatUtc } from '../lib/time'
 import { useNow } from '../lib/useNow'
 import { appChain, deployed, registry } from '../wagmi'
@@ -37,6 +45,13 @@ import { appChain, deployed, registry } from '../wagmi'
 const ROUTER = registry.contracts.feeRouter.address
 const MEZO_EARN = 'https://mezo.org/earn'
 const MEZO_EARN_DOCS = 'https://mezo.org/docs/users/mezo-earn'
+/** FeeRouter.BRIBE_CUTOFF: no bribe is posted in the last hour of an epoch (Mezo's Voter closes voting then). */
+const BRIBE_CUTOFF = 3_600
+
+/** Mirrors the pure FeeRouter.bribeWindowOpen(timestamp): false in the last hour of an epoch. */
+function bribeWindowOpen(timestamp: number): boolean {
+  return timestamp % EPOCH_SECONDS <= EPOCH_SECONDS - BRIBE_CUTOFF
+}
 
 export function FeesPage() {
   const fr = useFeeRouter()
@@ -73,14 +88,47 @@ export function FeesPage() {
 type FeeRouterView = ReturnType<typeof useFeeRouter>
 
 function DistributeCard({ fr }: { fr: FeeRouterView }) {
+  const now = Math.floor(useNow(1_000) / 1000)
   const p = fr.plan
   const loading = fr.isLoading
   const target = fr.targets?.[0]
-  const bribeTotal = p ? p.bribeAmounts.reduce((a, b) => a + b, 0n) : undefined
+  const posted = p ? p.bribeAmounts.reduce((a, b) => a + b, 0n) : undefined
   const empty = p !== undefined && p.total === 0n
   const dead = p ? p.gaugeAlive.some((alive) => !alive) : false
+  const windowOpen = bribeWindowOpen(now)
+  const flip = nextEpochFlip(now)
+  // The sMUSD leg is donated only when sMUSD accepts it; below its dust floor it stays here with any carried bribe.
+  const toSmusd = p ? (p.smusdAccepts ? p.toSmusd : 0n) : undefined
+  const carried = p ? p.bribesCarried + p.smusdCarried : undefined
+  const paidOut = p && carried !== undefined ? p.total - carried : undefined
+  // Nothing would leave the router: all it holds is a carry that would wait again.
+  const stuck = p !== undefined && !empty && paidOut === 0n
+  const bribeCarryIn = (fr.bribeCarry[0] ?? 0n) + (fr.bribeCarry[1] ?? 0n)
+  const carriedIn =
+    fr.smusdCarry !== undefined && fr.bribeCarry[0] !== undefined
+      ? fr.smusdCarry + bribeCarryIn
+      : undefined
+  const failingSince = fr.smusdFailingSince !== undefined ? Number(fr.smusdFailingSince) : 0
+  const graceEpochs = fr.smusdGraceEpochs !== undefined ? Number(fr.smusdGraceEpochs) : 2
+  // Once a failure streak spans the grace epochs, a failing donation pays the sMUSD leg to the treasury instead.
+  const toTreasuryFrom =
+    failingSince > 0 ? epochStart(failingSince) + graceEpochs * EPOCH_SECONDS : 0
+  const bribeCarried = p !== undefined && !empty && p.bribesCarried > 0n
   // An empty router still shows the fixed 40/40/20 split.
   const share = (bps: bigint, amount: bigint | undefined) => (empty ? bps : (amount ?? 0n))
+
+  let reason: string | null = null
+  if (!deployed.feeRouter) reason = 'The FeeRouter is not deployed on this network.'
+  else if (empty)
+    reason =
+      'Nothing to distribute: the router holds 0 MUSD. Fees arrive once the factory points at it (see the pending switch).'
+  else if (stuck)
+    reason =
+      p.bribesCarried === 0n
+        ? 'Nothing would leave the router: it only holds sMUSD dust below sMUSD’s minimum donation, kept until more fees arrive.'
+        : windowOpen
+          ? 'Nothing would leave the router: it only holds a carried bribe share, which waits until the bribe contract has votes.'
+          : `Nothing would leave the router: it only holds a carried bribe share, which waits for the epoch flip in ${formatDuration(flip - now)}.`
 
   return (
     <Card aria-labelledby="distribute-title">
@@ -131,17 +179,17 @@ function DistributeCard({ fr }: { fr: FeeRouterView }) {
               {
                 key: 'smusd',
                 label: 'sMUSD yield',
-                value: share(FEE_SPLIT_BPS.smusd, p.toSmusd),
+                value: share(FEE_SPLIT_BPS.smusd, toSmusd),
                 tone: 'brand',
-                detail: empty ? undefined : `${formatMusd(p.toSmusd)} MUSD`,
+                detail: empty ? undefined : `${formatMusd(toSmusd ?? 0n)} MUSD`,
               },
               {
                 key: 'bribes',
                 label: 'BTC/MUSD gauge bribe',
-                value: share(FEE_SPLIT_BPS.bribes, bribeTotal),
+                value: share(FEE_SPLIT_BPS.bribes, posted),
                 tone: 'brand',
                 soft: true,
-                detail: empty ? undefined : `${formatMusd(bribeTotal ?? 0n)} MUSD`,
+                detail: empty ? undefined : `${formatMusd(posted ?? 0n)} MUSD`,
               },
               {
                 key: 'treasury',
@@ -150,6 +198,18 @@ function DistributeCard({ fr }: { fr: FeeRouterView }) {
                 tone: 'neutral',
                 detail: empty ? undefined : `${formatMusd(p.toTreasury)} MUSD`,
               },
+              ...(!empty && carried !== undefined && carried > 0n
+                ? [
+                    {
+                      key: 'carried',
+                      label: 'Kept for a later distribution',
+                      value: carried,
+                      tone: 'warn' as const,
+                      soft: true,
+                      detail: `${formatMusd(carried)} MUSD`,
+                    },
+                  ]
+                : []),
             ]}
           />
         ) : (
@@ -159,7 +219,7 @@ function DistributeCard({ fr }: { fr: FeeRouterView }) {
       <dl className="mt-4 divide-y divide-line border-t border-line pt-2">
         <Row
           label="sMUSD"
-          tip="Donated with sMUSD.receiveProtocolYield, so every sMUSD (and wsMUSD) holder earns it."
+          tip="Donated with sMUSD.receiveProtocolYield, so every sMUSD (and wsMUSD) holder earns it. If the donation fails, the share stays in the router for the next distribution; once failures span two epoch flips it goes to the treasury instead."
           value={
             fr.smusd ? (
               <AddressLink href={explorerAddressUrl(appChain.id, fr.smusd)} address={fr.smusd} />
@@ -168,14 +228,21 @@ function DistributeCard({ fr }: { fr: FeeRouterView }) {
             )
           }
           hint={
-            p && !empty && !p.smusdAccepts
-              ? 'below sMUSD’s dust floor: kept for next time'
-              : undefined
+            failingSince > 0 ? (
+              <span className="text-warn">
+                donations failing since {formatUtc(failingSince)}:{' '}
+                {now >= toTreasuryFrom
+                  ? 'a failing donation now goes to the treasury'
+                  : `kept here, to the treasury from ${formatUtc(toTreasuryFrom)}`}
+              </span>
+            ) : p && !empty && !p.smusdAccepts ? (
+              'below sMUSD’s dust floor: kept for next time'
+            ) : undefined
           }
         />
         <Row
           label="Gauge → bribe"
-          tip="The PoolsVoter’s BribeVotingReward for the BTC/MUSD pool gauge. A gauge the voter reports dead gets nothing; its share goes to sMUSD."
+          tip="The PoolsVoter’s BribeVotingReward for the BTC/MUSD pool gauge. A gauge the voter reports dead gets nothing; its share goes to sMUSD. In the last hour of an epoch, or while the bribe contract has no votes, the share is kept for a later distribution to the same gauge."
           value={
             target ? (
               <span className="inline-flex flex-wrap justify-end gap-x-1">
@@ -197,6 +264,11 @@ function DistributeCard({ fr }: { fr: FeeRouterView }) {
             p ? (
               dead ? (
                 <span className="text-warn">gauge reported dead: share goes to sMUSD</span>
+              ) : bribeCarried ? (
+                <span className="text-warn">
+                  {windowOpen ? 'no votes on the bribe yet' : 'last hour of the epoch'}: share
+                  carried
+                </span>
               ) : (
                 'gauge alive'
               )
@@ -217,24 +289,48 @@ function DistributeCard({ fr }: { fr: FeeRouterView }) {
           }
           hint="testnet: the deployer; mainnet: a Safe"
         />
+        {carriedIn !== undefined && carriedIn > 0n ? (
+          <Row
+            label="Carried from earlier"
+            tip="MUSD an earlier distribution kept back. It is part of the balance above and goes back to its own leg (a bribe share to the same gauge, the sMUSD share to sMUSD); it is never split again."
+            value={`${formatMusd(carriedIn)} MUSD`}
+            hint={`bribe ${formatMusd(bribeCarryIn)} · sMUSD ${formatMusd(fr.smusdCarry ?? 0n)}`}
+          />
+        ) : null}
       </dl>
+      {bribeCarried && !windowOpen ? (
+        <Notice tone="warn" className="mt-4" title="Bribes wait for the epoch flip">
+          In the last hour of an epoch Mezo’s voter only takes votes from whitelisted veNFTs, so a
+          bribe posted now could not win votes. The router keeps the bribe share and posts it with
+          the first distribution after the flip, in {formatDuration(flip - now)}. The sMUSD and
+          treasury shares are paid as usual.
+        </Notice>
+      ) : bribeCarried ? (
+        <Notice className="mt-4" title="The bribe has no votes yet">
+          The gauge’s bribe contract has no votes, so a bribe posted now could never be claimed. The
+          router keeps the share and adds it to the gauge’s next bribe once it has votes.
+        </Notice>
+      ) : null}
       <div className="mt-4">
         <TxButton
           variant="secondary"
           size="md"
-          label={p && !empty ? `Distribute ${formatMusd(p.total)} MUSD` : 'Distribute'}
-          disabledReason={
-            !deployed.feeRouter
-              ? 'The FeeRouter is not deployed on this network.'
-              : empty
-                ? 'Nothing to distribute: the router holds 0 MUSD. Fees arrive once the factory points at it (see the pending switch).'
-                : null
+          label={
+            p && !empty && paidOut !== undefined
+              ? `Distribute ${formatMusd(paidOut)} MUSD`
+              : 'Distribute'
           }
+          disabledReason={reason}
           request={{ address: ROUTER, abi: feeRouterAbi, functionName: 'distribute' }}
           pendingTitle="Distributing fees"
           successTitle="Fees distributed"
           successMessage={distributedMessage}
         />
+        {!empty && !stuck && carried !== undefined && carried > 0n ? (
+          <p className="mt-2 text-center text-xs text-muted">
+            {formatMusd(carried)} MUSD stays in the router for a later distribution.
+          </p>
+        ) : null}
       </div>
     </Card>
   )
@@ -244,7 +340,11 @@ function distributedMessage(receipt: TransactionReceipt): string {
   const logs = receipt.logs.filter((l) => isAddressEqual(l.address, ROUTER))
   const [e] = parseEventLogs({ abi: feeRouterAbi, logs, eventName: 'Distributed' })
   if (!e) return `Included in block ${receipt.blockNumber}.`
-  return `${formatMusd(e.args.toSmusd)} MUSD to sMUSD, ${formatMusd(e.args.toBribes)} MUSD in bribes, ${formatMusd(e.args.toTreasury)} MUSD to the treasury.`
+  const kept =
+    e.args.retained > 0n
+      ? ` ${formatMusd(e.args.retained)} MUSD kept for the next distribution.`
+      : ''
+  return `${formatMusd(e.args.toSmusd)} MUSD to sMUSD, ${formatMusd(e.args.toBribes)} MUSD in bribes, ${formatMusd(e.args.toTreasury)} MUSD to the treasury.${kept}`
 }
 
 function HistoryCard() {
@@ -300,6 +400,15 @@ function HistoryCard() {
                   voters from {formatUtc(Number(d.epochStart) + 7 * 86_400)}
                 </p>
               ))}
+              {/* At most one carry per gauge per distribution. */}
+              {d.bribeCarries.map((c) => (
+                <p key={c.gauge} className="mt-1 text-xs text-muted">
+                  Bribe {formatMusd(c.amount)} MUSD for gauge{' '}
+                  <span className="font-mono">{shortAddress(c.gauge)}</span> carried to the next
+                  distribution ({CARRY_LABEL[c.reason]})
+                </p>
+              ))}
+              <SmusdOutcomeLine d={d} />
             </li>
           ))}
         </ul>
@@ -312,15 +421,63 @@ function HistoryCard() {
   )
 }
 
+const CARRY_LABEL: Record<CarryReason, string> = {
+  VOTE_WINDOW_CLOSED: 'last hour of the epoch',
+  NO_VOTES: 'no votes on the bribe yet',
+}
+
+/** What happened to a distribution's sMUSD leg when it was not simply donated. */
+function SmusdOutcomeLine({ d }: { d: Distribution }) {
+  const since = d.smusdFailingSince ? ` (failing since ${formatUtc(d.smusdFailingSince)})` : ''
+  if (d.smusdOutcome === 'DEFERRED')
+    return (
+      <p className="mt-1 text-xs text-muted">
+        sMUSD share of {formatMusd(d.smusdCarried)} MUSD was below sMUSD’s dust floor: carried to
+        the next distribution
+      </p>
+    )
+  if (d.smusdOutcome === 'FAILED')
+    return (
+      <p className="mt-1 text-xs text-warn">
+        sMUSD donation failed: {formatMusd(d.smusdCarried)} MUSD carried to the next distribution
+        {since}
+      </p>
+    )
+  if (d.smusdOutcome === 'TO_TREASURY')
+    return (
+      <p className="mt-1 text-xs text-warn">
+        sMUSD kept failing{since}: {formatMusd(d.smusdToTreasury)} MUSD of its share went to the
+        treasury instead
+      </p>
+    )
+  return null
+}
+
+const LAPSED_LABEL: Record<TimelockStatus, string> = {
+  PENDING: 'Expired',
+  ACCEPTED: 'Executed earlier',
+  REVOKED: 'Revoked',
+  INVALIDATED: 'Invalidated',
+  EXPIRED: 'Expired',
+}
+
 function FeeSwitchCard({ fr }: { fr: FeeRouterView }) {
   const now = Math.floor(useNow(1_000) / 1000)
   const sub = useFeeSwitchSubmission()
   const at = fr.switchExecutableAt !== undefined ? Number(fr.switchExecutableAt) : undefined
   const done = !!fr.feeRecipient && isAddressEqual(fr.feeRecipient, ROUTER)
   const left = at !== undefined && at > now ? at - now : 0
+  const execWindow = fr.executionWindow !== undefined ? Number(fr.executionWindow) : 14 * 86_400
+  // executableAt reads 0 once a submission is executed, revoked, invalidated by a cut or expired.
+  const lapsed = !done && at === 0 && !!sub.data
   let status: { tone: 'good' | 'warn' | 'brand' | 'neutral'; label: string }
   if (done) status = { tone: 'good', label: 'Executed' }
   else if (at === undefined) status = { tone: 'neutral', label: 'Loading' }
+  else if (lapsed)
+    status = {
+      tone: 'neutral',
+      label: sub.data?.status ? LAPSED_LABEL[sub.data.status] : 'No longer queued',
+    }
   else if (at === 0) status = { tone: 'neutral', label: 'Not submitted' }
   else if (left > 0) status = { tone: 'warn', label: 'Timelocked' }
   else status = { tone: 'brand', label: 'Executable' }
@@ -340,7 +497,8 @@ function FeeSwitchCard({ fr }: { fr: FeeRouterView }) {
             {left > 0 ? formatDuration(left) : 'Ready'}
           </p>
           <p className="num text-xs text-muted">
-            {left > 0 ? `executable ${formatUtc(at)}` : `executable since ${formatUtc(at)}`}
+            {left > 0 ? `executable ${formatUtc(at)}` : `executable since ${formatUtc(at)}`}, until{' '}
+            {formatUtc(at + execWindow)}
           </p>
         </div>
       ) : null}
@@ -382,7 +540,11 @@ function FeeSwitchCard({ fr }: { fr: FeeRouterView }) {
               '—'
             )
           }
-          hint={sub.data ? `block ${sub.data.block.toLocaleString('en-US')}` : undefined}
+          hint={
+            sub.data
+              ? `block ${sub.data.block.toLocaleString('en-US')}${lapsed ? ': no longer executable' : ''}`
+              : undefined
+          }
         />
         <Row
           label="Timelock"
@@ -399,7 +561,7 @@ function FeeSwitchCard({ fr }: { fr: FeeRouterView }) {
       <p className="mt-3 text-xs text-muted">
         {done
           ? 'Every new borrow’s fee now lands in the FeeRouter.'
-          : 'Until the governor executes it after the timelock, fees go to the treasury; the first distribution was funded by hand from it. Nothing can shorten the timelock.'}
+          : 'Until it is executed after the timelock, fees go to the treasury. Nothing can shorten the timelock, and a queued call lapses 14 days after it becomes executable.'}
       </p>
     </Card>
   )
@@ -427,6 +589,16 @@ function EpochCard() {
           tip="Bribes posted during this epoch become claimable by the gauge’s veBTC voters at the flip."
           value={<span className="num">in {formatDuration(flip - now)}</span>}
           hint={formatUtc(flip)}
+        />
+        <Row
+          label="Bribe window"
+          tip="The FeeRouter posts no bribe in the last hour of an epoch, when Mezo’s voter only takes votes from whitelisted veNFTs. The bribe share is kept for the first distribution after the flip."
+          value={bribeWindowOpen(now) ? 'Open' : <span className="text-warn">Closed</span>}
+          hint={
+            bribeWindowOpen(now)
+              ? `closes ${formatUtc(flip - BRIBE_CUTOFF)}`
+              : `reopens at the flip, in ${formatDuration(flip - now)}`
+          }
         />
       </dl>
     </Card>

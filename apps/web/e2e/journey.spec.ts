@@ -46,7 +46,16 @@ import {
 } from 'viem'
 import evidenceJson from '../src/evidence.json' with { type: 'json' }
 import { formatUtc } from '../src/lib/time'
-import { Chain, canaryAccounts, fmt18, parseUiNumber, type Snapshot, uiNumberOrNaN } from './chain'
+import {
+  Chain,
+  canaryAccounts,
+  distributions,
+  fmt18,
+  parseUiNumber,
+  type Snapshot,
+  timelockSubmission,
+  uiNumberOrNaN,
+} from './chain'
 import { E2EWallet, type SentTx } from './wallet'
 
 /**
@@ -329,6 +338,107 @@ test.describe('judge journey on Mezo testnet', () => {
       after,
       notes,
     })
+  }
+
+  /**
+   * Step 7 with no canary carrying debt (a fresh deployment): the Liquidate page shows when the canary comes back,
+   * read on-chain from the factory (`isCanaryOperator` and `executableAt(setCanaryOperator(op, true))`), never a
+   * live-canary claim; the backstop NAV still matches the contract, and nothing is sent.
+   */
+  async function liquidateWithoutCanary(browser: Browser, canaryHasCollateral: boolean) {
+    const r = chain.registry
+    const c = wallet.publicClient
+    const sentBefore = wallet.sent.length
+    const op = r.canaryOperator
+    const factory = { address: r.contracts.factory.address, abi: borrowAccountFactoryAbi } as const
+    const [isOperator, executableAt] = op
+      ? await Promise.all([
+          c.readContract({ ...factory, functionName: 'isCanaryOperator', args: [op] }),
+          c.readContract({
+            ...factory,
+            functionName: 'executableAt',
+            args: [
+              encodeFunctionData({
+                abi: borrowAccountFactoryAbi,
+                functionName: 'setCanaryOperator',
+                args: [op, true],
+              }),
+            ],
+          }),
+        ])
+      : [false, 0n]
+    const at = Number(executableAt)
+
+    const { page } = await open(browser, '07-liquidate', '/liquidate')
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+      'Zero-capital liquidations for M1',
+    )
+    const positions = page.getByRole('region', { name: 'Positions' })
+    await expect(positions).toBeVisible({ timeout: 60_000 })
+    const rearm = 'The canary re-arms after its 48-hour operator grant clears (audit fix D-7)'
+    const reopen = 'The canary re-opens shortly'
+    if (canaryHasCollateral) {
+      // A canary with collateral but no debt still counts as open on the page.
+      await expect(page.getByText('A live canary is on the book', { exact: true })).toBeVisible({
+        timeout: 60_000,
+      })
+      journey.skipped.push('liquidation: the canary holds collateral but no debt')
+    } else {
+      if (op && !isOperator && at > 0) {
+        if (at > Date.now() / 1000 + 120) {
+          const notice = page.getByRole('status').filter({ hasText: rearm })
+          await expect(notice).toBeVisible({ timeout: 60_000 })
+          await expect(notice).toContainText(formatUtc(at))
+        } else {
+          // Due now: the keeper may execute the grant while the page loads.
+          await expect(page.getByText(rearm).or(page.getByText(reopen)).first()).toBeVisible({
+            timeout: 60_000,
+          })
+        }
+        journey.skipped.push(
+          `liquidation: no canary yet; the operator grant for ${op} is executable from ${new Date(at * 1000).toISOString()}`,
+        )
+      } else if (op && isOperator) {
+        await expect(page.getByText(reopen, { exact: true })).toBeVisible({ timeout: 60_000 })
+        journey.skipped.push(
+          `liquidation: ${op} is a canary operator; the keeper has not opened it yet`,
+        )
+      } else {
+        await expect(page.getByText('No canary is open', { exact: true })).toBeVisible({
+          timeout: 60_000,
+        })
+        journey.skipped.push('liquidation: no canary and no live canary operator grant')
+      }
+      await expect(page.getByText('A live canary is on the book')).toHaveCount(0)
+    }
+
+    const backstopCard = page.getByRole('region', { name: 'Backstop' })
+    const nav = await c.readContract({
+      address: r.contracts.backstop.address,
+      abi: backstopAbi,
+      functionName: 'convertToAssets',
+      args: [WAD],
+    })
+    await expect(backstopCard.locator('p:text-is("NAV") + p')).toHaveText(
+      toFixedDecimal(nav, 18, 6),
+    )
+    expect(wallet.sent.length, 'no transaction sent without a canary').toBe(sentBefore)
+    await pause(page, 1_500)
+    await showcase(page, positions, 2_500)
+    await showcase(page, backstopCard, 2_500)
+    await finishStage()
+    await photograph(browser, 'liquidate', '/liquidate', async (p) => {
+      await expect(p.getByRole('region', { name: 'Backstop' })).toBeVisible({ timeout: 60_000 })
+    })
+    await photograph(
+      browser,
+      'liquidate-mobile',
+      '/liquidate',
+      async (p) => {
+        await expect(p.getByRole('region', { name: 'Backstop' })).toBeVisible({ timeout: 60_000 })
+      },
+      MOBILE,
+    )
   }
 
   /** Waits until the chain reflects `ok` (the RPC can trail the receipt by a block), then cross-checks it. */
@@ -904,8 +1014,9 @@ test.describe('judge journey on Mezo testnet', () => {
     const r = chain.registry
     const flash = r.contracts.flashLiquidator.address
     const c = wallet.publicClient
+    // On a fresh deployment there is no canary yet: the canary-operator grant is a 48 h timelocked raise (audit
+    // D-7). Then the page must say when the canary comes back instead of claiming a live one.
     const canaries = await canaryAccounts(chain)
-    expect(canaries.length, 'a canary account exists').toBeGreaterThan(0)
     const previews = await Promise.all(
       canaries.map(async (a) => {
         const { result } = await c.simulateContract({
@@ -918,8 +1029,13 @@ test.describe('judge journey on Mezo testnet', () => {
       }),
     )
     const live = previews.find((x) => x.p.debt > 0n)
-    expect(live, 'an open canary position').toBeTruthy()
-    if (!live) return
+    if (!live) {
+      await liquidateWithoutCanary(
+        browser,
+        previews.some((x) => x.p.collateral > 0n),
+      )
+      return
+    }
     const sentBefore = wallet.sent.length
 
     const { page } = await open(browser, '07-liquidate', '/liquidate')
@@ -1111,18 +1227,22 @@ test.describe('judge journey on Mezo testnet', () => {
     const r = chain.registry
     const c = wallet.publicClient
     const router = r.contracts.feeRouter.address
+    const feeSwitch = encodeFunctionData({
+      abi: borrowAccountFactoryAbi,
+      functionName: 'setFeeRecipient',
+      args: [router],
+    })
     const executableAt = await c.readContract({
       address: r.contracts.factory.address,
       abi: borrowAccountFactoryAbi,
       functionName: 'executableAt',
-      args: [
-        encodeFunctionData({
-          abi: borrowAccountFactoryAbi,
-          functionName: 'setFeeRecipient',
-          args: [router],
-        }),
-      ],
+      args: [feeSwitch],
     })
+    // Read from the chain, so the check holds on any deployment (a fresh one may have no distribution yet).
+    const [submitted, done] = await Promise.all([
+      timelockSubmission(chain, feeSwitch, BigInt(r.contracts.feeRouter.block)),
+      distributions(chain),
+    ])
     const plan = await c.readContract({
       address: router,
       abi: feeRouterAbi,
@@ -1137,10 +1257,21 @@ test.describe('judge journey on Mezo testnet', () => {
       await expect(sw).toContainText(formatUtc(Number(executableAt)), { timeout: 60_000 })
       if (Number(executableAt) > Date.now() / 1000) await expect(sw).toContainText('Timelocked')
     }
-    await expect(sw.getByRole('link', { name: /0xeedbd3…/ })).toBeVisible({ timeout: 60_000 })
+    if (submitted)
+      await expect(sw.getByRole('link', { name: shortAddress(submitted, 6) })).toBeVisible({
+        timeout: 60_000,
+      })
     const history = page.getByRole('region', { name: 'Distributions' })
-    await expect(history).toContainText('20.00 MUSD split', { timeout: 60_000 })
-    await expect(history).toContainText('Bribe 8.00 MUSD on gauge')
+    const latest = done.at(-1)
+    if (latest) {
+      await expect(history).toContainText(`${formatMusd(latest.total)} MUSD split`, {
+        timeout: 60_000,
+      })
+      for (const amount of latest.bribes)
+        await expect(history).toContainText(`Bribe ${formatMusd(amount)} MUSD on gauge`)
+    } else {
+      await expect(history).toContainText('No distributions yet.', { timeout: 60_000 })
+    }
     const distribute = page.getByRole('region', { name: 'Next distribution' }).getByRole('button', {
       name: /^Distribute/,
     })
@@ -1152,8 +1283,9 @@ test.describe('judge journey on Mezo testnet', () => {
     await showcase(page, page.getByRole('region', { name: 'Next distribution' }), 2_500)
     await showcase(page, history, 3_000)
     await finishStage()
+    const historyShown = /MUSD split|No distributions yet/
     await photograph(browser, 'fees', '/fees', async (p) => {
-      await expect(p.getByRole('region', { name: 'Distributions' })).toContainText('MUSD split', {
+      await expect(p.getByRole('region', { name: 'Distributions' })).toContainText(historyShown, {
         timeout: 60_000,
       })
     })
@@ -1162,7 +1294,7 @@ test.describe('judge journey on Mezo testnet', () => {
       'fees-mobile',
       '/fees',
       async (p) => {
-        await expect(p.getByRole('region', { name: 'Distributions' })).toContainText('MUSD split', {
+        await expect(p.getByRole('region', { name: 'Distributions' })).toContainText(historyShown, {
           timeout: 60_000,
         })
       },
