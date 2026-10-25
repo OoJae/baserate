@@ -61,7 +61,7 @@ export function CardHeader({
           {icon ? <span className="text-brand">{icon}</span> : null}
           {title}
         </h2>
-        {subtitle ? <p className="mt-0.5 text-sm text-muted">{subtitle}</p> : null}
+        {subtitle ? <p className="mt-0.5 text-sm break-words text-muted">{subtitle}</p> : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </header>
@@ -625,7 +625,11 @@ export function SplitBar({ segments, label }: { segments: Segment[]; label: stri
             <span className="flex min-w-0 items-center gap-2 text-muted">
               <span
                 aria-hidden
-                className={cx('inline-block size-2.5 shrink-0 rounded-sm', segmentBg[s.tone])}
+                className={cx(
+                  'inline-block size-2.5 shrink-0 rounded-sm',
+                  segmentBg[s.tone],
+                  s.soft && 'opacity-45',
+                )}
               />
               <span className="truncate">{s.label}</span>
             </span>

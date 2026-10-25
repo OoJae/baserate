@@ -140,6 +140,7 @@ export function LiquidatePage() {
     openRows.find((r) => r.canary) ??
     openRows[0]
   const liquidatableCount = rows.filter((r) => r.preview?.liquidatable).length
+  const previewsSettled = previews.every((q) => q.data !== undefined || q.isError)
 
   return (
     <>
@@ -157,7 +158,7 @@ export function LiquidatePage() {
         <ReadError className="mb-5" what="M1 positions" onRetry={() => void positions.refetch()} />
       ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-12">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
         <div className="space-y-5 lg:col-span-7">
           <Card aria-labelledby="positions-title">
             <CardHeader
@@ -168,7 +169,7 @@ export function LiquidatePage() {
               action={
                 liquidatableCount > 0 ? (
                   <Badge tone="bad">{liquidatableCount} liquidatable</Badge>
-                ) : positions.data ? (
+                ) : positions.data && previewsSettled ? (
                   <Badge tone="good">All healthy</Badge>
                 ) : null
               }

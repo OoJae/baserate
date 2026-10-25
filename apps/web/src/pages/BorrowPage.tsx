@@ -50,7 +50,7 @@ export function BorrowPage() {
         </Notice>
       ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-12">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
         <div className="space-y-5 lg:col-span-7">
           <PositionCard position={position} oracle={oracle} market={market} wallet={wallet} />
           <BorrowForm

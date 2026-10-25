@@ -111,7 +111,7 @@ export function RiskPage() {
         ) : null}
       </Card>
 
-      <div className="grid gap-5 lg:grid-cols-12">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
         <div className="space-y-5 lg:col-span-7">
           <DepthCard s={s} />
           <TroveCard s={s} />
@@ -147,7 +147,7 @@ function DepthCard({ s }: Props) {
       {s ? (
         <>
           <div className="-mx-4 overflow-x-auto sm:mx-0">
-            <table className="w-full min-w-[520px] text-left text-sm">
+            <table className="w-full min-w-[560px] text-left text-sm">
               <thead>
                 <tr className="border-b border-line text-xs text-muted">
                   <th scope="col" className="px-4 py-2 font-medium sm:pl-0">
@@ -247,7 +247,7 @@ function TroveCard({ s }: Props) {
             <Stat label="BTC price" value={formatUsd(t.price, 0)} sub="Skip, used for ICR" />
           </div>
           <div className="-mx-4 overflow-x-auto sm:mx-0">
-            <table className="w-full min-w-[520px] text-left text-sm">
+            <table className="w-full min-w-[560px] text-left text-sm">
               <thead>
                 <tr className="border-b border-line text-xs text-muted">
                   <th scope="col" className="px-4 py-2 font-medium sm:pl-0">
@@ -276,7 +276,7 @@ function TroveCard({ s }: Props) {
                     <td className="px-4 py-2 text-muted sm:pl-0">{i + 1}</td>
                     <td className="px-2 py-2">
                       <a
-                        className="font-mono text-xs text-brand hover:underline"
+                        className="font-mono text-xs whitespace-nowrap text-brand hover:underline"
                         href={explorerAddressUrl(appChain.id, e.borrower)}
                         target="_blank"
                         rel="noreferrer noopener"
@@ -290,7 +290,7 @@ function TroveCard({ s }: Props) {
                         NICR {toFixedDecimal(e.nicr, 20, 8)}
                       </span>
                     </td>
-                    <td className="px-2 py-2 text-right text-btc">
+                    <td className="px-2 py-2 text-right whitespace-nowrap text-btc">
                       {formatBtc(e.coll, { minDp: 4, maxDp: 4 })} BTC
                     </td>
                     <td className="px-2 py-2 text-right text-ink">

@@ -79,7 +79,7 @@ export function LendPage() {
       ) : null}
       {vault.isError ? <ReadError className="mb-5" what="vMUSD" onRetry={vault.refetch} /> : null}
 
-      <div className="grid gap-5 lg:grid-cols-12">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
         <div className="space-y-5 lg:col-span-7">
           <VaultCard vault={vault} />
           <ActionsCard vault={vault} wallet={wallet} />

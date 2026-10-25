@@ -55,7 +55,7 @@ export function FeesPage() {
         />
       ) : null}
       {fr.isError ? <ReadError className="mb-5" what="the FeeRouter" onRetry={fr.refetch} /> : null}
-      <div className="grid gap-5 lg:grid-cols-12">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
         <div className="space-y-5 lg:col-span-7">
           <DistributeCard fr={fr} />
           <HistoryCard />
@@ -331,7 +331,7 @@ function FeeSwitchCard({ fr }: { fr: FeeRouterView }) {
         id="switch-title"
         icon={<IconClock className="size-4" />}
         title="Pending governance: fee switch"
-        subtitle="BorrowAccountFactory.setFeeRecipient(FeeRouter), behind the 48-hour timelock"
+        subtitle="The factory’s setFeeRecipient(FeeRouter), behind its 48-hour timelock"
         action={<Badge tone={status.tone}>{status.label}</Badge>}
       />
       {at !== undefined && at > 0 && !done ? (
