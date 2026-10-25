@@ -1,9 +1,23 @@
 {
   "name": "@baserate/sdk",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Baserate SDK: Mezo chains, address registry, ABIs, Morpho math, MUSD permits and error decoding.",
   "license": "GPL-2.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OoJae/baserate.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://baserate-mezo.vercel.app",
+  "keywords": [
+    "mezo",
+    "musd",
+    "bitcoin",
+    "morpho",
+    "defi",
+    "viem",
+    "sdk"
+  ],
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -13,14 +27,31 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "files": [
-    "src"
+    "dist",
+    "src/deployments",
+    "README.md",
+    "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./deployments/*.json": "./src/deployments/*.json"
+    }
+  },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "gen:abis": "node scripts/gen-abis.mjs",
-    "check:abis": "tsx scripts/check-abis.mjs ../src/abis.ts"
+    "check:abis": "tsx scripts/check-abis.mjs ../src/abis.ts",
+    "build": "tsup src/index.ts --format esm --dts --clean --target es2022 --external viem",
+    "prepublishOnly": "pnpm run build && pnpm run typecheck && pnpm run test"
   },
   "peerDependencies": {
     "viem": "2.57.11"
@@ -30,6 +61,7 @@
     "typescript": "5.9.3",
     "viem": "2.57.11",
     "vitest": "5.0.5",
-    "zod": "3.25.76"
+    "zod": "3.25.76",
+    "tsup": "8.5.0"
   }
 }
