@@ -28,7 +28,7 @@ You need an EVM wallet (MetaMask, Rabby, etc.) and one faucet drip. Everything r
 
 ## 5. Check the chain, not the UI (1 minute)
 
-Open **[Evidence](https://baserate-mezo.vercel.app/evidence)**. Every recorded transaction, grouped by area (core, the recorded judge journey, Lend, Liquidations, Fees, Risk), is re-verified live against Mezo's Blockscout explorer, and every contract shows its source-verification status (Sourcify for ours).
+Open **[Evidence](https://baserate-mezo.vercel.app/evidence)**. Every recorded transaction, grouped by area (core, the recorded judge journey, Lend, Liquidations, Fees, Risk), is re-verified live against Mezo's Blockscout explorer, and every contract shows its source-verification status (Sourcify for ours). The **Keeper** card shows the off-chain keeper's jobs, the positions it watches and its recent transactions, live.
 
 ## 6. Lend MUSD in vMUSD (2 minutes)
 
