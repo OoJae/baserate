@@ -1,0 +1,4 @@
+{
+  "testnet": { "block": 16363000, "timestamp": 1792942983, "skipAnswer": "80563590440000000000000" },
+  "mainnet": { "block": 12758000, "timestamp": 1792943430, "skipAnswer": "80594916930000000000000" }
+}

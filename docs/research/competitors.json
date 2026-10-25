@@ -1,0 +1,432 @@
+[
+  {
+    "name": "Pylon",
+    "url": "https://pylon-mezo.vercel.app (mainnet build /mainnet/)",
+    "track": "T1 (not stated)",
+    "summary": "Non-custodial trove terminal: one-signature flash loop, unwind and exit; a MUSD redemption-shield reserve; full SortedTroves redemption radar; Rust keeper/relay engine with a paid x402 endpoint.",
+    "mezo_primitives_used": "BorrowerOperationsSignatures (EIP-712 ballots); SortedTroves (whole-queue indexing); TroveManager; Tigris pools (MUSD/mUSDT as flash venue, MUSD/BTC as swap venue); MUSD reserve vault; x402",
+    "deployment": "MAINNET: FlashEngine 0x8DEa475605ac7a99ad28F0DD3537A93b2aCf655D, Reserve 0x81175AaAC5Fa0873e64480502566Fe993bB88e62 holding about 10.14 MUSD (cast call MUSD balanceOf), deposit/withdraw txs on 2026-10-21. Testnet: full product; loop/unwind/exit/shield txs status 1 (cast receipt 0x7933c853…, 0xe7e02053…, 0xfd3e382f…, 0x0e3b6710…)",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/1PrjMj61aiJnq8mJ/products/gXlGLvqpoHZ0RkkN; team kiter99 (GitHub PhiBao); repo PhiBao/pylon-mezo (created 2026-10-15); about 195KB Solidity incl. 50KB tests, about 177KB Rust; docs/AUDIT.md agent audit with 35 findings (5 High), 32 fixed, regression tests; mainnet runbook; deck + video. Weak spot: README's '102.98M depth' MUSD/BTC claim conflicts with mainnet reserves (0.47 BTC / 39.3k MUSD)",
+    "threat_level": "high"
+  },
+  {
+    "name": "mbLP",
+    "url": "https://mblp.surge.sh",
+    "track": "T1",
+    "summary": "One BTC deposit opens a shared MUSD trove at a 300% target, borrows MUSD, adds BTC/MUSD LP, stakes it in Mezo's gauge for MEZO, auto-rebalances, and routes part of the fee as a gauge incentive (bribe) to attract veBTC votes.",
+    "mezo_primitives_used": "BorrowerOperations + HintHelpers + SortedTroves + TroveManager (vault-owned trove); Tigris Router addLiquidity/removeLiquidity/swap; Gauge deposit/getReward (Voter-fed testnet gauge); IncentiveRouter calling the gauge incentive contract notifyRewardAmount; PriceFeed; Mezo Passport",
+    "deployment": "Mezo testnet v1/v2/v3 (v3 0x75532765bfBa32E8DC796292937F9c571a2dBFEC). v1 deposit tx 0x2f8336f3… status 1 with 27 logs; Passport smart-account deposit 0x30219b76… status 1; keeper harvests about twice a day (Blockscout). Mainnet-fork test of incentive posting",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/d8NPdJNq7tJmoEoVD/products/OVdoK13BMTzz0K60; team GuTS805; repo GuTS805/Akindo; 34KB vault + 12 test files (invariant, manipulation, recovery, mainnet fork); SECURITY.md; docs/evidence.md listing every live tx; 1:56 video + deck; found and reported Passport relayer bug",
+    "threat_level": "high"
+  },
+  {
+    "name": "Mezodot",
+    "url": "https://github.com/mdlog/mezodot (repo not linked on AKINDO product)",
+    "track": "T1",
+    "summary": "Omnichain money market: supply MUSD/MEZO for ERC-4626 pMUSD/pMEZO, borrow against BTC, pTokens or Sepolia-locked WETH/USDC via Wormhole; flash-loan MUSD loop and one-tx BTC long via Tigris flash swap; keeper gateway and MCP risk agent.",
+    "mezo_primitives_used": "MUSD and MEZO as pool assets; native BTC collateral; Tigris MUSD/BTC flash swap; Pyth (Mezo) + Supra oracles; Wormhole core; ERC-3156 flash loans",
+    "deployment": "Mezo testnet hub (VaultManager 0x7a2e248Aa4799B3A6ef16a647E4F88A512B854F7 has code; pMUSD totalAssets about 1,739 MUSD, pMEZO about 401 MEZO via cast); spokes on Base Sepolia and Eth Sepolia",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/63dv68BletWx7Od7/products/La7M8xW8rIkr2kMoz; team mdlog123 (MDLOG Labs); about 111KB Solidity source, 253KB tests incl. invariant handlers, cross-chain and fork; SECURITY.md, RUNBOOK; video; AI-assisted plans in repo; not audited, large surface",
+    "threat_level": "high"
+  },
+  {
+    "name": "Lockwatch",
+    "url": "https://lockwatch.online",
+    "track": "not stated (T1 keeper + T2 Telegram)",
+    "summary": "Expiry protection for veBTC/veMEZO: at expiry a keeper returns, re-locks, or opens an MUSD trove (and can deposit to sMUSD) per the owner's rule; auto-extend and auto-claim; MUSD redemption radar and signed loan rescue; Telegram/email alerts.",
+    "mezo_primitives_used": "veBTC and veMEZO (increaseUnlockTime, withdraw, createLockFor, voted); Voter (claimBribes, claimFees, reset, gaugeToBribe); BorrowerOperationsSignatures (LockwatchRescue); sMUSD (Savings Vault); TroveManager/SortedTroves",
+    "deployment": "Mezo testnet; LockwatchVault 0xd7160697f3acd0191e65bcccaafeaa0913d21999 with register + protectBatch (tx 0x70012fd1… status 1, returned 0.004 BTC)",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/eaKMZLZlMC8vGEpEA/products/93k8QKXVpuZZXxVZ; team ChrisGold (GitHub AshThunder); 34KB source, 99KB tests incl. veBTC/veMEZO testnet forks and invariant; claims 218 tests, CI, Slither; video + deck; data-led problem (286/379 testnet veBTC locks expired)",
+    "threat_level": "high"
+  },
+  {
+    "name": "MezoRoute",
+    "url": "https://mezoroute.vercel.app",
+    "track": "T1 (not stated)",
+    "summary": "Compares MUSD/BTC LP vs Stability Pool routes by return source and the effect on total BTC exposure, then executes Borrow & Deploy into the Tigris MUSD/BTC pool in one transaction.",
+    "mezo_primitives_used": "Tigris MUSD/BTC pool + router (exact optimal swap); BorrowerOperationsSignatures (borrow and deploy in one tx); Stability Pool data; Mezo Passport",
+    "deployment": "MAINNET executor 0x046449b1229C863e278f369869BA10e12bd80d9E (9.6KB code; enter/exit txs on Oct 15, 20 and 21 via api.explorer.mezo.org), 1,000 MUSD cap; also testnet",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/vjmk6qeDdcZqAlWng/products/xKqvNXjQACQm8mnl; team hms1499; repo hms1499/MezoRoute (created 2026-09-28); 18 Solidity test files; self-audit mapping invariants to tests; no admin keys",
+    "threat_level": "medium"
+  },
+  {
+    "name": "Coil (Wilivms)",
+    "url": "https://wilivms.github.io/Coil/",
+    "track": "T1",
+    "summary": "Opens a leveraged MUSD trove in one signature via a flash swap from Mezo's MUSD/BTC pool plus openTroveWithSignature; one-tx unwind and deleverage; Guard pre-signed stop-loss for keepers; risk cockpit and redemption radar.",
+    "mezo_primitives_used": "Pool flash swap; BorrowerOperationsSignatures (open/adjust/closeTroveWithSignature); PriceFeed trigger; BTC precompile",
+    "deployment": "Mezo testnet CoilRouter 0x46a1B46016cF0C0E328Aa5D304F2f11257B21A16 (50+ txs on Blockscout)",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/kzmodr4eacd1Zpnve/products/WjDlXKe8pUvQkPBZ; team Wilivms; 23KB source, 35KB tests (unit, fuzz, EIP-712 compatibility, fork vs live MUSD); video + deck; overlaps with Pylon",
+    "threat_level": "medium"
+  },
+  {
+    "name": "Lifeline",
+    "url": "https://xachp.github.io/mezo-lifeline/",
+    "track": "T1 core (keeper bot framed as T2)",
+    "summary": "Standing safety policy: a per-user LifelineVault is the trove's borrower; anyone can call protect() to restore ICR or the redemption buffer from a BTC/MUSD reserve for a capped tip.",
+    "mezo_primitives_used": "BorrowerOperations (vault as borrower); SortedTroves walked on-chain for redemption buffer; TroveManager; PriceFeed; Recovery Mode handling",
+    "deployment": "Mezo testnet LifelineFactory 0x37aC7acd4e48b79bb0dc6AaCA5AF3611cF176149 (verified); live keeper rescue 127%→134%→150% claimed",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/3dJ9mlvoXTQ3MxKo/products/Pv1WZjReXtW0mN9L; team XachP; 22.7KB source, 16 fork tests vs live MUSD (45% crash scenario); Node keeper + Telegram; video",
+    "threat_level": "medium"
+  },
+  {
+    "name": "Vigil",
+    "url": "https://vigil-mezo.up.railway.app",
+    "track": "T2",
+    "summary": "Telegram (@VigilMezoBot) and web alerts before liquidation or redemption, with a rescue that repays from a MUSD reserve using a repay the borrower signed in advance.",
+    "mezo_primitives_used": "BorrowerOperationsSignatures.repayMUSDWithSignature (EIP-712); SortedTroves redemption order; PriceFeed (60s staleness pause); Multicall3",
+    "deployment": "Mezo testnet VigilReserve 0x9829963c86bf6A8AC47b0996eAD58cf3e630cf3E (verified); rescue tx ok after 2 failed attempts (Blockscout)",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/xKmLoZGWQhNJ0OG7/products/K8zDjV2MvuekAA17; team nftking (GitHub nftkingiii); 12 fork tests vs real MUSD; no owner/admin; video + deck; repo last pushed Oct 16",
+    "threat_level": "medium"
+  },
+  {
+    "name": "Mezher",
+    "url": "https://mezher.vercel.app",
+    "track": "T1 + T2",
+    "summary": "Bitcoin-backed checkout: pays the merchant from the payer's MUSD balance and borrows the remainder from their trove straight to the merchant in one gasless atomic call.",
+    "mezo_primitives_used": "BorrowerOperationsSignatures.withdrawMUSDWithSignature (recipient = merchant); MUSD permit; TroveManager + PriceFeed 150% post-check; relayer",
+    "deployment": "Mezo testnet MezherPay 0x80ddA1a82Bb291348d4b5Ef33FAc10819071f58b (2.3KB code, 0 recorded txs on the redeployed contract)",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/DrBVAgDBRsZJRz3zj/products/1PoKP8Ge0cl6eGeX; team darko (GitHub woydarko); fork + unit tests; internal security fix; deck",
+    "threat_level": "medium"
+  },
+  {
+    "name": "Mezo Agent Toolkit",
+    "url": "https://mezo-agent-toolkit.kylne700.workers.dev",
+    "track": "T2",
+    "summary": "MezoLens one-call read contract (trove health, redemption position, swap quotes, ve locks), a pay-per-call x402 endpoint at 0.001 MUSD, and an MCP server so AI agents can read and pay without holding BTC for gas.",
+    "mezo_primitives_used": "Reads TroveManager, SortedTroves, PriceFeed, pool router, veBTC, veMEZO; x402 via Permit2 through a third-party facilitator",
+    "deployment": "Mezo testnet MezoLens 0xBDfD1C0B544319E25b4b99ee1f355e55230f6130; x402 payments 0x72589fc2… and 0x74482a3e… status 1 (to x402 proxy 0x402085c2…0001)",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/La7ZJ4o6mHqJxK9a/products/mVqAPBqpoTkPq386; team Kylne; TS-heavy (441KB), 13 TS test files; video + deck; submission text mapped to the judging criteria",
+    "threat_level": "medium"
+  },
+  {
+    "name": "LeekWallet DIY Hardware Wallet & Leek Stonks",
+    "url": "https://leekdefi.0xoucanproject.xyz",
+    "track": "T1 + T2",
+    "summary": "Synthetic stock-style index shares settled in MUSD borrowed against BTC; MEZO staking (sMEZO) earns half of fees and gives fee discounts; every tx signed on an open-source ESP32 hardware wallet.",
+    "mezo_primitives_used": "MUSD minted by BorrowerOperations (settles in the borrowable MUSD); MEZO precompile staking; own Chainlink-style IndexOracle; Mezo DEX listing",
+    "deployment": "Mezo testnet, 8 contracts claimed verified",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/La7Zl0O4aIvRgwdV/products/VwpAO1DM2HQOQl9oZ; team 0xoucan; 107KB source, 147KB tests incl. invariants; own audit H-1 (vault owes more on a rally) fired twice live; existing ETHGlobal-finalist hardware wallet",
+    "threat_level": "medium"
+  },
+  {
+    "name": "PayLink (raherizo)",
+    "url": "https://mezo.paylink-mg.pages.dev/mezo/",
+    "track": "not stated (T2)",
+    "summary": "Dollar invoices shared as links/QR (WhatsApp, print) paid in MUSD by permit to an immutable contract; shows the smallest Mezo loan that covers an invoice; Madagascar focus; EN/FR/Malagasy.",
+    "mezo_primitives_used": "MUSD EIP-2612 permit; reads BorrowerOperations, PriceFeed, TroveManager",
+    "deployment": "Mezo testnet contract 0x448eCce9711860502806A3d5B021a4f9Ba715082 (12KB code, 1 tx)",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/3dJ9qxgpgipJnNpP/products/Mz9la64BOUvBxKMmz; repo nambininasafidison/paylink; extends existing PayLink v2; 9 e2e fork tests; no video link found",
+    "threat_level": "low"
+  },
+  {
+    "name": "Remitsheet for Mezo",
+    "url": "https://aratass.github.io/remitsheet-mezo/",
+    "track": "T2",
+    "summary": "Pay a whole spreadsheet of payees in MUSD, MEZO or BTC with one permit signature and one transaction; shows trove LTV impact; receipts and USD/EUR export.",
+    "mezo_primitives_used": "MUSD and MEZO-precompile permit; reads TroveManager/PriceFeed/BorrowerOperations; payment request links",
+    "deployment": "Mezo testnet 0xfB87f0a4df8Fa0FBBe505BF4Af27aEEebEafA570 (3.2KB). Not on mainnet despite the CREATE2 claim (cast code = 0)",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/ENkEE894XtLR7jra/products/rgmK1kjVkt7kjz0NV; team zemis; repo aratass/remitsheet-mezo; Playwright tests; video + deck",
+    "threat_level": "low"
+  },
+  {
+    "name": "Wasit",
+    "url": "https://wasit.app",
+    "track": "not stated",
+    "summary": "Trade-finance escrow: MUSD balance released only after named inspector and carrier sign (EIP-712); supplier's advance secured by a BTC bond priced by Mezo's oracle and convertible to MUSD via Mezo Router.",
+    "mezo_primitives_used": "MUSD escrow with permit; BTC precompile bond; Skip BTC/USD oracle (Pyth adapter); Mezo Router conversion",
+    "deployment": "Mezo testnet WasitEscrow 0x9d7573dd4A929311DDFC130ED085127517A9fC85 (21 txs), AdvanceBond 0x195474AF5d673e1597Eb31E978a57F81892f5Ad0",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/A8Na2eMg0HZxKmzd/products/63N96KMxMhLr1ZxNl; team swaat; no public GitHub repo linked or found (hard-requirement risk); claims unit/fuzz/invariant/fork tests",
+    "threat_level": "low"
+  },
+  {
+    "name": "MUSD Yield Vault",
+    "url": "(no live URL in text)",
+    "track": "T1 (not stated)",
+    "summary": "ERC-4626 yvMUSD vault allocating MUSD to a Stability Pool strategy, with harvest/compound and pause; Savings Vault and LP+gauge strategies promised for Wave 2.",
+    "mezo_primitives_used": "Stability Pool provideToSP/withdrawFromSP; ERC-4626",
+    "deployment": "Mezo testnet MUSDVault 0xDbe56d95ecCAc811d0B85C84D15137696bBB2F40 (totalAssets 500 MUSD), StabilityPoolStrategy 0xAd4F…96Ae, plus a MockYieldStrategy",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/BeNoK1DMpFDP1aXL/products/kzq7Wo6OecwV83ow; team anpratama; repo created and last pushed within 2 minutes on Oct 17 (single upload); 23KB source + fork test",
+    "threat_level": "low"
+  },
+  {
+    "name": "Morbit",
+    "url": "https://morbit-mezo.vercel.app/",
+    "track": "not stated (T1)",
+    "summary": "Simple BTC money app: open/adjust/close MUSD troves with hints, and a Simple Earn vault (mvMUSD) depositing into the Stability Pool.",
+    "mezo_primitives_used": "BorrowerOperations (open/adjust/closeTrove with SortedTroves hints); Stability Pool",
+    "deployment": "Mezo testnet MorbitEarnVault 0x8D6444887c22Eb1A32De4299E507C62EbAb4004A (0 recorded txs)",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/Vwp11kkDLcG9j97g/products/La7ME0ozJIkrDv1Or; team bruh_codes; no Solidity tests in repo; video",
+    "threat_level": "low"
+  },
+  {
+    "name": "Coil (0xprabal)",
+    "url": "https://github.com/PrabalParihar/coil",
+    "track": "not stated (T1)",
+    "summary": "Per-user EIP-1167 clone acts as borrower and loops BTC→MUSD→BTC via Mezo Pools in one tx; a keeper can only call deleverTo.",
+    "mezo_primitives_used": "BorrowerOperations; Mezo Pools swapExactTokensForTokens (MUSD/BTC)",
+    "deployment": "Mezo testnet factory 0xE29fAf17ed44B43c94D2Ff0e43E289aE49D98a3e",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/83NK18DAdizl8N3x/products/La7Da3JDdFx4xQ7Z; team 0xprabal; 46KB source, single test file; video",
+    "threat_level": "low"
+  },
+  {
+    "name": "MezoGig",
+    "url": "https://mak777uh.github.io/mezogig/",
+    "track": "T2",
+    "summary": "Milestone escrow for freelance work in MUSD (permit funding, auto-claim, refunds, arbiter splits), plus agent console, MCP server and Lean 4 invariant proofs.",
+    "mezo_primitives_used": "Plain MUSD transfers + EIP-2612 permit only",
+    "deployment": "Mezo testnet 0x247b313d0eD3C532B16c7E5f9eA760272361600F (Sourcify); team's own check reports gigCount 0 (never used)",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/q3qDrX9DOT0rkm3W/products/X4wmkRgXack2VjNR; team dsh_agent; 90 tests, Lean proofs, CI; video",
+    "threat_level": "low"
+  },
+  {
+    "name": "Liqvera",
+    "url": "https://liqvera.site",
+    "track": "not stated",
+    "summary": "Sells verifiable BTC order-book execution reports (from Hyperliquid data) for 0.01 MUSD per request via x402, with evidence ZIP and SHA-256 receipt.",
+    "mezo_primitives_used": "Plain MUSD payments via x402/Permit2 only",
+    "deployment": "Mezo testnet; payment tx 0x53808fff… status 1 to the x402 proxy 0x402085c2…0001",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/GLX6zWqv4hW7EP41/products/Drk1AoWNguaZnWMB; team dimkox (Getzilla); repo Dimkox/liqvera created 2026-09-24 (pre-dates Wave 1); deck; data not Mezo-specific",
+    "threat_level": "low"
+  },
+  {
+    "name": "TrustieWork",
+    "url": "https://trustiework.vercel.app/",
+    "track": "not stated",
+    "summary": "Freelance marketplace: jobs funded in MUSD or by locking BTC (contract opens a trove and mints MUSD); Gemini AI checks GitHub deliverables; disputes go to an AI arbiter then a human.",
+    "mezo_primitives_used": "MUSD escrow; BorrowerOperations (fund-by-trove)",
+    "deployment": "Mezo testnet SatLockEscrow 0x50FD11C3387ceFF1c3b71221bE39FB3D04C2fD6f (30 txs)",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/1PWEpLJgJSpdn3E7/products/eaq397x2BF80lW0P6; team renegade; repo SKAHLO1/dezor-card created May 2026 (reused); admin-final disputes",
+    "threat_level": "low"
+  },
+  {
+    "name": "Kudi",
+    "url": "https://trykudi.vercel.app",
+    "track": "not stated (T2)",
+    "summary": "Nigerian-focused front door to Mezo borrowing: guided first loan, Safe/Warning/Danger bar, naira values, English/Pidgin, swap and send, installable PWA.",
+    "mezo_primitives_used": "BorrowerOperations via UI; swaps; Mezo Passport (UniSat); no own contracts",
+    "deployment": "Mezo testnet front-end",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/JBRLwjXBvT4l4m1g/products/83NnvOGa8TlAWR3GZ; team Tebas; repo Yungtimmy/kudi; strong regional narrative",
+    "threat_level": "low"
+  },
+  {
+    "name": "MUSD Books",
+    "url": "https://neimasilk.github.io/musd-books/",
+    "track": "not stated",
+    "summary": "Verifiable MUSD account statements reconciled from Transfer logs, invoice-referenced MUSD payments (MusdPay), and an on-chain statement hash registry.",
+    "mezo_primitives_used": "MUSD Transfer logs + permit; demo trove open/withdraw/repay; labels core contracts",
+    "deployment": "Mezo testnet StatementRegistry 0x431785e21f9224c53aa37108d14cfa865279d23c, MusdPay 0x5fa72a18…",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/eamQa93eps8JNX3n8/products/wKmLKL9g0Id8NrWW; team neimasilk; 13 Foundry tests; extends ArcBooks; states 'Written by Claude'; video",
+    "threat_level": "low"
+  },
+  {
+    "name": "MUSD Pocket",
+    "url": "https://cyptoboy777.github.io/musd-pocket/",
+    "track": "T2",
+    "summary": "Time-locked MUSD savings goals (2% early-exit fee), shared goals and memo payments.",
+    "mezo_primitives_used": "Plain MUSD",
+    "deployment": "Mezo testnet 0x2d5f1275ac326aE0253aAf1cF7b633f7Fec2A1C8 (14 txs; early-withdraw tx 0xfd5179bb… status 1)",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/7mNwdW6lMHBpD8vA/products/lrkJw68jAfL634ne; team Cryptoboy_777; 24 tests + Slither; video + deck",
+    "threat_level": "low"
+  },
+  {
+    "name": "MUSD Subs",
+    "url": "https://ifeohsun.github.io/mezo-musd-subs/",
+    "track": "T1 (claimed)",
+    "summary": "Recurring MUSD subscriptions with up to 10 basis-point payee splits and permissionless charge().",
+    "mezo_primitives_used": "Plain MUSD transferFrom",
+    "deployment": "Mezo testnet 0x52ACb316F4D66B871654745bCc048fEFeA6eaa6c",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/Pv70qxDWRS8mZdAm/products/rgm1vwLkMUDmZ9ao; team sornsyun; 7 tests; video",
+    "threat_level": "low"
+  },
+  {
+    "name": "MUSD Pay Links",
+    "url": "https://musd-pay-links.lipmichal.workers.dev",
+    "track": "T2",
+    "summary": "EIP-681 MUSD payment links/QR with a strict payer guard (token, recipient, amount) and a receipt verifier.",
+    "mezo_primitives_used": "Plain MUSD transfer (no contracts)",
+    "deployment": "Cloudflare Worker; reads testnet and mainnet MUSD",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/RDgkLQzMni6M9mm98/products/Pv1lNjOBGIjwEZZj; team theluckystrike; 197 tests; deck + video",
+    "threat_level": "low"
+  },
+  {
+    "name": "PayLink — Digital Products",
+    "url": "https://paylink-omega-three.vercel.app/",
+    "track": "T2",
+    "summary": "Sell digital files for MUSD via x402 checkout links/buy buttons; private downloads and wallet-based purchase recovery.",
+    "mezo_primitives_used": "Plain MUSD via x402",
+    "deployment": "Mezo testnet + Vercel/Supabase",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/4eN1gp6GBT2keJ8ol/products/OVdoVwqKKuP4OK4l; team Fouad (GitHub Fuuaad05)",
+    "threat_level": "low"
+  },
+  {
+    "name": "SettleTag",
+    "url": "https://settletag.vercel.app/",
+    "track": "not stated",
+    "summary": "One-time MUSD invoices with direct merchant settlement and on-chain receipt events.",
+    "mezo_primitives_used": "Plain MUSD approve/transfer",
+    "deployment": "Mezo testnet",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/wKm7EmEewS9RQ1gO/products/4eNPVVA9wh2O8P0no; team magnum (0xNexuz); video + deck",
+    "threat_level": "low"
+  },
+  {
+    "name": "Runway",
+    "url": "https://mezo-runway-testnet.vercel.app",
+    "track": "not stated",
+    "summary": "Fund vesting contractor payment schedules in MUSD, track invoices, plan treasury runway; Gemini docs assistant.",
+    "mezo_primitives_used": "Plain MUSD schedules; reads existing Mezo loan",
+    "deployment": "Mezo testnet",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/rgWPRNdQ9TRZzjB1/products/7mNo9o7NwC2W8BqX; team supun_theekshana; repo SupunThk/runway exists but is not linked",
+    "threat_level": "low"
+  },
+  {
+    "name": "Pocket (Greyw0rks)",
+    "url": "(none in text)",
+    "track": "not stated (T2)",
+    "summary": "Social login (Privy) MUSD payments by username/link/QR, Savings Vault deposit, borrow/repay, with a reconciliation backend.",
+    "mezo_primitives_used": "MUSD transfers; Savings Vault; borrow/repay via UI",
+    "deployment": "Claims production deployment; no URL or repo in submission (greyw0rks/musd-pocket exists)",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/d87nqA9A4CJK1ZeL8/products/4eNnZ0KW7t0Q69VW; team Greyw0rks",
+    "threat_level": "low"
+  },
+  {
+    "name": "Mezo TradeOS",
+    "url": "https://mezo-tradeos.vercel.app",
+    "track": "not stated",
+    "summary": "Milestone MUSD escrow with IPFS evidence commitments.",
+    "mezo_primitives_used": "Plain MUSD",
+    "deployment": "Mezo testnet",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/GLzl1BZGpsp8wkmO/products/0nNR7QN1Dt4qKrON; team zyd; small repo (141KB); video",
+    "threat_level": "low"
+  },
+  {
+    "name": "Trove Guardian",
+    "url": "https://trove-guardian.onrender.com",
+    "track": "not stated (T2)",
+    "summary": "Telegram bot + dashboard warning MUSD borrowers before liquidation; /simulate and /fix.",
+    "mezo_primitives_used": "Reads trove + PriceFeed (no contracts)",
+    "deployment": "Off-chain bot reading testnet",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/K8zw01186c7M9BX0/products/JBapxvzA3fVnKpQo; team Aman; 25KB JS repo; video",
+    "threat_level": "low"
+  },
+  {
+    "name": "MUSD Pulse",
+    "url": "https://lisaaai200.github.io/musd-pulse/",
+    "track": "T2",
+    "summary": "Read-only MUSD dashboard and borrow-safety calculator; built and operated by an AI agent.",
+    "mezo_primitives_used": "Reads PriceFeed and MUSD supply",
+    "deployment": "Static GitHub Pages",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/1PojdM1e2TqJ9xMk/products/q3qvva3gkhL7WXPD; team Genie; 8KB repo; video",
+    "threat_level": "low"
+  },
+  {
+    "name": "Mezo Flow",
+    "url": "https://github.com/GauravKarakoti/Mezo-Flow",
+    "track": "not stated (T1)",
+    "summary": "Pitches a cross-chain MUSD/MEZO yield aggregator via NTT; Wave 1 delivers only an auto-compounding vault into the MUSD Savings Vault on testnet.",
+    "mezo_primitives_used": "MUSD Savings Vault (claimed); NTT only in roadmap",
+    "deployment": "Testnet claimed; no addresses given",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/nPEDwjEKzuQ43za0/products/jamAJzV3eslr1oNkn; team GauravKarakoti; 138KB TS repo; claims exceed implementation",
+    "threat_level": "low"
+  },
+  {
+    "name": "MezoLens (moduudefii)",
+    "url": "https://github.com/moduu6667/mezolens",
+    "track": "not stated",
+    "summary": "Concept-stage Bitcoin DeFi explorer; features explicitly planned, not built.",
+    "mezo_primitives_used": "None",
+    "deployment": "None",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/NmRP1rZDxTr6vlWk/products/lrkGn0QNwS2OLBXK; 16KB HTML repo",
+    "threat_level": "low"
+  },
+  {
+    "name": "kept",
+    "url": "",
+    "track": "",
+    "summary": "Empty placeholder (comment 'loading...').",
+    "mezo_primitives_used": "None",
+    "deployment": "None",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/RDdLz6VAjSPxZWWM/products/rgm17ZpaNfj1Vo8B; team devmo",
+    "threat_level": "low"
+  },
+  {
+    "name": "TAWFIK AAHMED ABDO MUSAED QERAN (x3)",
+    "url": "https://github.com/ta77130",
+    "track": "",
+    "summary": "Three spam/placeholder entries with no product.",
+    "mezo_primitives_used": "None",
+    "deployment": "None",
+    "quality_signals": "products 93kLWeoVlc8Zje2Z, rgM0NoXx9UJl84dN, 83No6MOwjC8ONdWE; team TAWFIKQERAN",
+    "threat_level": "low"
+  },
+  {
+    "name": "Origame",
+    "url": "",
+    "track": "",
+    "summary": "Empty placeholder.",
+    "mezo_primitives_used": "None",
+    "deployment": "None",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/4e9BMWpMoHkjL2oo/products/3dJE3v1KdfK3N0VVe; team DiablooDEVs",
+    "threat_level": "low"
+  },
+  {
+    "name": "MEZO-LOCK",
+    "url": "",
+    "track": "",
+    "summary": "Empty placeholder ('In Progress').",
+    "mezo_primitives_used": "None",
+    "deployment": "None",
+    "quality_signals": "AKINDO https://app.akindo.io/communities/aAN9REA8GuLzpplq/products/Mz9lmZKdATv326Rwj; team NeoCrafts",
+    "threat_level": "low"
+  },
+  {
+    "name": "[NOT YET SUBMITTED] Keel (Oladayo-Ahmod)",
+    "url": "https://keel-two-roan.vercel.app",
+    "track": "likely T1",
+    "summary": "Tradable, transferable MUSD positions: each trove is opened by a clone vault owned by an ERC-721; transferring the NFT moves collateral, debt and locked rate; Lens shows rate spread and redemption buffer.",
+    "mezo_primitives_used": "BorrowerOperations (vault as borrower, refinance only to a lower rate, permit repay/close); TroveManager getEntireDebtAndColl; SortedTroves walk",
+    "deployment": "Mezo testnet PositionFactory 0xCDf7E1a6Be19EcE762477Cf89c786B9216307405 (Sourcify exact match), NFT, Vault impl, Lens",
+    "quality_signals": "Private AKINDO product lrk4eNpjMU03JK8gO (community 'Free D'); tests use real MUSD contracts pinned at a commit; invariant state machine, fuzz, hostile-holder reentrancy tests; threat model; CI",
+    "threat_level": "high"
+  },
+  {
+    "name": "[NOT YET SUBMITTED] Assumable (user 'Annie')",
+    "url": "(none found)",
+    "track": "T1?",
+    "summary": "Assumable mortgages for Bitcoin loans: troves opened through an NFT-owned account contract so the whole loan (BTC, debt, locked rate) can be sold in one transaction.",
+    "mezo_primitives_used": "Troves via account contract (announced)",
+    "deployment": "Unknown",
+    "quality_signals": "Announced in AKINDO comments 2026-10-13; same mechanism as Keel; identity link to Keel unverified",
+    "threat_level": "unknown"
+  },
+  {
+    "name": "[NOT YET SUBMITTED] Payung (PugarHuda)",
+    "url": "https://payung-ecru.vercel.app",
+    "track": "T1",
+    "summary": "Liquidation cover: borrowers pay MUSD premiums for 1–4 week cover that pays out if Mezo's BTC price touches their strike before the Thursday epoch boundary; underwriters earn premiums in an ERC-4626 pyMUSD vault.",
+    "mezo_primitives_used": "MUSD; Mezo PriceFeed; trove context; relayer for BTC wallets",
+    "deployment": "Mezo testnet vault v2 0x706B5E6F3760eb0c5fe4c726784FbFB269Ac4150 (Sourcify)",
+    "quality_signals": "Repo PugarHuda/payung created 2026-10-20; README says 'Built for the Mezo Buildathon, Track 1'; team previously entered Mezo Hackathon 2 (nih)",
+    "threat_level": "medium"
+  },
+  {
+    "name": "[NOT YET SUBMITTED] Mezo Auth Dev (rohithr8484)",
+    "url": "(none found)",
+    "track": "T2?",
+    "summary": "Announced 'AWS for Web3' marketplace for oracles/AI services paid in MEZO/MUSD via x402.",
+    "mezo_primitives_used": "x402 (announced)",
+    "deployment": "Unknown",
+    "quality_signals": "Announced in AKINDO comments 2026-10-18; no GitHub found",
+    "threat_level": "low"
+  },
+  {
+    "name": "[NOT YET SUBMITTED] Tripwire / Keel-Telegram (Im-2) / Mezora / livastic lenses",
+    "url": "github.com/jj199-lab/tripwire; github.com/Im-2/keel; mezora.vercel.app; livastic-vm*.github.io",
+    "track": "T2 mostly",
+    "summary": "Read-only Telegram loan monitor + API; Telegram BTC-backed dollar account with guardian; business MUSD bills/cash flow; AI-agent-farm read-only mainnet MUSD dashboards.",
+    "mezo_primitives_used": "Mostly reads and plain MUSD",
+    "deployment": "Testnet/mainnet read-only",
+    "quality_signals": "All created Oct 20–23 and labelled for the Mezo Buildathon",
+    "threat_level": "low"
+  }
+]

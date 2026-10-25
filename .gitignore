@@ -1,0 +1,21 @@
+# dependencies and builds
+node_modules/
+dist/
+coverage/
+lcov.info
+contracts/out/
+contracts/cache/
+contracts/broadcast/*/31337/
+contracts/broadcast/**/dry-run/
+
+# secrets and local env
+.env
+.env.*
+!.env.example
+*.pw
+*.key
+
+# tooling
+.playwright-mcp/
+.DS_Store
+.vercel

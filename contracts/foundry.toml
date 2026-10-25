@@ -1,0 +1,48 @@
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+libs = ["lib"]
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 10_000
+via_ir = false
+bytecode_hash = "ipfs"
+cbor_metadata = true
+fs_permissions = [
+  { access = "read-write", path = "./deployments" },
+  { access = "read", path = "./test/fork" },
+]
+
+[profile.default.fuzz]
+runs = 512
+
+[profile.default.invariant]
+runs = 128
+depth = 64
+fail_on_revert = false
+
+# CI: heavier fuzzing; fork suites run in their own job
+[profile.ci.fuzz]
+runs = 2048
+
+[profile.ci.invariant]
+runs = 256
+depth = 100
+
+[fmt]
+line_length = 120
+tab_width = 4
+bracket_spacing = false
+int_types = "long"
+quote_style = "double"
+number_underscore = "thousands"
+
+[rpc_endpoints]
+mezo_mainnet = "https://mezo-mainnet.boar.network"
+mezo_testnet = "https://rpc.test.mezo.org"
+
+[etherscan]
+mezo_testnet = { key = "blockscout", url = "https://api.explorer.test.mezo.org/api", chain = 31611 }
+mezo_mainnet = { key = "blockscout", url = "https://api.explorer.mezo.org/api", chain = 31612 }
