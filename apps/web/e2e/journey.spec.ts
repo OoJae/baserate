@@ -68,6 +68,11 @@ const START_CHAIN = Number(process.env.E2E_START_CHAIN ?? 1)
 const SKIP_CLAIM = process.env.E2E_SKIP_CLAIM === '1'
 const OUTPUT_DIR = join(here, '.output')
 const VIEWPORT = { width: 1440, height: 900 }
+/**
+ * Zoom of recorded sessions. Playwright records at CSS-pixel size whatever the device pixel ratio, so 1.5 renders
+ * the same 1440×900 layout into a 2160×1350 viewport with CSS zoom: sharp enough to punch in on a panel.
+ */
+const ZOOM = Number(process.env.E2E_ZOOM ?? 1)
 
 const BTC_IN = 900_000_000_000_000n // 0.0009 BTC
 const BTC_IN_TEXT = '0.0009'
@@ -741,6 +746,7 @@ test.describe('judge journey on Mezo testnet', () => {
         timeout: 60_000,
       })
     await pause(page, 1_500)
+    await showcase(page, page.getByRole('region', { name: 'Keeper' }), 3_000)
     await smoothScroll(page)
     await finishStage()
     await photograph(browser, 'evidence', '/evidence', async (page) => {
@@ -1020,6 +1026,8 @@ test.describe('judge journey on Mezo testnet', () => {
       )
     }
     await pause(page, 1_500)
+    await showcase(page, positions, 2_500)
+    await showcase(page, page.getByRole('region', { name: 'Liquidation preview' }), 3_000)
     await finishStage()
     await photograph(browser, 'liquidate', '/liquidate', async (p) => {
       await expect(p.getByRole('region', { name: 'Liquidation preview' })).toBeVisible({
@@ -1141,6 +1149,8 @@ test.describe('judge journey on Mezo testnet', () => {
       await expect(page.getByText(/^Nothing to distribute: the router holds 0 MUSD/)).toBeVisible()
     }
     await pause(page, 1_500)
+    await showcase(page, page.getByRole('region', { name: 'Next distribution' }), 2_500)
+    await showcase(page, history, 3_000)
     await finishStage()
     await photograph(browser, 'fees', '/fees', async (p) => {
       await expect(p.getByRole('region', { name: 'Distributions' })).toContainText('MUSD split', {
@@ -1178,13 +1188,27 @@ class Session {
     name: string,
     storageState?: Awaited<ReturnType<BrowserContext['storageState']>>,
   ): Promise<Session> {
+    const size = { width: VIEWPORT.width * ZOOM, height: VIEWPORT.height * ZOOM }
     const context = await browser.newContext({
-      viewport: VIEWPORT,
+      viewport: size,
       deviceScaleFactor: 1,
       colorScheme: 'light',
       storageState,
-      recordVideo: MEDIA_DIR ? { dir: join(OUTPUT_DIR, 'video'), size: VIEWPORT } : undefined,
+      recordVideo: MEDIA_DIR ? { dir: join(OUTPUT_DIR, 'video'), size } : undefined,
     })
+    if (ZOOM !== 1)
+      await context.addInitScript((zoom) => {
+        // Init scripts can run before <html> exists: zoom it as soon as it does.
+        const apply = () => {
+          if (!document.documentElement) return false
+          document.documentElement.style.zoom = String(zoom)
+          return true
+        }
+        if (!apply())
+          new MutationObserver((_, observer) => {
+            if (apply()) observer.disconnect()
+          }).observe(document, { childList: true })
+      }, ZOOM)
     await wallet.install(context)
     const page = await context.newPage()
     page.on('pageerror', (e) => journey.pageErrors.push(`[${name}] ${e.message}`))
@@ -1249,6 +1273,13 @@ function decode(abi: Abi, tx: SentTx) {
 
 async function pause(page: Page, ms: number) {
   if (MEDIA_DIR) await page.waitForTimeout(ms)
+}
+
+/** When recording, scrolls a panel smoothly to the middle of the viewport and holds on it. */
+async function showcase(page: Page, panel: Locator, ms: number) {
+  if (!MEDIA_DIR) return
+  await panel.evaluate((el) => el.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+  await page.waitForTimeout(ms)
 }
 
 async function smoothScroll(page: Page) {

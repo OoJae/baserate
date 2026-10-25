@@ -26,3 +26,9 @@ contracts/deployments/*.dryrun.json
 
 # Playwright e2e output (journey logs, traces, raw videos)
 apps/web/e2e/.output/
+
+# Demo film: footage, renders and caches stay local
+video/*/assets/footage/
+video/*/renders/
+video/*/.hyperframes/
+video/*/snapshots/

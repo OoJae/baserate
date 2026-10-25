@@ -10,6 +10,7 @@ import { defineConfig } from '@playwright/test'
  *   E2E_MEDIA_DIR        when set, record one video per journey stage plus full-page screenshots there
  *   E2E_PHOTO_DIR        full-page screenshots only (no video), e.g. docs/media
  *   E2E_SLOWMO           ms between browser actions (default 150 when recording, else 0)
+ *   E2E_ZOOM             zoom of the videos (default 1; 1.5 records the same layout at 2160×1350 for the demo film)
  *   E2E_START_CHAIN      chain the wallet starts on (default 1, so the add-network flow runs)
  *   E2E_SKIP_CLAIM=1     skip the once-a-day dispenser claim (debugging runs)
  *   E2E_HEADED=1         show the browser

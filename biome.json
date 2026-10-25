@@ -11,6 +11,7 @@
       "**",
       "!contracts",
       "!docs",
+      "!video",
       "!**/dist",
       "!**/node_modules",
       "!**/coverage",
