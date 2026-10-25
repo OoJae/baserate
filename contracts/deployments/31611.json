@@ -1,0 +1,16 @@
+{
+  "borrowAccountImpl": "0xEF8D999248Dfa1aEDBd9B38b633D565f5751b292",
+  "chainId": 31611,
+  "collateral": "0xd53B0Bf00d8e1b7F06E85cD6f11921fda9Bc27d1",
+  "deployBlock": 16364327,
+  "deployer": "0x787b4E3AaD7DA9217Ca222E4C6112B2ebC0da330",
+  "dispenser": "0x92F13D33aF38BbAc45a7E880826a787d895654c8",
+  "factory": "0xa3a03CD439B4cCB7292Ef21a23bb6BB36a4b86fE",
+  "governanceNote": "Testnet: the deployer EOA holds governor and sentinel roles.",
+  "irm": "0x0c97Fe017628636649ff374aD499529F91167441",
+  "lltv": 770000000000000000,
+  "marketId": "0xadd5f62435744e4fe91c94212024eba66fe93af38824bf264dee64258aebb13b",
+  "morpho": "0xCe1da828cA15cb1FDAfa84C366A53C8106655a73",
+  "oracle": "0x99F948b6955Ac7b579b2d8847178911645Ffe77F",
+  "wsMusd": "0x92aa0306c3af1e02D776EA05857653A3839DeBEB"
+}

@@ -1,4 +1,53 @@
 {
   "$schema": "./evidence.schema.json",
-  "entries": []
+  "entries": [
+    {
+      "chainId": 31611,
+      "kind": "deploy",
+      "tx": "0xea4778fcafea34da033cd061501f2e2df28c1197fc1d65933dff91171b3b24f4",
+      "block": 16364338,
+      "summary": "BorrowAccountFactory deployed; its constructor deploys the bcBTC receipt and the BorrowAccount implementation.",
+      "proves": "The account factory, gated collateral receipt and clone implementation fit in one transaction under Mezo's 10M block gas limit."
+    },
+    {
+      "chainId": 31611,
+      "kind": "create-market",
+      "tx": "0x4810d36183cda01097e07258b1b692477ae07ff1449a7abdac134fab03172da5",
+      "block": 16364340,
+      "summary": "M1 created on Mezo's official testnet Morpho Blue: MUSD loan, bcBTC collateral, BtcMusdOracle, AdaptiveCurveIrm, LLTV 0.77.",
+      "proves": "A redemption-free BTC→MUSD market now exists on Mezo's own Morpho deployment, created permissionlessly."
+    },
+    {
+      "chainId": 31611,
+      "kind": "supply",
+      "tx": "0x29d883635a6e485f9ea5c358c1c6142dfab07607e57bf6ca2f9f03bf4d815fae",
+      "block": 16364342,
+      "summary": "Team supplied 3,000 MUSD of liquidity to M1.",
+      "proves": "Judges can borrow immediately; in Wave 2 this liquidity moves into the vMUSD lending vault."
+    },
+    {
+      "chainId": 31611,
+      "kind": "borrow",
+      "tx": "0x4b25c6e57ebec23866fdba5f020bd2d1cb40a745f2c07cb83892ccbafaefa5f6",
+      "block": 16364355,
+      "summary": "openAndBorrow: 0.001 BTC sent as msg.value, 30 MUSD borrowed in one transaction (0.1% origination fee).",
+      "proves": "One-transaction BTC→MUSD credit priced by the live Skip precompile, with no 2,000-MUSD minimum and no redemption queue."
+    },
+    {
+      "chainId": 31611,
+      "kind": "repay-exit",
+      "tx": "0x98996d663b29140990502713f1bfb582ae3ceac7fe444dfa0d5ea458ec5adae1",
+      "block": 16364364,
+      "summary": "repayAndWithdraw: debt repaid exactly by shares, collateral withdrawn and unwrapped to native BTC in one transaction.",
+      "proves": "The oracle-free exit path works on-chain; debt and collateral are both zero afterwards."
+    },
+    {
+      "chainId": 31611,
+      "kind": "wsmusd-deposit",
+      "tx": "0x947d865b889a996660a6f5f552de38dc8e061093d9b230ef05f0d0d05e730be4",
+      "block": 16364336,
+      "summary": "wsMUSD seeded with 1 MUSD of dead shares, deposited into the real sMUSD.",
+      "proves": "The ERC-4626 wrapper composes with Mezo's live claim-based sMUSD and is protected against first-depositor inflation."
+    }
+  ]
 }

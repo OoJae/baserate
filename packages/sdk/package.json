@@ -18,7 +18,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "gen:abis": "node scripts/gen-abis.mjs",
+    "check:abis": "tsx scripts/check-abis.mjs ../src/abis.ts"
   },
   "peerDependencies": {
     "viem": "2.57.11"

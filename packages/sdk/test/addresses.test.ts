@@ -60,8 +60,17 @@ describe('registry', () => {
     }
   })
 
-  it('keeps Baserate contracts as explicit zero-address placeholders until deployment', () => {
+  it('has the Wave 1 testnet deployment wired in', () => {
     const r = getRegistry(MEZO_TESTNET_ID)
+    expect(isDeployed(r.contracts.factory.address)).toBe(true)
+    expect(isMarketKnown(r.markets.M1.id)).toBe(true)
+    expect(r.markets.M1.params.collateralToken).toBe(r.contracts.collateral.address)
+    expect(r.markets.M1.params.oracle).toBe(r.contracts.oracle.address)
+    expect(computeMarketId(r.markets.M1.params)).toBe(r.markets.M1.id)
+  })
+
+  it('keeps mainnet Baserate contracts as explicit zero-address placeholders until deployment', () => {
+    const r = getRegistry(MEZO_MAINNET_ID)
     expect(isDeployed(r.contracts.factory.address)).toBe(false)
     expect(isMarketKnown(r.markets.M1.id)).toBe(false)
     expect(isDeployed(r.external.musd)).toBe(true)
