@@ -20,7 +20,8 @@ import {
   wsMusdAbi,
 } from '@baserate/sdk'
 import { useState } from 'react'
-import { useConfig, usePublicClient, useReadContracts } from 'wagmi'
+import { isAddressEqual, parseEventLogs, type TransactionReceipt } from 'viem'
+import { useConfig, usePublicClient, useReadContract, useReadContracts } from 'wagmi'
 import { signTypedData } from 'wagmi/actions'
 import { GetTestFunds } from '../components/GetTestFunds'
 import { IconSave } from '../components/icons'
@@ -45,6 +46,16 @@ import { appChain, deployed, registry } from '../wagmi'
 
 const WS = registry.contracts.wsMusd.address
 const ONE_DAY = 86_400
+
+/**
+ * "Max" fills the input rounded down to `dp` decimals; while the input still shows exactly that, act on the full
+ * amount so Max leaves no dust (e.g. 1e-9 wsMUSD once yield makes share balances non-round).
+ */
+function exactMax(input: string, max: bigint | undefined, dp: number): bigint | undefined {
+  return max !== undefined && max > 0n && input !== '' && input === toInputString(max, 18, dp)
+    ? max
+    : undefined
+}
 
 function sharePrice4(p: bigint | undefined) {
   return p !== undefined ? toFixedDecimal(p, 18, 6) : undefined
@@ -226,6 +237,15 @@ function SyncButton() {
 }
 
 function YourSavings({ ws, wallet }: { ws: WsMusdView; wallet: ReturnType<typeof useWallet> }) {
+  // Redeem-in-kind pays out sMUSD, so show it here rather than letting it vanish from view.
+  const smusd = useReadContract({
+    address: registry.external.smusd,
+    abi: smusdAbi,
+    functionName: 'balanceOf',
+    args: wallet.address ? [wallet.address] : undefined,
+    chainId: appChain.id,
+    query: { enabled: !!wallet.address, refetchInterval: 15_000 },
+  })
   if (!wallet.isConnected) return null
   return (
     <Card aria-labelledby="mine-title">
@@ -240,6 +260,13 @@ function YourSavings({ ws, wallet }: { ws: WsMusdView; wallet: ReturnType<typeof
           label="Wallet MUSD"
           value={wallet.musdBalance !== undefined ? formatMusd(wallet.musdBalance) : '—'}
         />
+        {smusd.data !== undefined && smusd.data > 0n ? (
+          <Stat
+            label="Wallet sMUSD"
+            value={formatMusd(smusd.data, { dp: 4 })}
+            sub="From redeeming in kind"
+          />
+        ) : null}
       </div>
     </Card>
   )
@@ -325,13 +352,13 @@ function Deposit({ ws, wallet }: { ws: WsMusdView; wallet: ReturnType<typeof use
   const config = useConfig()
   const client = usePublicClient({ chainId: appChain.id })
   const [input, setInput] = useState('')
-  const amount = parseAmount(input) ?? 0n
   const owner = wallet.address
   const balance = wallet.musdBalance
   const musd = registry.external.musd
   const capRoom = ws.maxDeposit
   const max =
     balance !== undefined ? (capRoom !== undefined ? minBig(balance, capRoom) : balance) : undefined
+  const amount = exactMax(input, max, 6) ?? parseAmount(input) ?? 0n
   const shares =
     ws.totalAssets !== undefined && ws.totalSupply !== undefined
       ? erc4626ToShares(amount, ws.totalAssets, ws.totalSupply)
@@ -433,9 +460,9 @@ function Deposit({ ws, wallet }: { ws: WsMusdView; wallet: ReturnType<typeof use
 function Redeem({ ws, wallet }: { ws: WsMusdView; wallet: ReturnType<typeof useWallet> }) {
   const [input, setInput] = useState('')
   const [inKind, setInKind] = useState(false)
-  const shares = parseAmount(input) ?? 0n
   const owner = wallet.address
   const max = ws.maxRedeem ?? ws.shares
+  const shares = exactMax(input, max, 8) ?? parseAmount(input) ?? 0n
   const assets =
     ws.totalAssets !== undefined && ws.totalSupply !== undefined
       ? erc4626ToAssets(shares, ws.totalAssets, ws.totalSupply)
@@ -504,8 +531,25 @@ function Redeem({ ws, wallet }: { ws: WsMusdView; wallet: ReturnType<typeof useW
         }
         pendingTitle={inKind ? 'Redeeming in kind' : 'Redeeming wsMUSD'}
         successTitle="Redeemed"
+        successMessage={(receipt) => redeemedMessage(receipt, inKind)}
         onConfirmed={() => setInput('')}
       />
     </div>
   )
+}
+
+/** What the redemption paid out, read from wsMUSD's own event in the receipt. */
+function redeemedMessage(receipt: TransactionReceipt, inKind: boolean): string {
+  const logs = receipt.logs.filter((l) => isAddressEqual(l.address, WS))
+  if (inKind) {
+    const [e] = parseEventLogs({ abi: wsMusdAbi, logs, eventName: 'RedeemedInKind' })
+    if (e) {
+      const musd = e.args.musdOut > 0n ? ` and ${formatMusd(e.args.musdOut, { dp: 4 })} MUSD` : ''
+      return `${formatMusd(e.args.smusdOut, { dp: 4 })} sMUSD${musd} sent to your wallet.`
+    }
+  } else {
+    const [e] = parseEventLogs({ abi: wsMusdAbi, logs, eventName: 'Withdraw' })
+    if (e) return `${formatMusd(e.args.assets)} MUSD sent to your wallet.`
+  }
+  return `Included in block ${receipt.blockNumber}.`
 }

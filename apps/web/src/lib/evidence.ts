@@ -1,4 +1,13 @@
-import { blockscoutApi } from '@baserate/sdk'
+import {
+  blockscoutApi,
+  borrowAccountAbi,
+  borrowAccountFactoryAbi,
+  btcMusdOracleAbi,
+  morphoAbi,
+  musdDispenserAbi,
+  wsMusdAbi,
+} from '@baserate/sdk'
+import { type AbiFunction, toFunctionSelector } from 'viem'
 import raw from '../evidence.json'
 
 /** One curated piece of on-chain evidence (schema: src/evidence.schema.json). */
@@ -63,6 +72,57 @@ interface BlockscoutTx {
   from?: { hash?: string }
   to?: { hash?: string } | null
   decoded_input?: { method_call?: string } | null
+  raw_input?: string | null
+}
+
+/** Explorer calls give up after this long, so a hung API ends in a retry or a clear badge, never a forever-skeleton. */
+const EXPLORER_TIMEOUT_MS = 12_000
+
+/** A signal that aborts after `ms` (as a TimeoutError) or when `outer` aborts (with its reason). */
+function timeoutSignal(ms: number, outer?: AbortSignal): AbortSignal {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(new DOMException('Timed out', 'TimeoutError')), ms)
+  ctrl.signal.addEventListener('abort', () => clearTimeout(timer), { once: true })
+  if (outer?.aborted) ctrl.abort(outer.reason)
+  else outer?.addEventListener('abort', () => ctrl.abort(outer.reason), { once: true })
+  return ctrl.signal
+}
+
+let knownSelectors: Map<string, string> | undefined
+
+/** 4-byte selector → function name for every Baserate contract and the Morpho calls we make. */
+function selectorNames(): Map<string, string> {
+  if (knownSelectors) return knownSelectors
+  knownSelectors = new Map()
+  const abis = [
+    borrowAccountFactoryAbi,
+    borrowAccountAbi,
+    wsMusdAbi,
+    musdDispenserAbi,
+    btcMusdOracleAbi,
+    morphoAbi,
+  ]
+  for (const abi of abis)
+    for (const item of abi)
+      if (item.type === 'function')
+        knownSelectors.set(toFunctionSelector(item as AbiFunction), item.name)
+  return knownSelectors
+}
+
+/**
+ * The called method's name. Blockscout only decodes calls to contracts it holds source for, so for Baserate
+ * contracts (verified on Sourcify) and their clones it returns a bare selector or nothing; resolve those from our
+ * own ABIs instead of showing `0xad3bf5ff`.
+ */
+export function methodName(tx: {
+  method?: string | null
+  decoded_input?: { method_call?: string } | null
+  raw_input?: string | null
+}): string | null {
+  const named = tx.decoded_input?.method_call?.split('(')[0] || tx.method || null
+  if (named && !/^0x[0-9a-fA-F]{8}$/.test(named)) return named
+  const selector = (named ?? tx.raw_input?.slice(0, 10) ?? '').toLowerCase()
+  return selectorNames().get(selector) ?? named
 }
 
 interface BlockscoutLogs {
@@ -79,7 +139,9 @@ export async function verifyTx(
 ): Promise<TxVerification> {
   const base = blockscoutApi(entry.chainId)
   try {
-    const res = await fetch(`${base}/transactions/${entry.tx}`, { signal })
+    const res = await fetch(`${base}/transactions/${entry.tx}`, {
+      signal: timeoutSignal(EXPLORER_TIMEOUT_MS, signal),
+    })
     if (res.status === 404)
       return { state: 'not-found', events: [], detail: 'Blockscout has no such transaction.' }
     if (!res.ok) return { state: 'error', events: [], detail: `Blockscout answered ${res.status}.` }
@@ -87,7 +149,9 @@ export async function verifyTx(
 
     let events: string[] = []
     try {
-      const logsRes = await fetch(`${base}/transactions/${entry.tx}/logs`, { signal })
+      const logsRes = await fetch(`${base}/transactions/${entry.tx}/logs`, {
+        signal: timeoutSignal(EXPLORER_TIMEOUT_MS, signal),
+      })
       if (logsRes.ok) {
         const logs = (await logsRes.json()) as BlockscoutLogs
         events = (logs.items ?? [])
@@ -101,7 +165,7 @@ export async function verifyTx(
     const base_ = {
       status: tx.result ?? tx.status ?? undefined,
       block: tx.block_number ?? undefined,
-      method: tx.method ?? tx.decoded_input?.method_call?.split('(')[0] ?? null,
+      method: methodName(tx),
       from: tx.from?.hash,
       to: tx.to?.hash ?? null,
       value: tx.value,
@@ -137,25 +201,31 @@ export interface AddressInfo {
   name?: string | null
 }
 
+/**
+ * Whether Sourcify holds a (partial or exact) match. Only a 404 means "not verified"; rate limits, 5xx and network
+ * failures throw, so a transient Sourcify hiccup is retried and never shown as a false "Unverified".
+ */
 async function sourcifyMatch(chainId: number, address: string): Promise<boolean> {
-  try {
-    const res = await fetch(`https://sourcify.dev/server/v2/contract/${chainId}/${address}`)
-    if (!res.ok) return false
-    const s = (await res.json()) as { match?: string | null }
-    return s.match === 'exact_match' || s.match === 'match'
-  } catch {
-    return false
-  }
+  const res = await fetch(`https://sourcify.dev/server/v2/contract/${chainId}/${address}`, {
+    signal: timeoutSignal(EXPLORER_TIMEOUT_MS),
+  })
+  if (res.status === 404) return false
+  if (!res.ok) throw new Error(`Sourcify ${res.status}`)
+  const s = (await res.json()) as { match?: string | null }
+  return s.match === 'exact_match' || s.match === 'match'
 }
 
 export async function fetchAddressInfo(chainId: number, address: string): Promise<AddressInfo> {
-  const res = await fetch(`${blockscoutApi(chainId)}/addresses/${address}`)
+  const res = await fetch(`${blockscoutApi(chainId)}/addresses/${address}`, {
+    signal: timeoutSignal(EXPLORER_TIMEOUT_MS),
+  })
   // Blockscout returns 404 for contracts it has not indexed yet (e.g. ones created inside another constructor).
   if (!res.ok && res.status !== 404) throw new Error(`Blockscout ${res.status}`)
   const a = res.ok
     ? ((await res.json()) as { is_contract?: boolean; is_verified?: boolean; name?: string | null })
     : {}
-  if (a.is_verified) return { isContract: true, isVerified: true, verifiedBy: 'blockscout', name: a.name }
+  if (a.is_verified)
+    return { isContract: true, isVerified: true, verifiedBy: 'blockscout', name: a.name }
   const onSourcify = await sourcifyMatch(chainId, address)
   return {
     isContract: !!a.is_contract || onSourcify,

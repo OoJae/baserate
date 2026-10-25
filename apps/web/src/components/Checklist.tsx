@@ -1,15 +1,52 @@
+import { maxBig, wsMusdAbi } from '@baserate/sdk'
+import { useQuery } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
+import type { Address } from 'viem'
+import { usePublicClient } from 'wagmi'
 import { usePosition } from '../hooks/usePosition'
 import { useWallet } from '../hooks/useWallet'
 import { useWsMusd } from '../hooks/useWsMusd'
+import { appChain, deployed, registry } from '../wagmi'
 import { IconCheck } from './icons'
 import { Card, CardHeader, cx } from './ui'
+
+/** Mezo RPCs serve eth_getLogs over at most 10,000 blocks (about ten hours of testnet blocks). */
+const LOG_WINDOW = 9_999n
+
+/**
+ * Whether `owner` deposited into wsMUSD within the last log window. Lets the walkthrough keep "Save" ticked after
+ * the judge redeems everything (deposit → redeem is the guided flow), without an indexer.
+ */
+function useRecentWsDeposit(owner: Address | undefined, enabled: boolean) {
+  const client = usePublicClient({ chainId: appChain.id })
+  return useQuery({
+    queryKey: ['baserate-recent-ws-deposit', appChain.id, owner],
+    enabled: enabled && !!owner && !!client && deployed.wsMusd,
+    staleTime: 60_000,
+    retry: 1,
+    queryFn: async () => {
+      if (!client || !owner) return false
+      const head = await client.getBlockNumber()
+      const logs = await client.getContractEvents({
+        address: registry.contracts.wsMusd.address,
+        abi: wsMusdAbi,
+        eventName: 'Deposit',
+        args: { owner },
+        fromBlock: maxBig(head - LOG_WINDOW, BigInt(registry.contracts.wsMusd.block)),
+        toBlock: head,
+      })
+      return logs.length > 0
+    },
+  })
+}
 
 /** The judge walkthrough, derived purely from on-chain state. */
 export function Checklist() {
   const wallet = useWallet()
   const position = usePosition(wallet.address)
   const ws = useWsMusd(wallet.address)
+  const holdsWs = (ws.shares ?? 0n) > 0n
+  const recentDeposit = useRecentWsDeposit(wallet.address, ws.shares === 0n)
   if (!wallet.isConnected) return null
 
   const steps: { label: string; done: boolean; detail: ReactNode }[] = [
@@ -23,7 +60,11 @@ export function Checklist() {
       done: position.debt > 0n || (position.accountDeployed && !position.hasPosition),
       detail: 'One transaction, BTC as value',
     },
-    { label: 'Save in wsMUSD', done: (ws.shares ?? 0n) > 0n, detail: 'Deposit with a permit' },
+    {
+      label: 'Save in wsMUSD',
+      done: holdsWs || recentDeposit.data === true,
+      detail: 'Deposit with a permit',
+    },
     {
       label: 'Repay & withdraw',
       done: position.accountDeployed && !position.hasPosition,

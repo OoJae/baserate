@@ -212,7 +212,8 @@ function VerifiedBadge({ row }: { row: ContractRow }) {
     queryFn: () => fetchAddressInfo(appChain.id, row.address),
     enabled: deployedHere && !row.precompile,
     staleTime: 10 * 60_000,
-    retry: 1,
+    // Blockscout and Sourcify both rate-limit bursts (this table fires one lookup per row); back off and retry.
+    retry: 3,
   })
   if (!deployedHere) return <Badge>Not deployed yet</Badge>
   if (row.precompile) return <Badge tone="brand">Precompile</Badge>

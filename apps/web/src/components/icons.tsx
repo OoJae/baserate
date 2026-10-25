@@ -77,11 +77,12 @@ export const IconBorrow = (p: IconProps) => (
     <path d="M17 8l3 3-3 3" />
   </Svg>
 )
+/** A piggy bank: a padlock here would read as "locked", the same glyph as the next-release items. */
 export const IconSave = (p: IconProps) => (
   <Svg {...p}>
-    <path d="M5 9h14v10a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z" />
-    <path d="M8 9V7a4 4 0 0 1 8 0v2" />
-    <path d="M12 13v3" />
+    <path d="M19 11.5c0-3.6-3.4-6.5-7.5-6.5S4 7.9 4 11.5c0 2 1 3.7 2.6 4.9V19h2.6v-1.4c.7.2 1.5.3 2.3.3s1.6-.1 2.3-.3V19h2.6v-2.6c.9-.7 1.6-1.5 2-2.4H20v-3h-1.2" />
+    <path d="M9.5 8.5h4" />
+    <path d="M15.5 10.5v.01" />
   </Svg>
 )
 export const IconEvidence = (p: IconProps) => (

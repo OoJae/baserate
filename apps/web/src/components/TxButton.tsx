@@ -157,6 +157,8 @@ export function TxButton({
         hash,
         chainId: appChain.id,
         timeout: 180_000,
+        // Mezo makes a block every ~4s; viem's default 4s poll could hold the spinner up to two blocks late.
+        pollingInterval: 1_000,
       })
       if (receipt.status === 'success') {
         toast.update(hash, {

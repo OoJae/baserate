@@ -229,7 +229,7 @@ export function BorrowForm({
               }
             />
           </dl>
-          {quote && deployed.factory ? (
+          {quote && quote.musdOut > 0n && deployed.factory ? (
             <p className="mt-2 text-xs text-muted">
               Reverts instead of borrowing if the price moves enough to push LTV past{' '}
               {formatBps(quote.maxLtvBps, 1)} before it lands.
