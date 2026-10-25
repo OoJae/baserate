@@ -116,3 +116,32 @@ export const IconLock = (p: IconProps) => (
     <path d="M8 10V7a4 4 0 0 1 8 0v3" />
   </Svg>
 )
+/** Stacked coins: MUSD lent out through the vault. */
+export const IconLend = (p: IconProps) => (
+  <Svg {...p}>
+    <ellipse cx="12" cy="6.5" rx="7" ry="2.5" />
+    <path d="M5 6.5v5c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-5" />
+    <path d="M5 11.5v5c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-5" />
+  </Svg>
+)
+/** A lightning bolt: zero-capital, one-transaction liquidations. */
+export const IconLiquidate = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M13 3L5 13.5h6L10 21l8-10.5h-6z" />
+  </Svg>
+)
+/** A gauge: risk dashboard. */
+export const IconRisk = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 16a8 8 0 1 1 16 0" />
+    <path d="M12 16l4-5" />
+    <path d="M4 20h16" />
+  </Svg>
+)
+/** One flow splitting three ways: the fee router. */
+export const IconFees = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 12h7" />
+    <path d="M10 12c3 0 4-6 8-6h3M10 12h11M10 12c3 0 4 6 8 6h3" />
+  </Svg>
+)

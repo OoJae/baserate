@@ -1,8 +1,12 @@
 /** Features of the next release. Shown as a clearly labelled roadmap, never as working screens. */
 export const NEXT_RELEASE: { label: string; blurb: string }[] = [
-  { label: 'Lend', blurb: 'vMUSD vault: idle MUSD earns sMUSD until borrowers need it' },
-  { label: 'Liquidate', blurb: 'Zero-capital FlashLiquidator and live canary positions' },
   { label: 'Credit lines', blurb: 'Capped, revocable MUSD credit for apps and agents' },
   { label: 'Come back', blurb: 'Reclaim surplus BTC from redeemed troves into a position' },
-  { label: 'RiskLens', blurb: 'Liquidation depth, caps and oracle health in one view' },
+]
+
+/** Planned infrastructure without a page of its own (listed on Evidence → Built vs planned). */
+export const PLANNED_INFRA: { label: string; blurb: string }[] = [
+  { label: 'Keeper service', blurb: 'Automated rebalances, liquidations and fee distributions' },
+  { label: 'Subgraph', blurb: 'Indexed history instead of reading logs in the browser' },
+  { label: 'Mainnet proof mode', blurb: 'The same contracts on Mezo mainnet, caps ≤ 2,000 MUSD' },
 ]

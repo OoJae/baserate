@@ -3,18 +3,38 @@ import { Link, Outlet, useRouterState } from '@tanstack/react-router'
 import { type ComponentType, type SVGProps, useEffect, useState } from 'react'
 import { NEXT_RELEASE } from '../lib/roadmap'
 import { appChain, deployed } from '../wagmi'
-import { IconBorrow, IconEvidence, IconLock, IconMore, IconSave, IconX } from './icons'
+import {
+  IconBorrow,
+  IconEvidence,
+  IconFees,
+  IconLend,
+  IconLiquidate,
+  IconLock,
+  IconMore,
+  IconRisk,
+  IconSave,
+  IconX,
+} from './icons'
 import { Wordmark } from './Logo'
 import { NetworkGuard, useChainHead } from './NetworkGuard'
 import { cx, Dot } from './ui'
 
 type Icon = ComponentType<SVGProps<SVGSVGElement>>
 
-const NAV: { to: '/borrow' | '/save' | '/evidence'; label: string; icon: Icon; blurb: string }[] = [
+type NavPath = '/borrow' | '/save' | '/lend' | '/liquidate' | '/risk' | '/fees' | '/evidence'
+
+const NAV: { to: NavPath; label: string; icon: Icon; blurb: string }[] = [
   { to: '/borrow', label: 'Borrow', icon: IconBorrow, blurb: 'MUSD against BTC' },
   { to: '/save', label: 'Save', icon: IconSave, blurb: 'wsMUSD savings' },
+  { to: '/lend', label: 'Lend', icon: IconLend, blurb: 'vMUSD lending vault' },
+  { to: '/liquidate', label: 'Liquidate', icon: IconLiquidate, blurb: 'Zero-capital liquidations' },
+  { to: '/risk', label: 'Risk', icon: IconRisk, blurb: 'RiskLens dashboard' },
+  { to: '/fees', label: 'Fees', icon: IconFees, blurb: 'Fee router and bribes' },
   { to: '/evidence', label: 'Evidence', icon: IconEvidence, blurb: 'Verify it on-chain' },
 ]
+
+/** The bottom tab bar holds three pages plus More; the rest live in the More sheet. */
+const MOBILE_TABS: NavPath[] = ['/borrow', '/save', '/lend']
 
 function NextReleaseList({ compact }: { compact?: boolean }) {
   return (
@@ -63,19 +83,19 @@ function ChainStatus() {
 
 function Sidebar() {
   return (
-    <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-line bg-surface lg:flex">
-      <div className="px-5 pt-5 pb-6">
+    <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col overflow-y-auto border-r border-line bg-surface lg:flex">
+      <div className="px-5 pt-5 pb-5">
         <Link to="/borrow" aria-label="Baserate home">
           <Wordmark />
         </Link>
       </div>
       <nav aria-label="Main" className="px-3">
-        <ul className="space-y-1">
+        <ul className="space-y-0.5">
           {NAV.map((item) => (
             <li key={item.to}>
               <Link
                 to={item.to}
-                className="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted transition-colors hover:bg-raised hover:text-ink"
+                className="group flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-raised hover:text-ink"
                 activeProps={{ className: 'bg-brand-soft !text-brand', 'aria-current': 'page' }}
               >
                 <item.icon className="size-5 shrink-0" />
@@ -90,7 +110,7 @@ function Sidebar() {
           ))}
         </ul>
       </nav>
-      <div className="mt-6 border-t border-line px-0 pt-5">
+      <div className="mt-4 border-t border-line px-0 pt-4">
         <NextReleaseList />
       </div>
       <div className="mt-auto space-y-2 border-t border-line px-5 py-4">
@@ -102,13 +122,16 @@ function Sidebar() {
 }
 
 function MobileTabs({ onMore }: { onMore: () => void }) {
+  const pathname = useRouterState({ select: (st) => st.location.pathname })
+  // The More tab reads as current while one of its pages is open.
+  const inMore = NAV.some((n) => !MOBILE_TABS.includes(n.to) && pathname.startsWith(n.to))
   return (
     <nav
       aria-label="Main"
       className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
     >
       <ul className="mx-auto grid max-w-lg grid-cols-4">
-        {NAV.map((item) => (
+        {NAV.filter((item) => MOBILE_TABS.includes(item.to)).map((item) => (
           <li key={item.to}>
             <Link
               to={item.to}
@@ -124,7 +147,11 @@ function MobileTabs({ onMore }: { onMore: () => void }) {
           <button
             type="button"
             onClick={onMore}
-            className="flex h-16 w-full flex-col items-center justify-center gap-1 text-[11px] font-medium text-muted"
+            aria-haspopup="dialog"
+            className={cx(
+              'flex h-16 w-full flex-col items-center justify-center gap-1 text-[11px] font-medium',
+              inMore ? 'text-brand' : 'text-muted',
+            )}
           >
             <IconMore className="size-5" />
             More
@@ -163,7 +190,28 @@ function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
             <IconX className="size-5" />
           </button>
         </div>
-        <div className="-mx-3">
+        <nav aria-label="More pages" className="-mx-1 mb-4">
+          <ul className="grid grid-cols-2 gap-1">
+            {NAV.filter((item) => !MOBILE_TABS.includes(item.to)).map((item) => (
+              <li key={item.to}>
+                <Link
+                  to={item.to}
+                  className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted hover:bg-raised hover:text-ink"
+                  activeProps={{ className: 'bg-brand-soft !text-brand', 'aria-current': 'page' }}
+                >
+                  <item.icon className="size-5 shrink-0" />
+                  <span className="min-w-0">
+                    {item.label}
+                    <span className="block truncate text-xs font-normal text-faint">
+                      {item.blurb}
+                    </span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <div className="-mx-3 border-t border-line pt-4">
           <NextReleaseList compact />
         </div>
         <p className="mt-4 text-xs text-faint">Built on Mezo · testnet funds only</p>

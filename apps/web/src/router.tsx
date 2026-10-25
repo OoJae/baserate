@@ -2,6 +2,10 @@ import { createRootRoute, createRoute, createRouter, Link, redirect } from '@tan
 import { AppShell } from './components/AppShell'
 import { BorrowPage } from './pages/BorrowPage'
 import { EvidencePage } from './pages/EvidencePage'
+import { FeesPage } from './pages/FeesPage'
+import { LendPage } from './pages/LendPage'
+import { LiquidatePage } from './pages/LiquidatePage'
+import { RiskPage } from './pages/RiskPage'
 import { SavePage } from './pages/SavePage'
 
 function NotFound() {
@@ -38,13 +42,46 @@ const saveRoute = createRoute({
   component: SavePage,
 })
 
+const lendRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/lend',
+  component: LendPage,
+})
+
+const liquidateRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/liquidate',
+  component: LiquidatePage,
+})
+
+const riskRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/risk',
+  component: RiskPage,
+})
+
+const feesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/fees',
+  component: FeesPage,
+})
+
 const evidenceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/evidence',
   component: EvidencePage,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, borrowRoute, saveRoute, evidenceRoute])
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  borrowRoute,
+  saveRoute,
+  lendRoute,
+  liquidateRoute,
+  riskRoute,
+  feesRoute,
+  evidenceRoute,
+])
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent', scrollRestoration: true })
 

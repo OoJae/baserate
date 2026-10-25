@@ -16,6 +16,7 @@ import {
   walletConnectWallet,
 } from '@rainbow-me/rainbowkit/wallets'
 import { QueryClient } from '@tanstack/react-query'
+import { createPublicClient } from 'viem'
 import { createConfig } from 'wagmi'
 import { hashFn } from 'wagmi/query'
 import { env } from './env'
@@ -33,6 +34,14 @@ export const deployed = {
   wsMusd: isDeployed(registry.contracts.wsMusd.address),
   dispenser: isDeployed(registry.contracts.dispenser.address),
   market: isMarketKnown(registry.markets.M1.id),
+  backstop: isDeployed(registry.contracts.backstop.address),
+  flashLiquidator: isDeployed(registry.contracts.flashLiquidator.address),
+  feeRouter: isDeployed(registry.contracts.feeRouter.address),
+  riskLens: isDeployed(registry.contracts.riskLens.address),
+  vault:
+    isDeployed(registry.contracts.vMusd.address) &&
+    isDeployed(registry.contracts.allocator.address) &&
+    isDeployed(registry.contracts.wsMusdAdapter.address),
 } as const
 
 const appInfo = {
@@ -66,6 +75,18 @@ export const wagmiConfig = createConfig({
   },
   multiInjectedProviderDiscovery: true,
   ssr: false,
+})
+
+/**
+ * A public client with no multicall batching, for calls that spend Skip precompile reads (RiskLens.snapshot,
+ * FlashLiquidator previews). Mezo allows 20 precompile calls per eth_call, so these must never be aggregated with
+ * other reads into one Multicall3 call the way wagmi batches `useReadContract`. JSON-RPC batching (several eth_calls
+ * in one HTTP request) is fine: the limit is per call.
+ */
+export const directClient = createPublicClient({
+  chain: appChain,
+  transport: transportFor(appChain),
+  batch: { multicall: false },
 })
 
 export const queryClient = new QueryClient({

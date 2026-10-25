@@ -544,3 +544,135 @@ export function Segmented<T extends string>({
     </div>
   )
 }
+
+// -------------------------------------------------------------------------------------------------
+// Shared data pieces (Wave 2 pages)
+// -------------------------------------------------------------------------------------------------
+
+/** A short address linking to the explorer, with an optional label before it. */
+export function AddressLink({
+  href,
+  address,
+  label,
+  chars = 4,
+}: {
+  href: string
+  address: string
+  label?: ReactNode
+  chars?: number
+}) {
+  return (
+    <ExternalLink href={href}>
+      {label ? <span>{label}</span> : null}
+      <span className="num font-mono text-xs">
+        {address.length > 2 + chars * 2
+          ? `${address.slice(0, 2 + chars)}…${address.slice(-chars)}`
+          : address}
+      </span>
+    </ExternalLink>
+  )
+}
+
+const segmentBg: Record<Tone, string> = {
+  neutral: 'bg-line-strong',
+  brand: 'bg-brand',
+  good: 'bg-good',
+  warn: 'bg-warn',
+  bad: 'bg-bad',
+  btc: 'bg-btc',
+}
+
+export interface Segment {
+  key: string
+  label: ReactNode
+  /** Share of the bar; any unit, normalised against the sum. */
+  value: bigint
+  tone: Tone
+  /** Lighter shade of the tone, to tell two related segments apart (e.g. lent vs parked MUSD). */
+  soft?: boolean
+  /** Text shown in the legend next to the label, e.g. "1,234.56 MUSD". */
+  detail?: ReactNode
+}
+
+/** A stacked horizontal bar with a legend (vault split, fee split). */
+export function SplitBar({ segments, label }: { segments: Segment[]; label: string }) {
+  const total = segments.reduce((a, s) => a + (s.value > 0n ? s.value : 0n), 0n)
+  const pct = (v: bigint) => (total > 0n && v > 0n ? Number((v * 10_000n) / total) / 100 : 0)
+  return (
+    <div>
+      <div
+        role="img"
+        aria-label={`${label}: ${segments.map((s) => `${typeof s.label === 'string' ? s.label : s.key} ${pct(s.value).toFixed(1)}%`).join(', ')}`}
+        className="flex h-3 w-full overflow-hidden rounded-full bg-raised"
+      >
+        {segments.map((s) =>
+          pct(s.value) > 0 ? (
+            <span
+              key={s.key}
+              className={cx(
+                'h-full first:rounded-l-full last:rounded-r-full',
+                segmentBg[s.tone],
+                s.soft && 'opacity-45',
+              )}
+              style={{ width: `${pct(s.value)}%`, minWidth: '3px' }}
+            />
+          ) : null,
+        )}
+      </div>
+      <ul className="mt-3 grid gap-x-4 gap-y-1.5 sm:grid-cols-2">
+        {segments.map((s) => (
+          <li key={s.key} className="flex items-baseline justify-between gap-2 text-sm">
+            <span className="flex min-w-0 items-center gap-2 text-muted">
+              <span
+                aria-hidden
+                className={cx('inline-block size-2.5 shrink-0 rounded-sm', segmentBg[s.tone])}
+              />
+              <span className="truncate">{s.label}</span>
+            </span>
+            <span className="num shrink-0 text-right text-ink">
+              {s.detail}
+              <span className="ml-1.5 text-xs text-muted">{pct(s.value).toFixed(1)}%</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/** RPC read failed: say so plainly, keep whatever is on screen, offer a retry. */
+export function ReadError({
+  what,
+  onRetry,
+  className,
+}: {
+  what: string
+  onRetry?: () => void
+  className?: string
+}) {
+  return (
+    <Notice
+      tone="warn"
+      className={className}
+      title={`Could not read ${what} from Mezo testnet`}
+      action={
+        onRetry ? (
+          <Button variant="secondary" size="sm" onClick={onRetry}>
+            Try again
+          </Button>
+        ) : undefined
+      }
+    >
+      The public testnet RPC did not answer. Values refresh automatically when it recovers.
+    </Notice>
+  )
+}
+
+/** Small uppercase section label inside a card. */
+export function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+      {children}
+    </h3>
+  )
+}

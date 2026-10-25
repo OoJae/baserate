@@ -13,6 +13,7 @@ import {
   shortAddress,
   utilization,
 } from '@baserate/sdk'
+import { Link } from '@tanstack/react-router'
 import type { MarketView } from '../../hooks/useMarket'
 import { appChain, registry } from '../../wagmi'
 import { Badge, Card, CardHeader, ExternalLink, Row, Value } from '../ui'
@@ -48,7 +49,7 @@ export function MarketCard({ market }: { market: MarketView }) {
         />
         <Row
           label="Available liquidity"
-          tip="Wave 1 liquidity is supplied by the Baserate team with Morpho.supply. The vMUSD lending vault opens it to everyone in the next release."
+          tip="M1 liquidity comes from the team’s direct supply and the vMUSD lending vault, whose allocator keeps at least 2,000 MUSD (or 15% of supply) free for borrowers."
           value={
             <Value loading={loading && !!market.id}>
               {s ? `${formatMusd(availableLiquidity(s))} MUSD` : null}
@@ -84,7 +85,11 @@ export function MarketCard({ market }: { market: MarketView }) {
         />
       </dl>
       <p className="mt-3 text-xs text-muted">
-        Liquidity supplied by the Baserate team (vMUSD in the next release). Morpho{' '}
+        Liquidity from the team and the{' '}
+        <Link to="/lend" className="font-medium text-brand hover:underline">
+          vMUSD vault
+        </Link>
+        . Morpho{' '}
         <ExternalLink href={explorerAddressUrl(appChain.id, registry.external.morpho)}>
           {shortAddress(registry.external.morpho)}
         </ExternalLink>
