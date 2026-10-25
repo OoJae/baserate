@@ -1,0 +1,7 @@
+# graph codegen / graph build output
+generated/
+build/
+# matchstick: compiled tests and its cached version tag
+tests/.bin/
+tests/.latest.json
+.latest.json

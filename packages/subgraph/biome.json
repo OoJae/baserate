@@ -1,0 +1,22 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.6.2/schema.json",
+  "root": false,
+  "extends": "//",
+  "overrides": [
+    {
+      "includes": ["src/**/*.ts", "tests/**/*.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noDoubleEquals": "off",
+            "noShadowRestrictedNames": "off"
+          },
+          "style": {
+            "useImportType": "off",
+            "useTemplate": "off"
+          }
+        }
+      }
+    }
+  ]
+}

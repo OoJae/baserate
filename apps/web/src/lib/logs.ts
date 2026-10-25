@@ -12,7 +12,8 @@ export const LOG_RANGE = 9_999n
 
 /**
  * `getContractEvents` over any block range, in ≤10,000-block windows read three at a time, oldest first.
- * Baserate contracts are young, so this is a handful of requests; an indexer replaces it in a later release.
+ * With a subgraph configured (lib/subgraph.ts) history hooks only use this for the blocks it has not indexed yet,
+ * or for everything when it is unavailable.
  */
 export async function getEventsChunked<
   const abi extends Abi,

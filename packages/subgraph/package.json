@@ -1,0 +1,22 @@
+{
+  "name": "@baserate/subgraph",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Baserate subgraph (The Graph / Goldsky) for Mezo testnet: accounts, M1 positions and liquidations, vault flows and share prices, allocator moves, backstop exits and fee distributions.",
+  "license": "GPL-2.0-or-later",
+  "type": "module",
+  "scripts": {
+    "abis": "node scripts/extract-abis.mjs",
+    "check-config": "node scripts/check-config.mjs",
+    "codegen": "graph codegen",
+    "build": "node scripts/check-config.mjs && graph codegen && graph build",
+    "test:unit": "graph codegen && graph test -v 0.6.0",
+    "deploy:goldsky": "goldsky subgraph deploy baserate-mezo-testnet/$npm_package_version --path ."
+  },
+  "devDependencies": {
+    "@graphprotocol/graph-cli": "0.98.1",
+    "@graphprotocol/graph-ts": "0.38.2",
+    "assemblyscript": "0.19.23",
+    "matchstick-as": "0.6.0"
+  }
+}

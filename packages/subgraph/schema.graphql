@@ -1,0 +1,620 @@
+# Baserate on Mezo testnet.
+#
+# Amounts are raw on-chain integers: MUSD, bcBTC and vault shares in 18-decimal wei; rates, APYs and share prices in
+# WAD (1e18 = 1). Event entities are immutable and keyed by transaction hash + log index; aggregates (Protocol,
+# Account, Market, Vault, ...) are mutable. Every event entity carries blockNumber, timestamp, transactionHash and
+# logIndex; sort history by `timestamp` (or `blockNumber`).
+
+enum Profile {
+  STANDARD
+  CANARY
+}
+
+"Where FlashLiquidator (or a backstop keeper sale) sold BTC."
+enum Venue {
+  BACKSTOP
+  CL200
+  VAMM
+}
+
+"BaserateAllocator.Action, in contract order (actionId 0..3)."
+enum AllocatorAction {
+  NONE
+  BUFFER_TOP_UP
+  TO_MARKET
+  TO_LIQUIDITY
+}
+
+enum RedirectReason {
+  GAUGE_DEAD
+  VOTER_UNREADABLE
+  NOTIFY_FAILED
+}
+
+enum VaultKind {
+  "Baserate wsMUSD (ERC-4626 over sMUSD)."
+  WSMUSD
+  "vMUSD, the Morpho Vault V2 driven by BaserateAllocator."
+  VMUSD
+  "bMUSD, the liquidation backstop."
+  BACKSTOP
+}
+
+enum VaultFlowKind {
+  DEPOSIT
+  WITHDRAW
+  "wsMUSD redeemInKind (sMUSD + MUSD out)."
+  REDEEM_IN_KIND
+}
+
+"What produced a share-price observation."
+enum SharePriceSource {
+  "assets / shares of a deposit or withdrawal (exact up to share rounding)."
+  FLOW
+  "wsMUSD Synced: stored assets / supply right after a sync."
+  SYNC
+  "vMUSD AccrueInterest: new total assets / supply."
+  VAULT_ACCRUAL
+  "Backstop Checkpoint: book / supply."
+  BACKSTOP_CHECKPOINT
+  "BaserateAllocator CheckpointRecorded: wsMUSD convertToAssets(1e18)."
+  ALLOCATOR_CHECKPOINT
+}
+
+enum AccountActionKind {
+  OPENED
+  BORROWED
+  REPAID
+  EXITED
+  COLLATERAL_ADDED
+  COLLATERAL_WITHDRAWN
+  COME_BACK
+}
+
+enum MarketEventKind {
+  SUPPLY
+  WITHDRAW
+  BORROW
+  REPAY
+  SUPPLY_COLLATERAL
+  WITHDRAW_COLLATERAL
+  LIQUIDATE
+}
+
+enum AllocationKind {
+  ALLOCATE
+  DEALLOCATE
+  FORCE_DEALLOCATE
+}
+
+enum AdapterKind {
+  "WsMusdLiquidityAdapter (vMUSD's liquidity adapter)."
+  WSMUSD_LIQUIDITY
+  "MorphoMarketV1AdapterV2 for M1."
+  M1_MARKET
+  OTHER
+}
+
+enum AllocatorFlowKind {
+  IDLE_ALLOCATED
+  MARKET_LIQUIDITY_PULLED
+}
+
+enum BackstopTradeKind {
+  "FlashLiquidator sold seized BTC to the backstop (CollateralBought)."
+  BUY
+  "Dutch-auction fill (AuctionTaken)."
+  AUCTION
+  "Bounded keeper sale on Tigris (InventorySold)."
+  KEEPER_SALE
+}
+
+enum TimelockStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+}
+
+enum GovernanceEventKind {
+  TIMELOCK_SUBMITTED
+  TIMELOCK_REVOKED
+  TIMELOCK_ACCEPTED
+  GLOBAL_BORROW_CAP_SET
+  LIMITS_SET
+  FEE_RECIPIENT_SET
+  MODULE_APPROVAL_SET
+  PAUSED_SET
+  CANARY_OPERATOR_SET
+  SENTINEL_SET
+  GOVERNANCE_TRANSFER_STARTED
+  GOVERNANCE_TRANSFERRED
+  WSMUSD_CAP_RAISE_SUBMITTED
+  WSMUSD_CAP_RAISED
+  WSMUSD_CAP_RAISE_REVOKED
+  BACKSTOP_DEPOSITS_PAUSED_SET
+}
+
+# ---------------------------------------------------------------------------------------------------------------
+# Aggregates
+# ---------------------------------------------------------------------------------------------------------------
+
+"Protocol-wide totals and the factory's current parameters. Single entity, id `baserate`."
+type Protocol @entity(immutable: false) {
+  id: ID!
+  accountCount: Int!
+  canaryAccountCount: Int!
+  "Accounts with collateral or borrow shares in M1."
+  openPositionCount: Int!
+  "MUSD sent to borrowers (BorrowAccount Borrowed.musdOut)."
+  totalBorrowed: BigInt!
+  "Origination fees charged on borrows (BorrowAccount Borrowed.fee)."
+  totalOriginationFees: BigInt!
+  "MUSD repaid through BorrowAccounts (Repaid + Exited)."
+  totalRepaid: BigInt!
+  liquidationCount: Int!
+  totalSeizedCollateral: BigInt!
+  totalLiquidatorProfit: BigInt!
+  distributionCount: Int!
+  totalDistributed: BigInt!
+  totalToSmusd: BigInt!
+  totalToBribes: BigInt!
+  totalToTreasury: BigInt!
+  feeRecipient: Bytes
+  globalBorrowCap: BigInt
+  borrowPaused: Boolean!
+  creditPaused: Boolean!
+  governor: Bytes
+  pendingGovernor: Bytes
+  sentinel: Bytes
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
+"Factory limits per profile (LimitsSet). id: `STANDARD` or `CANARY`."
+type ProfileLimit @entity(immutable: false) {
+  id: ID!
+  profile: Profile!
+  "Maximum collateral per position (bcBTC wei)."
+  positionCap: BigInt!
+  "Maximum post-action LTV in basis points."
+  ceilingBps: Int!
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
+"A BorrowAccount clone (AccountCreated) and its M1 position, tracked from Morpho events."
+type Account @entity(immutable: false) {
+  "The BorrowAccount address (its Morpho position is held under this address)."
+  id: Bytes!
+  owner: Bytes!
+  profile: Profile!
+  canary: Boolean!
+  "bcBTC collateral in M1."
+  collateral: BigInt!
+  "M1 borrow shares (debt = shares x market totalBorrowAssets / totalBorrowShares, plus accrual since lastUpdate)."
+  borrowShares: BigInt!
+  isOpen: Boolean!
+  totalBorrowed: BigInt!
+  totalFeesPaid: BigInt!
+  totalRepaid: BigInt!
+  liquidationCount: Int!
+  createdAtBlock: BigInt!
+  createdAtTimestamp: BigInt!
+  createdTransactionHash: Bytes!
+  lastActivityTimestamp: BigInt!
+  actions: [AccountAction!]! @derivedFrom(field: "account")
+  marketEvents: [MarketEvent!]! @derivedFrom(field: "account")
+  liquidations: [Liquidation!]! @derivedFrom(field: "account")
+}
+
+"M1 on Mezo's Morpho Blue. Totals mirror Morpho's storage, updated from its events."
+type Market @entity(immutable: false) {
+  "Morpho market id."
+  id: Bytes!
+  loanToken: Bytes!
+  collateralToken: Bytes!
+  oracle: Bytes!
+  irm: Bytes!
+  lltv: BigInt!
+  totalSupplyAssets: BigInt!
+  totalSupplyShares: BigInt!
+  totalBorrowAssets: BigInt!
+  totalBorrowShares: BigInt!
+  totalCollateral: BigInt!
+  "totalBorrowAssets / totalSupplyAssets."
+  utilization: BigDecimal!
+  "Per-second borrow rate (WAD) applied by the last accrual (AccrueInterest.prevBorrowRate)."
+  borrowRate: BigInt!
+  "Timestamp of the last interest accrual."
+  lastUpdate: BigInt!
+  totalInterest: BigInt!
+  totalFeeShares: BigInt!
+  liquidationCount: Int!
+  "Most recent liquidation (joins FlashLiquidator.Liquidated to the Morpho Liquidate that precedes it in the tx)."
+  lastLiquidation: Liquidation
+  createdAtBlock: BigInt!
+  createdAtTimestamp: BigInt!
+  dailySnapshots: [MarketDailySnapshot!]! @derivedFrom(field: "market")
+}
+
+"End-of-day M1 state plus the day's volumes. Days without M1 activity have no snapshot."
+type MarketDailySnapshot @entity(immutable: false) {
+  "market id + day (big-endian int32)."
+  id: Bytes!
+  market: Market!
+  "Unix day: timestamp / 86400."
+  day: Int!
+  "Start of the day (unix seconds)."
+  timestamp: BigInt!
+  totalSupplyAssets: BigInt!
+  totalSupplyShares: BigInt!
+  totalBorrowAssets: BigInt!
+  totalBorrowShares: BigInt!
+  totalCollateral: BigInt!
+  utilization: BigDecimal!
+  borrowRate: BigInt!
+  supplied: BigInt!
+  withdrawn: BigInt!
+  borrowed: BigInt!
+  repaid: BigInt!
+  collateralSupplied: BigInt!
+  collateralWithdrawn: BigInt!
+  interest: BigInt!
+  liquidations: Int!
+  seizedCollateral: BigInt!
+  updatedAtBlock: BigInt!
+}
+
+"wsMUSD, vMUSD or the backstop (bMUSD)."
+type Vault @entity(immutable: false) {
+  "Vault address."
+  id: Bytes!
+  kind: VaultKind!
+  "Shares outstanding, from mints and burns in the vault's events."
+  totalSupply: BigInt!
+  """
+  Assets backing the shares as of the last event. vMUSD: exact (AccrueInterest + flows). Backstop: the recognised
+  book (Checkpoint + deposits). wsMUSD: stored assets after a sync, otherwise sharePrice x totalSupply.
+  """
+  totalAssets: BigInt!
+  "Assets per 1e18 shares (WAD), last observation."
+  sharePrice: BigInt!
+  depositCount: Int!
+  withdrawCount: Int!
+  totalDeposited: BigInt!
+  totalWithdrawn: BigInt!
+  "wsMUSD / backstop: gains still vesting, and when they finish."
+  unvested: BigInt
+  vestingEnd: BigInt
+  "Backstop: BTC held for sale."
+  inventory: BigInt
+  "Backstop: assets reserved for queued exits, and how many are pending."
+  reservedAssets: BigInt
+  pendingRedeemCount: Int
+  depositsPaused: Boolean
+  "vMUSD: fee shares minted by accruals."
+  performanceFeeShares: BigInt
+  managementFeeShares: BigInt
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
+  flows: [VaultFlow!]! @derivedFrom(field: "vault")
+  sharePrices: [SharePricePoint!]! @derivedFrom(field: "vault")
+}
+
+"A vault's share price, at most one point per block (the block's last observation)."
+type SharePricePoint @entity(immutable: false) {
+  "vault address + block number (big-endian int32)."
+  id: Bytes!
+  vault: Vault!
+  sharePrice: BigInt!
+  totalAssets: BigInt!
+  totalSupply: BigInt!
+  source: SharePriceSource!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+}
+
+"A backstop exit: requestRedeem, then claimRedeem after the delay."
+type RedeemRequest @entity(immutable: false) {
+  "Request id (decimal)."
+  id: ID!
+  requestId: BigInt!
+  vault: Vault!
+  owner: Bytes!
+  receiver: Bytes!
+  shares: BigInt!
+  "NAV of the shares at request; the claim pays at most this."
+  assets: BigInt!
+  claimableAt: BigInt!
+  claimed: Boolean!
+  claimedAssets: BigInt
+  claimedAtBlock: BigInt
+  claimedAtTimestamp: BigInt
+  claimTransactionHash: Bytes
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+"A factory call queued behind the 48 h timelock (Submitted), and how it ended."
+type TimelockSubmission @entity(immutable: false) {
+  id: Bytes!
+  contract: Bytes!
+  selector: Bytes!
+  "Full calldata of the queued call."
+  data: Bytes!
+  executableAt: BigInt!
+  status: TimelockStatus!
+  resolvedBy: Bytes
+  resolvedAtBlock: BigInt
+  resolvedAtTimestamp: BigInt
+  resolveTransactionHash: Bytes
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+"Internal: the pending submission for a calldata (id = keccak256(data))."
+type TimelockSlot @entity(immutable: false) {
+  id: Bytes!
+  pending: TimelockSubmission
+}
+
+# ---------------------------------------------------------------------------------------------------------------
+# Events
+# ---------------------------------------------------------------------------------------------------------------
+
+"""
+A BorrowAccount action. Fields by kind: OPENED musd, btc; BORROWED musd (to the receiver), fee, debtAfter, ltvBps;
+REPAID musd, debtAfter; EXITED musd (repaid), btc (returned), debtAfter = collateralAfter = 0; COLLATERAL_ADDED btc,
+collateralAfter; COLLATERAL_WITHDRAWN btc, recipient; COME_BACK btc (BTC claimed from the Mezo surplus pool).
+"""
+type AccountAction @entity(immutable: true) {
+  id: Bytes!
+  account: Account!
+  owner: Bytes!
+  kind: AccountActionKind!
+  musd: BigInt
+  fee: BigInt
+  btc: BigInt
+  debtAfter: BigInt
+  collateralAfter: BigInt
+  ltvBps: Int
+  recipient: Bytes
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"""
+A Morpho Blue event on M1. `assets` is MUSD (or bcBTC for *_COLLATERAL; repaid MUSD for LIQUIDATE); `shares` is
+supply or borrow shares (repaid shares for LIQUIDATE). For Baserate accounts the position after the event is
+recorded in collateralAfter / borrowSharesAfter.
+"""
+type MarketEvent @entity(immutable: true) {
+  id: Bytes!
+  market: Market!
+  kind: MarketEventKind!
+  account: Account
+  "Morpho onBehalf (the borrower for LIQUIDATE)."
+  onBehalf: Bytes!
+  caller: Bytes!
+  receiver: Bytes
+  assets: BigInt!
+  shares: BigInt
+  collateralAfter: BigInt
+  borrowSharesAfter: BigInt
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"A Morpho liquidation on M1, with FlashLiquidator's sale details when it went through FlashLiquidator."
+type Liquidation @entity(immutable: false) {
+  id: Bytes!
+  market: Market!
+  account: Account
+  borrower: Bytes!
+  "Morpho caller (FlashLiquidator for flash liquidations)."
+  caller: Bytes!
+  repaidAssets: BigInt!
+  repaidShares: BigInt!
+  seizedAssets: BigInt!
+  badDebtAssets: BigInt!
+  badDebtShares: BigInt!
+  viaFlashLiquidator: Boolean!
+  "FlashLiquidator caller, who received the profit."
+  liquidator: Bytes
+  venue: Venue
+  "MUSD the seized BTC sold for, and the liquidator's profit after repaying the debt."
+  proceeds: BigInt
+  profit: BigInt
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"An ERC-4626 deposit or withdrawal (or wsMUSD in-kind redemption)."
+type VaultFlow @entity(immutable: true) {
+  id: Bytes!
+  vault: Vault!
+  kind: VaultFlowKind!
+  "msg.sender."
+  sender: Bytes!
+  "Share owner: receives shares on DEPOSIT, has them burned on WITHDRAW / REDEEM_IN_KIND (Vault V2's onBehalf)."
+  owner: Bytes!
+  "Receives the assets on WITHDRAW / REDEEM_IN_KIND."
+  receiver: Bytes
+  "MUSD in or out (REDEEM_IN_KIND: smusdOut + musdOut)."
+  assets: BigInt!
+  shares: BigInt!
+  smusdOut: BigInt
+  musdOut: BigInt
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"wsMUSD Synced: a harvest of sMUSD yield and/or absorbed surplus."
+type WsMusdSync @entity(immutable: true) {
+  id: Bytes!
+  harvested: BigInt!
+  instant: BigInt!
+  surplus: BigInt!
+  stored: BigInt!
+  unvested: BigInt!
+  periodEnd: BigInt!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"vMUSD Allocate / Deallocate / ForceDeallocate. `change` is the adapter's signed allocation change."
+type VaultAllocation @entity(immutable: true) {
+  id: Bytes!
+  vault: Vault!
+  kind: AllocationKind!
+  sender: Bytes!
+  adapter: Bytes!
+  adapterKind: AdapterKind!
+  assets: BigInt!
+  change: BigInt
+  ids: [Bytes!]!
+  "ForceDeallocate only."
+  onBehalf: Bytes
+  penaltyAssets: BigInt
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"BaserateAllocator.Rebalanced. The app's \"Recent moves\" are the ones with action != NONE."
+type Rebalance @entity(immutable: true) {
+  id: Bytes!
+  action: AllocatorAction!
+  actionId: Int!
+  amount: BigInt!
+  m1SupplyApy: BigInt!
+  wsMusdApy: BigInt!
+  apyWindow: BigInt!
+  m1Liquidity: BigInt!
+  bufferTarget: BigInt!
+  "Transaction sender (the keeper or whoever rebalanced)."
+  from: Bytes!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"BaserateAllocator IdleAllocated / MarketLiquidityPulled."
+type AllocatorFlow @entity(immutable: true) {
+  id: Bytes!
+  kind: AllocatorFlowKind!
+  caller: Bytes
+  assets: BigInt!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"BaserateAllocator.CheckpointRecorded: a wsMUSD share-price observation (at most hourly)."
+type AllocatorCheckpoint @entity(immutable: true) {
+  id: Bytes!
+  index: BigInt!
+  observedAt: BigInt!
+  sharePrice: BigInt!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"""
+Backstop inventory activity. BUY: trader = seller (FlashLiquidator), price = oracle price; AUCTION: trader = taker,
+recipient = BTC receiver, factorWad = auction factor; KEEPER_SALE: trader = caller, venue.
+"""
+type BackstopTrade @entity(immutable: true) {
+  id: Bytes!
+  kind: BackstopTradeKind!
+  trader: Bytes!
+  recipient: Bytes
+  btcAmount: BigInt!
+  musdAmount: BigInt!
+  price: BigInt
+  factorWad: BigInt
+  venue: Venue
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"One FeeRouter.distribute() (Distributed), with the bribes posted or redirected in the same transaction."
+type Distribution @entity(immutable: true) {
+  "Transaction hash (one distribution per transaction)."
+  id: Bytes!
+  caller: Bytes!
+  epochStart: BigInt!
+  total: BigInt!
+  toSmusd: BigInt!
+  toBribes: BigInt!
+  toTreasury: BigInt!
+  retained: BigInt!
+  bribes: [Bribe!]! @derivedFrom(field: "distribution")
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"A gauge's bribe share: posted (BribePosted) or redirected to sMUSD (BribeRedirected)."
+type Bribe @entity(immutable: true) {
+  id: Bytes!
+  distribution: Distribution!
+  gauge: Bytes!
+  "BribeVotingReward (posted only)."
+  bribe: Bytes
+  epochStart: BigInt
+  amount: BigInt!
+  posted: Boolean!
+  redirectReason: RedirectReason
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"""
+Parameter and role changes on the factory, wsMUSD and the backstop. Fields by kind: TIMELOCK_* selector, data,
+value (executableAt); GLOBAL_BORROW_CAP_SET value; LIMITS_SET profile, value (positionCap), value2 (ceilingBps);
+FEE_RECIPIENT_SET / SENTINEL_SET target; MODULE_APPROVAL_SET / CANARY_OPERATOR_SET target, flag; PAUSED_SET flag
+(borrowPaused), flag2 (creditPaused); GOVERNANCE_TRANSFER_* target (new governor); WSMUSD_CAP_RAISE_SUBMITTED value
+(new cap), value2 (executableAt); WSMUSD_CAP_RAISED value (new cap), value2 (old cap); WSMUSD_CAP_RAISE_REVOKED value;
+BACKSTOP_DEPOSITS_PAUSED_SET flag.
+"""
+type GovernanceEvent @entity(immutable: true) {
+  id: Bytes!
+  contract: Bytes!
+  kind: GovernanceEventKind!
+  caller: Bytes
+  target: Bytes
+  selector: Bytes
+  data: Bytes
+  value: BigInt
+  value2: BigInt
+  flag: Boolean
+  flag2: Boolean
+  profile: Profile
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}

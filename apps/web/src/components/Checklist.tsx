@@ -6,6 +6,7 @@ import { usePublicClient } from 'wagmi'
 import { usePosition } from '../hooks/usePosition'
 import { useWallet } from '../hooks/useWallet'
 import { useWsMusd } from '../hooks/useWsMusd'
+import { META, querySubgraph, trySubgraph } from '../lib/subgraph'
 import { appChain, deployed, registry } from '../wagmi'
 import { IconCheck } from './icons'
 import { Card, CardHeader, cx } from './ui'
@@ -13,9 +14,15 @@ import { Card, CardHeader, cx } from './ui'
 /** Mezo RPCs serve eth_getLogs over at most 10,000 blocks (about ten hours of testnet blocks). */
 const LOG_WINDOW = 9_999n
 
+const WS_DEPOSIT_QUERY = `query WsMusdDeposit($vault: Bytes!, $owner: Bytes!) {
+  vaultFlows(first: 1, where: { vault: $vault, owner: $owner, kind: DEPOSIT }) { id }
+  ${META}
+}`
+
 /**
- * Whether `owner` deposited into wsMUSD within the last log window. Lets the walkthrough keep "Save" ticked after
- * the judge redeems everything (deposit → redeem is the guided flow), without an indexer.
+ * Whether `owner` deposited into wsMUSD: ever, per the subgraph when one is configured, otherwise (or when it has
+ * not indexed one yet) within the last log window. Lets the walkthrough keep "Save" ticked after the judge redeems
+ * everything (deposit → redeem is the guided flow).
  */
 function useRecentWsDeposit(owner: Address | undefined, enabled: boolean) {
   const client = usePublicClient({ chainId: appChain.id })
@@ -26,6 +33,14 @@ function useRecentWsDeposit(owner: Address | undefined, enabled: boolean) {
     retry: 1,
     queryFn: async () => {
       if (!client || !owner) return false
+      const indexed = await trySubgraph(async () => {
+        const data = await querySubgraph<{ vaultFlows: { id: string }[] }>(WS_DEPOSIT_QUERY, {
+          vault: registry.contracts.wsMusd.address.toLowerCase(),
+          owner: owner.toLowerCase(),
+        })
+        return data.vaultFlows.length > 0
+      })
+      if (indexed) return true
       const head = await client.getBlockNumber()
       const logs = await client.getContractEvents({
         address: registry.contracts.wsMusd.address,

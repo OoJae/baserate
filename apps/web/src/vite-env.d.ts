@@ -7,6 +7,11 @@ interface ImportMetaEnv {
   readonly BASERATE_PUBLIC_LOCAL_FORK?: string
   /** Keeper status API base URL. Defaults to the Railway deployment. */
   readonly BASERATE_PUBLIC_KEEPER_URL?: string
+  /**
+   * Baserate subgraph GraphQL endpoint (public, e.g. Goldsky's https://api.goldsky.com/api/public/…/gn). Optional:
+   * without it, history is read from logs in the browser.
+   */
+  readonly BASERATE_PUBLIC_SUBGRAPH_URL?: string
 }
 
 interface ImportMeta {

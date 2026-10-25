@@ -1,8 +1,9 @@
 import { backstopAbi, erc20PermitAbi, WAD } from '@baserate/sdk'
 import { useQuery } from '@tanstack/react-query'
-import { type Address, zeroAddress } from 'viem'
+import { type Address, getAddress, type PublicClient, zeroAddress } from 'viem'
 import { usePublicClient, useReadContracts } from 'wagmi'
 import { getEventsChunked } from '../lib/logs'
+import { indexedTo, META, querySubgraph, readHistory } from '../lib/subgraph'
 import { appChain, deployed, registry } from '../wagmi'
 
 const BACKSTOP = registry.contracts.backstop.address
@@ -135,7 +136,68 @@ export interface RedeemRequestView {
   pending: boolean
 }
 
-/** The owner's backstop exit requests (RedeemRequested logs), with their live state. */
+/** A RedeemRequested record, before its live state is read. */
+type QueuedRequest = Omit<RedeemRequestView, 'pending'>
+
+const REQUESTS_QUERY = `query RedeemRequests($owner: Bytes!) {
+  redeemRequests(first: 1000, orderBy: requestId, orderDirection: asc, where: { owner: $owner }) {
+    requestId shares assets claimableAt receiver
+  }
+  ${META}
+}`
+
+interface RequestRow {
+  requestId: string
+  shares: string
+  assets: string
+  claimableAt: string
+  receiver: string
+}
+
+/** The owner's requests the subgraph indexed, oldest first. */
+async function requestsFromSubgraph(owner: Address) {
+  const data = await querySubgraph<{ redeemRequests: RequestRow[] }>(REQUESTS_QUERY, {
+    owner: owner.toLowerCase(),
+  })
+  const items = data.redeemRequests.map(
+    (r): QueuedRequest => ({
+      id: BigInt(r.requestId),
+      shares: BigInt(r.shares),
+      assets: BigInt(r.assets),
+      claimableAt: Number(r.claimableAt),
+      receiver: getAddress(r.receiver),
+    }),
+  )
+  return { items, indexedTo: indexedTo(data) }
+}
+
+/** The owner's RedeemRequested logs from `fromBlock`, oldest first. */
+async function requestsFromLogs(
+  client: PublicClient,
+  owner: Address,
+  fromBlock: bigint,
+): Promise<QueuedRequest[]> {
+  const logs = await getEventsChunked(client, {
+    address: BACKSTOP,
+    abi: backstopAbi,
+    eventName: 'RedeemRequested',
+    args: { owner },
+    fromBlock,
+  })
+  return logs.map((l) => ({
+    id: l.args.id ?? 0n,
+    shares: l.args.shares ?? 0n,
+    assets: l.args.assets ?? 0n,
+    claimableAt: Number(l.args.claimableAt ?? 0n),
+    receiver: (l.args.receiver ?? owner) as Address,
+  }))
+}
+
+/**
+ * The owner's backstop exit requests, newest first, with their live state (`redeemRequest(id)` by multicall). The
+ * list comes from the subgraph when one is configured (plus the blocks it has not indexed yet), otherwise from
+ * RedeemRequested logs.
+ */
 export function useRedeemRequests(owner: Address | undefined) {
   const client = usePublicClient({ chainId: appChain.id })
   return useQuery({
@@ -146,36 +208,24 @@ export function useRedeemRequests(owner: Address | undefined) {
     retry: 2,
     queryFn: async (): Promise<RedeemRequestView[]> => {
       if (!client || !owner) return []
-      const logs = await getEventsChunked(client, {
-        address: BACKSTOP,
-        abi: backstopAbi,
-        eventName: 'RedeemRequested',
-        args: { owner },
-        fromBlock: BigInt(registry.contracts.backstop.block),
+      const requests = await readHistory({
+        subgraph: () => requestsFromSubgraph(owner),
+        logs: (fromBlock) => requestsFromLogs(client, owner, fromBlock),
+        startBlock: BigInt(registry.contracts.backstop.block),
       })
-      if (logs.length === 0) return []
+      if (requests.length === 0) return []
       // Typed loosely: the full backstop ABI makes multicall's inference too deep for TypeScript.
       const live = (await client.multicall({
-        contracts: logs.map((l) => ({
+        contracts: requests.map((r) => ({
           address: BACKSTOP,
           abi: backstopAbi,
           functionName: 'redeemRequest',
-          args: [l.args.id ?? 0n],
+          args: [r.id],
         })) as never,
         allowFailure: false,
       })) as unknown as { shares: bigint }[]
-      return logs
-        .map((l, i) => {
-          const req = live[i] ?? { shares: 0n }
-          return {
-            id: l.args.id ?? 0n,
-            shares: l.args.shares ?? 0n,
-            assets: l.args.assets ?? 0n,
-            claimableAt: Number(l.args.claimableAt ?? 0n),
-            receiver: (l.args.receiver ?? owner) as Address,
-            pending: req.shares > 0n,
-          }
-        })
+      return requests
+        .map((r, i) => ({ ...r, pending: (live[i] ?? { shares: 0n }).shares > 0n }))
         .reverse()
     },
   })

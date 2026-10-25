@@ -26,14 +26,21 @@ Only `BASERATE_PUBLIC_*` variables reach the bundle (`envPrefix`); see `.env.exa
 | ------------------------------- | ---------------------------------------------------------------------------------------- |
 | `BASERATE_PUBLIC_WC_PROJECT_ID` | Optional Reown project id. Without it, only injected (and EIP-6963) wallets are offered. |
 | `BASERATE_PUBLIC_LOCAL_FORK=1`  | Target an anvil fork of testnet on `http://127.0.0.1:8545` with chain id 31337.          |
+| `BASERATE_PUBLIC_SUBGRAPH_URL`  | Optional public GraphQL endpoint of the Baserate subgraph (Goldsky). See below.          |
 
 Contract addresses come from `packages/sdk/src/deployments/<chainId>.json`. On a network where a Baserate contract
 is a zero-address placeholder, its page says so and its actions stay disabled.
 
 Calls that spend Skip precompile reads (`RiskLens.snapshot`, `FlashLiquidator.previewLiquidation`/`quoteVenues`) go
 through `directClient` in `src/wagmi.ts`, a client without multicall batching: Mezo allows 20 precompile calls per
-`eth_call`, so they must not be aggregated with other reads. History (allocator moves, distributions, accounts,
-backstop exits) is read from logs in 10,000-block windows (`src/lib/logs.ts`) until the subgraph lands.
+`eth_call`, so they must not be aggregated with other reads.
+
+History (allocator moves, distributions and the fee-switch submission, borrow accounts, backstop exit requests, the
+walkthrough's wsMUSD deposit check) comes from the Baserate subgraph (`packages/subgraph`) when
+`BASERATE_PUBLIC_SUBGRAPH_URL` is set: one GraphQL request, plus a log read of the blocks the subgraph has not indexed
+yet so the newest events still show (`src/lib/subgraph.ts`). When it is unset, on a local fork, or when a query fails,
+the same hooks read logs in 10,000-block windows (`src/lib/logs.ts`). Live state (positions, request status) is
+always read on-chain.
 
 ## End-to-end tests
 

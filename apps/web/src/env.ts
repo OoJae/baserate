@@ -17,4 +17,6 @@ export const env = {
   keeperUrl:
     clean(import.meta.env.BASERATE_PUBLIC_KEEPER_URL) ??
     'https://keeper-production-be8a.up.railway.app',
+  /** Baserate subgraph GraphQL endpoint (Goldsky). Unset: history is read from logs in the browser. */
+  subgraphUrl: clean(import.meta.env.BASERATE_PUBLIC_SUBGRAPH_URL),
 } as const

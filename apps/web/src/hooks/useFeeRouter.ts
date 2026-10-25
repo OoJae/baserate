@@ -1,8 +1,16 @@
 import { borrowAccountFactoryAbi, erc20PermitAbi, feeRouterAbi } from '@baserate/sdk'
 import { useQuery } from '@tanstack/react-query'
-import { type Address, encodeFunctionData, type Hex, toFunctionSelector } from 'viem'
+import {
+  type Address,
+  encodeFunctionData,
+  getAddress,
+  type Hex,
+  type PublicClient,
+  toFunctionSelector,
+} from 'viem'
 import { usePublicClient, useReadContracts } from 'wagmi'
 import { getEventsChunked } from '../lib/logs'
+import { indexedTo, META, querySubgraph, readHistory } from '../lib/subgraph'
 import { appChain, deployed, registry } from '../wagmi'
 
 const ROUTER = registry.contracts.feeRouter.address
@@ -76,7 +84,102 @@ export interface Distribution {
   bribes: { gauge: Address; bribe: Address; amount: bigint }[]
 }
 
-/** Every FeeRouter distribution (Distributed and BribePosted events), newest first. */
+const DISTRIBUTIONS_QUERY = `query Distributions {
+  distributions(first: 1000, orderBy: blockNumber, orderDirection: desc) {
+    caller epochStart total toSmusd toBribes toTreasury retained blockNumber timestamp transactionHash
+    bribes(where: { posted: true }, orderBy: logIndex, orderDirection: asc) { gauge bribe amount }
+  }
+  ${META}
+}`
+
+interface DistributionRow {
+  caller: string
+  epochStart: string
+  total: string
+  toSmusd: string
+  toBribes: string
+  toTreasury: string
+  retained: string
+  blockNumber: string
+  timestamp: string
+  transactionHash: Hex
+  bribes: { gauge: string; bribe: string; amount: string }[]
+}
+
+/** Distributions the subgraph indexed, oldest first. */
+async function distributionsFromSubgraph() {
+  const data = await querySubgraph<{ distributions: DistributionRow[] }>(DISTRIBUTIONS_QUERY)
+  const items = data.distributions.map(
+    (d): Distribution => ({
+      tx: d.transactionHash,
+      block: BigInt(d.blockNumber),
+      timestamp: Number(d.timestamp),
+      caller: getAddress(d.caller),
+      epochStart: BigInt(d.epochStart),
+      total: BigInt(d.total),
+      toSmusd: BigInt(d.toSmusd),
+      toBribes: BigInt(d.toBribes),
+      toTreasury: BigInt(d.toTreasury),
+      retained: BigInt(d.retained),
+      bribes: d.bribes.map((b) => ({
+        gauge: getAddress(b.gauge),
+        bribe: getAddress(b.bribe),
+        amount: BigInt(b.amount),
+      })),
+    }),
+  )
+  return { items: items.reverse(), indexedTo: indexedTo(data) }
+}
+
+/** Distributed and BribePosted logs from `fromBlock`, joined by transaction, oldest first. */
+async function distributionsFromLogs(
+  client: PublicClient,
+  fromBlock: bigint,
+): Promise<Distribution[]> {
+  const [dist, bribes] = await Promise.all([
+    getEventsChunked(client, {
+      address: ROUTER,
+      abi: feeRouterAbi,
+      eventName: 'Distributed',
+      fromBlock,
+    }),
+    getEventsChunked(client, {
+      address: ROUTER,
+      abi: feeRouterAbi,
+      eventName: 'BribePosted',
+      fromBlock,
+    }),
+  ])
+  return Promise.all(
+    dist.map(async (l) => {
+      const block = await client.getBlock({ blockNumber: l.blockNumber }).catch(() => null)
+      return {
+        tx: l.transactionHash,
+        block: l.blockNumber,
+        timestamp: block ? Number(block.timestamp) : undefined,
+        caller: l.args.caller as Address,
+        epochStart: l.args.epochStart ?? 0n,
+        total: l.args.total ?? 0n,
+        toSmusd: l.args.toSmusd ?? 0n,
+        toBribes: l.args.toBribes ?? 0n,
+        toTreasury: l.args.toTreasury ?? 0n,
+        retained: l.args.retained ?? 0n,
+        bribes: bribes
+          .filter((b) => b.transactionHash === l.transactionHash)
+          .map((b) => ({
+            gauge: b.args.gauge as Address,
+            bribe: b.args.bribe as Address,
+            amount: b.args.amount ?? 0n,
+          })),
+      }
+    }),
+  )
+}
+
+/**
+ * Every FeeRouter distribution (Distributed and BribePosted events), newest first: from the subgraph when one is
+ * configured (plus the blocks it has not indexed yet), otherwise from logs.
+ */
 export function useDistributions() {
   const client = usePublicClient({ chainId: appChain.id })
   return useQuery({
@@ -87,48 +190,62 @@ export function useDistributions() {
     retry: 2,
     queryFn: async (): Promise<Distribution[]> => {
       if (!client) return []
-      const fromBlock = BigInt(registry.contracts.feeRouter.block)
-      const [dist, bribes] = await Promise.all([
-        getEventsChunked(client, {
-          address: ROUTER,
-          abi: feeRouterAbi,
-          eventName: 'Distributed',
-          fromBlock,
-        }),
-        getEventsChunked(client, {
-          address: ROUTER,
-          abi: feeRouterAbi,
-          eventName: 'BribePosted',
-          fromBlock,
-        }),
-      ])
-      const out = await Promise.all(
-        dist.map(async (l) => {
-          const block = await client.getBlock({ blockNumber: l.blockNumber }).catch(() => null)
-          return {
-            tx: l.transactionHash,
-            block: l.blockNumber,
-            timestamp: block ? Number(block.timestamp) : undefined,
-            caller: l.args.caller as Address,
-            epochStart: l.args.epochStart ?? 0n,
-            total: l.args.total ?? 0n,
-            toSmusd: l.args.toSmusd ?? 0n,
-            toBribes: l.args.toBribes ?? 0n,
-            toTreasury: l.args.toTreasury ?? 0n,
-            retained: l.args.retained ?? 0n,
-            bribes: bribes
-              .filter((b) => b.transactionHash === l.transactionHash)
-              .map((b) => ({
-                gauge: b.args.gauge as Address,
-                bribe: b.args.bribe as Address,
-                amount: b.args.amount ?? 0n,
-              })),
-          }
-        }),
-      )
+      const out = await readHistory({
+        subgraph: distributionsFromSubgraph,
+        logs: (fromBlock) => distributionsFromLogs(client, fromBlock),
+        startBlock: BigInt(registry.contracts.feeRouter.block),
+      })
       return out.reverse()
     },
   })
+}
+
+const FEE_SWITCH_QUERY = `query FeeSwitchSubmission($factory: Bytes!, $data: Bytes!) {
+  timelockSubmissions(
+    first: 1
+    orderBy: blockNumber
+    orderDirection: desc
+    where: { contract: $factory, data: $data }
+  ) {
+    blockNumber transactionHash
+  }
+  ${META}
+}`
+
+interface FeeSwitchSubmission {
+  tx: Hex
+  block: bigint
+}
+
+/** The latest fee-switch submission the subgraph indexed (zero or one item). */
+async function feeSwitchFromSubgraph() {
+  const data = await querySubgraph<{
+    timelockSubmissions: { blockNumber: string; transactionHash: Hex }[]
+  }>(FEE_SWITCH_QUERY, {
+    factory: FACTORY.toLowerCase(),
+    data: FEE_SWITCH_CALL.toLowerCase(),
+  })
+  const items = data.timelockSubmissions.map(
+    (s): FeeSwitchSubmission => ({ tx: s.transactionHash, block: BigInt(s.blockNumber) }),
+  )
+  return { items, indexedTo: indexedTo(data) }
+}
+
+/** Fee-switch `Submitted` logs from `fromBlock`, oldest first. */
+async function feeSwitchFromLogs(
+  client: PublicClient,
+  fromBlock: bigint,
+): Promise<FeeSwitchSubmission[]> {
+  const logs = await getEventsChunked(client, {
+    address: FACTORY,
+    abi: borrowAccountFactoryAbi,
+    eventName: 'Submitted',
+    args: { selector: SET_FEE_RECIPIENT },
+    fromBlock,
+  })
+  return logs
+    .filter((l) => l.args.data?.toLowerCase() === FEE_SWITCH_CALL.toLowerCase())
+    .map((l) => ({ tx: l.transactionHash, block: l.blockNumber }))
 }
 
 /** The factory's `Submitted` record of the fee switch (its tx hash), if any. */
@@ -141,17 +258,12 @@ export function useFeeSwitchSubmission() {
     retry: 2,
     queryFn: async () => {
       if (!client) return null
-      const logs = await getEventsChunked(client, {
-        address: FACTORY,
-        abi: borrowAccountFactoryAbi,
-        eventName: 'Submitted',
-        args: { selector: SET_FEE_RECIPIENT },
-        fromBlock: BigInt(registry.contracts.feeRouter.block),
+      const submissions = await readHistory({
+        subgraph: feeSwitchFromSubgraph,
+        logs: (fromBlock) => feeSwitchFromLogs(client, fromBlock),
+        startBlock: BigInt(registry.contracts.feeRouter.block),
       })
-      const match = logs
-        .filter((l) => l.args.data?.toLowerCase() === FEE_SWITCH_CALL.toLowerCase())
-        .at(-1)
-      return match ? { tx: match.transactionHash, block: match.blockNumber } : null
+      return submissions.at(-1) ?? null
     },
   })
 }

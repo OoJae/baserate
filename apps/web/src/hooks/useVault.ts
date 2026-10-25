@@ -11,9 +11,10 @@ import {
   wsMusdLiquidityAdapterAbi,
 } from '@baserate/sdk'
 import { useQuery } from '@tanstack/react-query'
-import { type Address, zeroAddress } from 'viem'
+import { type Address, type Hex, type PublicClient, zeroAddress } from 'viem'
 import { usePublicClient, useReadContracts } from 'wagmi'
 import { getEventsChunked } from '../lib/logs'
+import { indexedTo, META, querySubgraph, readHistory } from '../lib/subgraph'
 import { appChain, deployed, registry } from '../wagmi'
 
 const VAULT = registry.contracts.vMusd.address
@@ -215,7 +216,73 @@ export interface AllocatorMove {
   timestamp?: number
 }
 
-/** The allocator's last fund moves (Rebalanced events with an action), newest first. */
+const MOVES_QUERY = `query AllocatorMoves($limit: Int!) {
+  rebalances(first: $limit, orderBy: blockNumber, orderDirection: desc, where: { actionId_gt: 0 }) {
+    actionId amount m1SupplyApy wsMusdApy blockNumber timestamp transactionHash
+  }
+  ${META}
+}`
+
+interface RebalanceRow {
+  actionId: number
+  amount: string
+  m1SupplyApy: string
+  wsMusdApy: string
+  blockNumber: string
+  timestamp: string
+  transactionHash: Hex
+}
+
+/** The last `limit` moves the subgraph indexed, oldest first. */
+async function movesFromSubgraph(limit: number) {
+  const data = await querySubgraph<{ rebalances: RebalanceRow[] }>(MOVES_QUERY, { limit })
+  const items = data.rebalances.map(
+    (r): AllocatorMove => ({
+      action: r.actionId as AllocatorActionId,
+      amount: BigInt(r.amount),
+      m1SupplyApy: BigInt(r.m1SupplyApy),
+      wsMusdApy: BigInt(r.wsMusdApy),
+      block: BigInt(r.blockNumber),
+      tx: r.transactionHash,
+      timestamp: Number(r.timestamp),
+    }),
+  )
+  return { items: items.reverse(), indexedTo: indexedTo(data) }
+}
+
+/** The last `limit` moves in Rebalanced logs from `fromBlock`, oldest first, with their block timestamps. */
+async function movesFromLogs(
+  client: PublicClient,
+  fromBlock: bigint,
+  limit: number,
+): Promise<AllocatorMove[]> {
+  const logs = await getEventsChunked(client, {
+    address: ALLOCATOR,
+    abi: baserateAllocatorAbi,
+    eventName: 'Rebalanced',
+    fromBlock,
+  })
+  const moves = logs.filter((l) => Number(l.args.action) !== 0).slice(-limit)
+  return Promise.all(
+    moves.map(async (l) => {
+      const block = await client.getBlock({ blockNumber: l.blockNumber }).catch(() => null)
+      return {
+        action: Number(l.args.action) as AllocatorActionId,
+        amount: l.args.amount ?? 0n,
+        m1SupplyApy: l.args.m1SupplyApy ?? 0n,
+        wsMusdApy: l.args.wsMusdApy ?? 0n,
+        block: l.blockNumber,
+        tx: l.transactionHash,
+        timestamp: block ? Number(block.timestamp) : undefined,
+      }
+    }),
+  )
+}
+
+/**
+ * The allocator's last fund moves (Rebalanced events with an action), newest first: from the subgraph when one is
+ * configured (plus the blocks it has not indexed yet), otherwise from logs.
+ */
 export function useAllocatorMoves(limit = 3) {
   const client = usePublicClient({ chainId: appChain.id })
   return useQuery({
@@ -226,30 +293,12 @@ export function useAllocatorMoves(limit = 3) {
     retry: 2,
     queryFn: async (): Promise<AllocatorMove[]> => {
       if (!client) return []
-      const logs = await getEventsChunked(client, {
-        address: ALLOCATOR,
-        abi: baserateAllocatorAbi,
-        eventName: 'Rebalanced',
-        fromBlock: BigInt(registry.contracts.allocator.block),
+      const moves = await readHistory({
+        subgraph: () => movesFromSubgraph(limit),
+        logs: (fromBlock) => movesFromLogs(client, fromBlock, limit),
+        startBlock: BigInt(registry.contracts.allocator.block),
       })
-      const moves = logs
-        .filter((l) => Number(l.args.action) !== 0)
-        .slice(-limit)
-        .reverse()
-      return Promise.all(
-        moves.map(async (l) => {
-          const block = await client.getBlock({ blockNumber: l.blockNumber }).catch(() => null)
-          return {
-            action: Number(l.args.action) as AllocatorActionId,
-            amount: l.args.amount ?? 0n,
-            m1SupplyApy: l.args.m1SupplyApy ?? 0n,
-            wsMusdApy: l.args.wsMusdApy ?? 0n,
-            block: l.blockNumber,
-            tx: l.transactionHash,
-            timestamp: block ? Number(block.timestamp) : undefined,
-          }
-        }),
-      )
+      return moves.slice(-limit).reverse()
     },
   })
 }
