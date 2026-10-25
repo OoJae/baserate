@@ -24,6 +24,7 @@ dataSources:
         - ProfileLimit
         - TimelockSubmission
         - TimelockSlot
+        - TimelockParam
         - GovernanceEvent
       abis:
         - name: BorrowAccountFactory
@@ -39,6 +40,8 @@ dataSources:
           handler: handleRevoked
         - event: Accepted(indexed bytes4,bytes)
           handler: handleAccepted
+        - event: PendingInvalidated(indexed bytes4,indexed bytes32)
+          handler: handlePendingInvalidated
         - event: GlobalBorrowCapSet(indexed address,uint256)
           handler: handleGlobalBorrowCapSet
         - event: LimitsSet(indexed address,indexed uint8,uint128,uint16)
@@ -236,6 +239,8 @@ dataSources:
           handler: handleRedeemRequested
         - event: RedeemClaimed(indexed uint256,indexed address,uint256,uint256)
           handler: handleRedeemClaimed
+        - event: RedeemPartiallyClaimed(indexed uint256,uint256,uint256)
+          handler: handleRedeemPartiallyClaimed
         - event: AuctionTaken(indexed address,indexed address,uint256,uint256,uint256)
           handler: handleAuctionTaken
         - event: InventorySold(indexed address,indexed uint8,uint256,uint256)
@@ -257,6 +262,7 @@ dataSources:
       language: wasm/assemblyscript
       entities:
         - Liquidation
+        - FlashLiquidatorNative
         - Protocol
       abis:
         - name: FlashLiquidator
@@ -264,6 +270,10 @@ dataSources:
       eventHandlers:
         - event: Liquidated(indexed address,indexed address,indexed uint8,uint256,uint256,uint256,uint256)
           handler: handleLiquidated
+        - event: NativeKept(indexed address,uint256)
+          handler: handleNativeKept
+        - event: NativeSwept(indexed address,indexed address,uint256)
+          handler: handleNativeSwept
       file: ./src/flash-liquidator.ts
 
   - kind: ethereum
@@ -280,6 +290,8 @@ dataSources:
       entities:
         - Distribution
         - Bribe
+        - BribeCarry
+        - PendingDistribution
         - Protocol
       abis:
         - name: FeeRouter
@@ -291,6 +303,14 @@ dataSources:
           handler: handleBribePosted
         - event: BribeRedirected(indexed address,uint256,uint8)
           handler: handleBribeRedirected
+        - event: BribeCarried(indexed address,uint256,uint8)
+          handler: handleBribeCarried
+        - event: SmusdYieldDeferred(uint256)
+          handler: handleSmusdYieldDeferred
+        - event: SmusdYieldFailed(uint256,uint256)
+          handler: handleSmusdYieldFailed
+        - event: SmusdShareToTreasury(indexed address,uint256,uint256)
+          handler: handleSmusdShareToTreasury
       file: ./src/fee-router.ts
 
 templates:
@@ -323,4 +343,6 @@ templates:
           handler: handleCollateralAdded
         - event: CollateralWithdrawn(indexed address,uint256,indexed address)
           handler: handleCollateralWithdrawn
+        - event: Swept(indexed address,indexed address,uint256)
+          handler: handleSwept
       file: ./src/account.ts

@@ -31,6 +31,28 @@ enum RedirectReason {
   NOTIFY_FAILED
 }
 
+"FeeRouter.CarryReason: why a gauge's bribe share stays in the router for the next distribute()."
+enum CarryReason {
+  "Last hour of the epoch, when Mezo's Voter only lets whitelisted veNFTs vote."
+  VOTE_WINDOW_CLOSED
+  "The bribe contract has no votes (a bribe credited now might never be claimable)."
+  NO_VOTES
+}
+
+"What a distribute() did with its sMUSD leg."
+enum SmusdOutcome {
+  "No sMUSD leg (it was 0)."
+  NONE
+  "The whole leg was donated (SmusdYieldPosted)."
+  DONATED
+  "Below sMUSD's AmountTooSmall floor: carried to the next call (SmusdYieldDeferred)."
+  DEFERRED
+  "The donation failed or pulled less; the rest is carried (SmusdYieldFailed). Not yet past the grace period."
+  FAILED
+  "sMUSD has kept failing past the grace period: the rest was paid to the treasury (SmusdShareToTreasury)."
+  TO_TREASURY
+}
+
 enum VaultKind {
   "Baserate wsMUSD (ERC-4626 over sMUSD)."
   WSMUSD
@@ -45,6 +67,16 @@ enum VaultFlowKind {
   WITHDRAW
   "wsMUSD redeemInKind (sMUSD + MUSD out)."
   REDEEM_IN_KIND
+}
+
+"Where a backstop exit stands."
+enum RedeemStatus {
+  "Queued, nothing paid yet."
+  PENDING
+  "Paid in part (cash was short); the rest stays queued, claimable again at any time."
+  PARTIALLY_CLAIMED
+  "Fully paid; the request is closed."
+  CLAIMED
 }
 
 "What produced a share-price observation."
@@ -69,6 +101,8 @@ enum AccountActionKind {
   COLLATERAL_ADDED
   COLLATERAL_WITHDRAWN
   COME_BACK
+  "BorrowAccount.sweep: tokens sent to the clone directly, swept out by the owner."
+  SWEPT
 }
 
 enum MarketEventKind {
@@ -110,15 +144,32 @@ enum BackstopTradeKind {
 }
 
 enum TimelockStatus {
+  "Queued. Executable from executableAt until expiresAt; past expiresAt it is expired even while still PENDING."
   PENDING
   ACCEPTED
   REVOKED
+  "An instant decrease of the same parameter (PendingInvalidated) made it unexecutable."
+  INVALIDATED
+  """
+  Expired (not executed within EXECUTION_WINDOW of executableAt). Set when the same calldata is submitted again or
+  its parameter is decreased after expiry; until then an expired submission stays PENDING with expiresAt in the past.
+  """
+  EXPIRED
+}
+
+enum FlashLiquidatorNativeKind {
+  "NativeKept: the liquidation's leftover native BTC could not be sent to the caller; it stays for sweepNative."
+  KEPT
+  "NativeSwept: sweepNative sent the contract's native BTC to `to`."
+  SWEPT
 }
 
 enum GovernanceEventKind {
   TIMELOCK_SUBMITTED
   TIMELOCK_REVOKED
   TIMELOCK_ACCEPTED
+  "PendingInvalidated: an instant decrease made every call queued for the same parameter unexecutable."
+  TIMELOCK_INVALIDATED
   GLOBAL_BORROW_CAP_SET
   LIMITS_SET
   FEE_RECIPIENT_SET
@@ -158,7 +209,14 @@ type Protocol @entity(immutable: false) {
   totalDistributed: BigInt!
   totalToSmusd: BigInt!
   totalToBribes: BigInt!
+  "FeeRouter treasury payments, including the sMUSD leg paid to the treasury after the grace period."
   totalToTreasury: BigInt!
+  "Part of totalToTreasury that was the sMUSD leg, paid to the treasury because sMUSD kept failing."
+  totalSmusdToTreasury: BigInt!
+  "MUSD the FeeRouter carries into its next distribute() (the last Distributed.retained)."
+  feeRouterCarried: BigInt!
+  "Start of the current sMUSD donation failure streak (FeeRouter.smusdFailingSince); 0 while sMUSD is healthy."
+  smusdFailingSince: BigInt!
   feeRecipient: Bytes
   globalBorrowCap: BigInt
   borrowPaused: Boolean!
@@ -288,7 +346,7 @@ type Vault @entity(immutable: false) {
   vestingEnd: BigInt
   "Backstop: BTC held for sale."
   inventory: BigInt
-  "Backstop: assets reserved for queued exits, and how many are pending."
+  "Backstop: assets reserved for queued exits, and how many requests are open (pending or partially claimed)."
   reservedAssets: BigInt
   pendingRedeemCount: Int
   depositsPaused: Boolean
@@ -314,7 +372,11 @@ type SharePricePoint @entity(immutable: false) {
   timestamp: BigInt!
 }
 
-"A backstop exit: requestRedeem, then claimRedeem after the delay."
+"""
+A backstop exit: requestRedeem, then claimRedeem (or claimRedeemWithoutOracle) after the delay. When cash is short a
+claim pays what there is, burns the matching shares and keeps the rest queued (RedeemPartiallyClaimed); the request
+closes only when fully paid. Every payment is a VaultFlow WITHDRAW in `payments`.
+"""
 type RedeemRequest @entity(immutable: false) {
   "Request id (decimal)."
   id: ID!
@@ -322,28 +384,58 @@ type RedeemRequest @entity(immutable: false) {
   vault: Vault!
   owner: Bytes!
   receiver: Bytes!
+  "Shares escrowed at request (unchanged by partial claims; see sharesLeft)."
   shares: BigInt!
-  "NAV of the shares at request; the claim pays at most this."
+  "NAV of the shares at request; all claims together pay at most this (see assetsLeft)."
   assets: BigInt!
   claimableAt: BigInt!
+  status: RedeemStatus!
+  "Escrowed shares not yet paid (the contract's redeemRequest(id).shares); 0 once claimed."
+  sharesLeft: BigInt!
+  "Request NAV of sharesLeft, the most the remaining claims can pay (redeemRequest(id).assets); 0 once claimed."
+  assetsLeft: BigInt!
+  "MUSD paid so far (sum of RedeemClaimed.assets)."
+  paidAssets: BigInt!
+  "Shares burned so far (sum of RedeemClaimed.shares)."
+  burnedShares: BigInt!
+  "Number of payments (RedeemClaimed events)."
+  claimCount: Int!
+  "True once fully paid (status CLAIMED)."
   claimed: Boolean!
+  "Total MUSD paid, set when the request closes (then equal to paidAssets)."
   claimedAssets: BigInt
+  "Block, time and transaction of the final payment."
   claimedAtBlock: BigInt
   claimedAtTimestamp: BigInt
   claimTransactionHash: Bytes
+  "Block, time and transaction of the latest payment (partial or final)."
+  lastClaimAtBlock: BigInt
+  lastClaimAtTimestamp: BigInt
+  lastClaimTransactionHash: Bytes
+  payments: [VaultFlow!]! @derivedFrom(field: "redeemRequest")
   blockNumber: BigInt!
   timestamp: BigInt!
   transactionHash: Bytes!
 }
 
-"A factory call queued behind the 48 h timelock (Submitted), and how it ended."
+"""
+A factory call queued behind the 48 h timelock (Submitted), and how it ended. It can be executed from executableAt
+until expiresAt (executableAt + EXECUTION_WINDOW, 14 days); live calls are `status: PENDING, expiresAt_gte: now`.
+"""
 type TimelockSubmission @entity(immutable: false) {
   id: Bytes!
   contract: Bytes!
   selector: Bytes!
   "Full calldata of the queued call."
   data: Bytes!
+  """
+  The parameter it changes, as PendingInvalidated reports it: the first argument word (profile, module, operator or
+  fee recipient), or zero for setGlobalBorrowCap.
+  """
+  param: Bytes!
   executableAt: BigInt!
+  "Last second it can be executed: executableAt + 14 days."
+  expiresAt: BigInt!
   status: TimelockStatus!
   resolvedBy: Bytes
   resolvedAtBlock: BigInt
@@ -360,6 +452,12 @@ type TimelockSlot @entity(immutable: false) {
   pending: TimelockSubmission
 }
 
+"Internal: the pending submissions of one parameter (id = selector ++ param), cleared by PendingInvalidated."
+type TimelockParam @entity(immutable: false) {
+  id: Bytes!
+  pending: [TimelockSubmission!]!
+}
+
 # ---------------------------------------------------------------------------------------------------------------
 # Events
 # ---------------------------------------------------------------------------------------------------------------
@@ -367,7 +465,8 @@ type TimelockSlot @entity(immutable: false) {
 """
 A BorrowAccount action. Fields by kind: OPENED musd, btc; BORROWED musd (to the receiver), fee, debtAfter, ltvBps;
 REPAID musd, debtAfter; EXITED musd (repaid), btc (returned), debtAfter = collateralAfter = 0; COLLATERAL_ADDED btc,
-collateralAfter; COLLATERAL_WITHDRAWN btc, recipient; COME_BACK btc (BTC claimed from the Mezo surplus pool).
+collateralAfter; COLLATERAL_WITHDRAWN btc, recipient; COME_BACK btc (BTC claimed from the Mezo surplus pool); SWEPT
+token, amount, recipient.
 """
 type AccountAction @entity(immutable: true) {
   id: Bytes!
@@ -381,6 +480,9 @@ type AccountAction @entity(immutable: true) {
   collateralAfter: BigInt
   ltvBps: Int
   recipient: Bytes
+  "SWEPT: the token swept and the amount."
+  token: Bytes
+  amount: BigInt
   blockNumber: BigInt!
   timestamp: BigInt!
   transactionHash: Bytes!
@@ -431,6 +533,8 @@ type Liquidation @entity(immutable: false) {
   "MUSD the seized BTC sold for, and the liquidator's profit after repaying the debt."
   proceeds: BigInt
   profit: BigInt
+  "Native BTC left by the liquidation that the caller could not take (NativeKept); it waits for sweepNative."
+  nativeKept: BigInt
   blockNumber: BigInt!
   timestamp: BigInt!
   transactionHash: Bytes!
@@ -453,6 +557,8 @@ type VaultFlow @entity(immutable: true) {
   shares: BigInt!
   smusdOut: BigInt
   musdOut: BigInt
+  "Backstop WITHDRAW: the exit request this payment belongs to."
+  redeemRequest: RedeemRequest
   blockNumber: BigInt!
   timestamp: BigInt!
   transactionHash: Bytes!
@@ -557,18 +663,36 @@ type BackstopTrade @entity(immutable: true) {
   logIndex: BigInt!
 }
 
-"One FeeRouter.distribute() (Distributed), with the bribes posted or redirected in the same transaction."
+"""
+One FeeRouter.distribute() (Distributed), with the bribes posted, redirected or carried in the same transaction.
+total == toSmusd + toBribes + toTreasury + retained.
+"""
 type Distribution @entity(immutable: true) {
   "Transaction hash (one distribution per transaction)."
   id: Bytes!
   caller: Bytes!
   epochStart: BigInt!
+  "MUSD balance split: new fees plus the amounts carried from earlier calls."
   total: BigInt!
+  "MUSD actually donated to sMUSD."
   toSmusd: BigInt!
+  "MUSD posted as bribes."
   toBribes: BigInt!
+  "MUSD paid to the treasury: its 20% of the new fees plus smusdToTreasury."
   toTreasury: BigInt!
+  "MUSD carried to the next distribute(): bribesCarried + smusdCarried."
   retained: BigInt!
+  "Bribe shares carried (sum of the bribeCarries)."
+  bribesCarried: BigInt!
+  "Part of the sMUSD leg carried: below sMUSD's dust floor, or a failed donation within the grace period."
+  smusdCarried: BigInt!
+  "Part of the sMUSD leg paid to the treasury instead (sMUSD failing past the grace period); included in toTreasury."
+  smusdToTreasury: BigInt!
+  smusdOutcome: SmusdOutcome!
+  "FAILED / TO_TREASURY: start of the sMUSD failure streak."
+  smusdFailingSince: BigInt
   bribes: [Bribe!]! @derivedFrom(field: "distribution")
+  bribeCarries: [BribeCarry!]! @derivedFrom(field: "distribution")
   blockNumber: BigInt!
   timestamp: BigInt!
   transactionHash: Bytes!
@@ -592,9 +716,51 @@ type Bribe @entity(immutable: true) {
   logIndex: BigInt!
 }
 
+"A gauge's bribe share kept in the FeeRouter (BribeCarried) and added to that gauge's share in the next distribute()."
+type BribeCarry @entity(immutable: true) {
+  id: Bytes!
+  distribution: Distribution!
+  gauge: Bytes!
+  amount: BigInt!
+  reason: CarryReason!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
+"Internal: the sMUSD and carry events of a distribute() in progress, folded into its Distribution (id = tx hash)."
+type PendingDistribution @entity(immutable: false) {
+  id: Bytes!
+  bribesCarried: BigInt!
+  smusdCarried: BigInt!
+  smusdToTreasury: BigInt!
+  "NONE until an sMUSD outcome event arrives (DONATED is inferred from Distributed.toSmusd)."
+  smusdOutcome: SmusdOutcome!
+  smusdFailingSince: BigInt
+}
+
+"FlashLiquidator native BTC: leftovers its caller could not take (KEPT) and sweepNative payouts (SWEPT)."
+type FlashLiquidatorNative @entity(immutable: true) {
+  id: Bytes!
+  kind: FlashLiquidatorNativeKind!
+  "KEPT: the liquidation caller; SWEPT: whoever called sweepNative."
+  caller: Bytes!
+  "SWEPT: the recipient."
+  to: Bytes
+  amount: BigInt!
+  "KEPT: the liquidation that left it."
+  liquidation: Liquidation
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+  logIndex: BigInt!
+}
+
 """
-Parameter and role changes on the factory, wsMUSD and the backstop. Fields by kind: TIMELOCK_* selector, data,
-value (executableAt); GLOBAL_BORROW_CAP_SET value; LIMITS_SET profile, value (positionCap), value2 (ceilingBps);
+Parameter and role changes on the factory, wsMUSD and the backstop. Fields by kind: TIMELOCK_SUBMITTED /
+TIMELOCK_REVOKED / TIMELOCK_ACCEPTED selector, data, value (executableAt, SUBMITTED only); TIMELOCK_INVALIDATED
+selector, param, value (number of queued calls it invalidated); GLOBAL_BORROW_CAP_SET value; LIMITS_SET profile, value (positionCap), value2 (ceilingBps);
 FEE_RECIPIENT_SET / SENTINEL_SET target; MODULE_APPROVAL_SET / CANARY_OPERATOR_SET target, flag; PAUSED_SET flag
 (borrowPaused), flag2 (creditPaused); GOVERNANCE_TRANSFER_* target (new governor); WSMUSD_CAP_RAISE_SUBMITTED value
 (new cap), value2 (executableAt); WSMUSD_CAP_RAISED value (new cap), value2 (old cap); WSMUSD_CAP_RAISE_REVOKED value;
@@ -608,6 +774,8 @@ type GovernanceEvent @entity(immutable: true) {
   target: Bytes
   selector: Bytes
   data: Bytes
+  "TIMELOCK_INVALIDATED: the parameter (first argument word; zero for setGlobalBorrowCap)."
+  param: Bytes
   value: BigInt
   value2: BigInt
   flag: Boolean

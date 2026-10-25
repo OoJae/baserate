@@ -1,13 +1,16 @@
 // FlashLiquidator.Liquidated is emitted after Morpho's Liquidate in the same call, so it enriches that liquidation
-// (found through Market.lastLiquidation) with the venue, sale proceeds and the liquidator's profit.
+// (found through Market.lastLiquidation) with the venue, sale proceeds and the liquidator's profit. Native BTC the
+// liquidation leaves behind goes to the caller; if the caller cannot take it, NativeKept follows Liquidated and the
+// BTC waits in the contract for anyone's sweepNative (NativeSwept).
 
-import { Bytes } from '@graphprotocol/graph-ts'
-import { Liquidated } from '../generated/FlashLiquidator/FlashLiquidator'
-import { Account, Liquidation, Market } from '../generated/schema'
+import { Bytes, ethereum } from '@graphprotocol/graph-ts'
+import { Liquidated, NativeKept, NativeSwept } from '../generated/FlashLiquidator/FlashLiquidator'
+import { Account, FlashLiquidatorNative, Liquidation, Market } from '../generated/schema'
 import { eventId, getProtocol, venueName, ZERO } from './common'
 import { M1_MARKET_ID } from './config'
 
-function matchingLiquidation(event: Liquidated): Liquidation | null {
+/** M1's latest liquidation, if it happened in this event's transaction. */
+function liquidationInTx(event: ethereum.Event): Liquidation | null {
   const market = Market.load(Bytes.fromHexString(M1_MARKET_ID))
   if (market == null) return null
   const lastId = market.lastLiquidation
@@ -15,6 +18,22 @@ function matchingLiquidation(event: Liquidated): Liquidation | null {
   const last = Liquidation.load(lastId)
   if (last == null) return null
   if (!last.transactionHash.equals(event.transaction.hash)) return null
+  return last
+}
+
+/** The FlashLiquidator liquidation in this transaction whose caller is `caller`. */
+function flashLiquidationBy(event: ethereum.Event, caller: Bytes): Liquidation | null {
+  const last = liquidationInTx(event)
+  if (last == null) return null
+  const liquidator = last.liquidator
+  if (!liquidator) return null
+  if (!liquidator.equals(caller)) return null
+  return last
+}
+
+function matchingLiquidation(event: Liquidated): Liquidation | null {
+  const last = liquidationInTx(event)
+  if (last == null) return null
   if (!last.borrower.equals(event.params.borrower)) return null
   return last
 }
@@ -49,4 +68,35 @@ export function handleLiquidated(event: Liquidated): void {
   const protocol = getProtocol(event)
   protocol.totalLiquidatorProfit = protocol.totalLiquidatorProfit.plus(event.params.profit)
   protocol.save()
+}
+
+function newNative(event: ethereum.Event, kind: string, caller: Bytes): FlashLiquidatorNative {
+  const n = new FlashLiquidatorNative(eventId(event))
+  n.kind = kind
+  n.caller = caller
+  n.blockNumber = event.block.number
+  n.timestamp = event.block.timestamp
+  n.transactionHash = event.transaction.hash
+  n.logIndex = event.logIndex
+  return n
+}
+
+/** The caller could not take the liquidation's leftover native BTC (emitted right after Liquidated). */
+export function handleNativeKept(event: NativeKept): void {
+  const n = newNative(event, 'KEPT', event.params.caller)
+  n.amount = event.params.amount
+  const liquidation = flashLiquidationBy(event, event.params.caller)
+  if (liquidation != null) {
+    liquidation.nativeKept = event.params.amount
+    liquidation.save()
+    n.liquidation = liquidation.id
+  }
+  n.save()
+}
+
+export function handleNativeSwept(event: NativeSwept): void {
+  const n = newNative(event, 'SWEPT', event.params.caller)
+  n.to = event.params.to
+  n.amount = event.params.amount
+  n.save()
 }

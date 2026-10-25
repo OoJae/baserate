@@ -11,6 +11,7 @@ import {
   LimitsSet,
   ModuleApprovalSet,
   PausedSet,
+  PendingInvalidated,
   Revoked,
   SentinelSet,
   Submitted,
@@ -19,6 +20,7 @@ import {
   Account,
   AccountAction,
   ProfileLimit,
+  TimelockParam,
   TimelockSlot,
   TimelockSubmission,
 } from '../generated/schema'
@@ -75,9 +77,61 @@ export function handleComeBack(event: ComeBack): void {
 // ---------------------------------------------------------------------------------------------------------------
 // Timelock
 // ---------------------------------------------------------------------------------------------------------------
+//
+// A submitted call is executable from `executableAt` until `executableAt + EXECUTION_WINDOW` (it then expires), unless
+// it is revoked or an instant decrease of the same parameter invalidates it first (PendingInvalidated). The factory
+// keys parameters by selector plus the first argument word (zero for setGlobalBorrowCap); TimelockParam mirrors that
+// key so PendingInvalidated can close every call queued for it.
+
+/** BorrowAccountFactory.EXECUTION_WINDOW: 14 days. */
+export const EXECUTION_WINDOW = BigInt.fromI32(14 * 86400)
+/** `setGlobalBorrowCap(uint256)`: its parameter key has no argument word. */
+const SET_GLOBAL_BORROW_CAP = Bytes.fromHexString('0xfccdf210')
+const ZERO_WORD = Bytes.fromHexString(
+  '0x0000000000000000000000000000000000000000000000000000000000000000',
+)
 
 function slotId(data: Bytes): Bytes {
   return Bytes.fromByteArray(crypto.keccak256(data))
+}
+
+/** The parameter `data` changes, as PendingInvalidated reports it (the factory's `_paramKey`). */
+function paramOf(selector: Bytes, data: Bytes): Bytes {
+  if (selector.equals(SET_GLOBAL_BORROW_CAP) || data.length < 36) return ZERO_WORD
+  return Bytes.fromUint8Array(data.subarray(4, 36))
+}
+
+function paramId(selector: Bytes, param: Bytes): Bytes {
+  return selector.concat(param)
+}
+
+/** Drops `id` from its parameter's pending list. */
+function unlistPending(submission: TimelockSubmission): void {
+  const group = TimelockParam.load(paramId(submission.selector, submission.param))
+  if (group == null) return
+  const kept: Bytes[] = []
+  const pending = group.pending
+  for (let i = 0; i < pending.length; i++) {
+    if (!pending[i].equals(submission.id)) kept.push(pending[i])
+  }
+  group.pending = kept
+  group.save()
+}
+
+function close(
+  submission: TimelockSubmission,
+  status: string,
+  by: Bytes | null,
+  event: ethereum.Event | null,
+): void {
+  submission.status = status
+  if (event != null) {
+    submission.resolvedBy = by
+    submission.resolvedAtBlock = event.block.number
+    submission.resolvedAtTimestamp = event.block.timestamp
+    submission.resolveTransactionHash = event.transaction.hash
+  }
+  submission.save()
 }
 
 /** Closes the pending submission for `data`, if any. */
@@ -88,23 +142,34 @@ function resolve(data: Bytes, status: string, by: Bytes, event: ethereum.Event):
   if (!pendingId) return
   const submission = TimelockSubmission.load(pendingId)
   if (submission != null) {
-    submission.status = status
-    submission.resolvedBy = by
-    submission.resolvedAtBlock = event.block.number
-    submission.resolvedAtTimestamp = event.block.timestamp
-    submission.resolveTransactionHash = event.transaction.hash
-    submission.save()
+    close(submission, status, by, event)
+    unlistPending(submission)
   }
   slot.pending = null
   slot.save()
 }
 
 export function handleSubmitted(event: Submitted): void {
+  // `submit` reverts while the same calldata is live, so a submission still pending here has expired.
+  const previous = TimelockSlot.load(slotId(event.params.data))
+  if (previous != null) {
+    const previousId = previous.pending
+    if (previousId) {
+      const expired = TimelockSubmission.load(previousId)
+      if (expired != null) {
+        close(expired, 'EXPIRED', null, null)
+        unlistPending(expired)
+      }
+    }
+  }
+
   const submission = new TimelockSubmission(eventId(event))
   submission.contract = event.address
   submission.selector = event.params.selector
   submission.data = event.params.data
+  submission.param = paramOf(event.params.selector, event.params.data)
   submission.executableAt = event.params.executableAt
+  submission.expiresAt = event.params.executableAt.plus(EXECUTION_WINDOW)
   submission.status = 'PENDING'
   submission.blockNumber = event.block.number
   submission.timestamp = event.block.timestamp
@@ -114,6 +179,17 @@ export function handleSubmitted(event: Submitted): void {
   const slot = new TimelockSlot(slotId(event.params.data))
   slot.pending = submission.id
   slot.save()
+
+  const key = paramId(submission.selector, submission.param)
+  let group = TimelockParam.load(key)
+  if (group == null) {
+    group = new TimelockParam(key)
+    group.pending = [] as Bytes[]
+  }
+  const pending = group.pending
+  pending.push(submission.id)
+  group.pending = pending
+  group.save()
 
   const g = newGovernanceEvent(event, 'TIMELOCK_SUBMITTED')
   g.caller = event.transaction.from
@@ -140,6 +216,49 @@ export function handleAccepted(event: Accepted): void {
   g.caller = event.transaction.from
   g.selector = event.params.selector
   g.data = event.params.data
+  g.save()
+}
+
+/**
+ * An instant decrease (governor or sentinel) bumped the parameter's epoch: every call queued for it until now is
+ * no longer executable. Those already past their execution window are recorded as EXPIRED instead.
+ */
+export function handlePendingInvalidated(event: PendingInvalidated): void {
+  const selector = event.params.selector
+  const param = event.params.param
+  let invalidated = 0
+  const group = TimelockParam.load(paramId(selector, param))
+  if (group != null) {
+    const pending = group.pending
+    for (let i = 0; i < pending.length; i++) {
+      const submission = TimelockSubmission.load(pending[i])
+      if (submission == null || submission.status != 'PENDING') continue
+      if (event.block.timestamp.gt(submission.expiresAt)) {
+        close(submission, 'EXPIRED', null, null)
+      } else {
+        close(submission, 'INVALIDATED', event.transaction.from, event)
+        invalidated++
+      }
+      const slot = TimelockSlot.load(slotId(submission.data))
+      if (slot != null) {
+        const slotPending = slot.pending
+        if (slotPending) {
+          if (slotPending.equals(submission.id)) {
+            slot.pending = null
+            slot.save()
+          }
+        }
+      }
+    }
+    group.pending = [] as Bytes[]
+    group.save()
+  }
+
+  const g = newGovernanceEvent(event, 'TIMELOCK_INVALIDATED')
+  g.caller = event.transaction.from
+  g.selector = selector
+  g.param = param
+  g.value = BigInt.fromI32(invalidated)
   g.save()
 }
 

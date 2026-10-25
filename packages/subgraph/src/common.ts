@@ -33,6 +33,9 @@ export function getProtocol(event: ethereum.Event): Protocol {
     protocol.totalToSmusd = ZERO
     protocol.totalToBribes = ZERO
     protocol.totalToTreasury = ZERO
+    protocol.totalSmusdToTreasury = ZERO
+    protocol.feeRouterCarried = ZERO
+    protocol.smusdFailingSince = ZERO
     protocol.borrowPaused = false
     protocol.creditPaused = false
   }
@@ -66,6 +69,10 @@ export function redirectReasonName(value: i32): string {
   if (value == 0) return 'GAUGE_DEAD'
   if (value == 1) return 'VOTER_UNREADABLE'
   return 'NOTIFY_FAILED'
+}
+
+export function carryReasonName(value: i32): string {
+  return value == 0 ? 'VOTE_WINDOW_CLOSED' : 'NO_VOTES'
 }
 
 // ---------------------------------------------------------------------------------------------------------------

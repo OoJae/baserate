@@ -9,21 +9,39 @@ apiVersion 0.0.9).
 
 ## What it indexes
 
-| Data source                     | Start block | Events                                                                                                                                                                  |
-| ------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BorrowAccountFactory`          | 16364338    | AccountCreated (creates a `BorrowAccount` template per clone), ComeBack, timelock Submitted / Revoked / Accepted, every parameter and role event                        |
-| `BorrowAccount` (template)      | per clone   | Opened, Borrowed (incl. origination fee and LTV), Repaid, Exited, CollateralAdded, CollateralWithdrawn                                                                    |
-| `Morpho` (M1 only)              | 16364340    | CreateMarket, Supply, Withdraw, Borrow, Repay, SupplyCollateral, WithdrawCollateral, Liquidate, AccrueInterest. Mezo's Morpho hosts other markets; handlers skip them. |
-| `WsMUSD`                        | 16364313    | Deposit, Withdraw, RedeemedInKind, Synced, CapRaiseSubmitted / CapRaised / CapRaiseRevoked                                                                               |
-| `VMUSD` (Morpho Vault V2)       | 16366237    | Deposit, Withdraw, AccrueInterest, Allocate, Deallocate, ForceDeallocate                                                                                                 |
-| `BaserateAllocator`             | 16366247    | Rebalanced, CheckpointRecorded, IdleAllocated, MarketLiquidityPulled                                                                                                     |
-| `Backstop`                      | 16365855    | Deposit, Checkpoint, CollateralBought, RedeemRequested, RedeemClaimed, AuctionTaken, InventorySold, DepositsPausedSet                                                    |
-| `FlashLiquidator`               | 16365856    | Liquidated (joined to the Morpho Liquidate it follows in the same transaction)                                                                                          |
-| `FeeRouter`                     | 16365872    | Distributed, BribePosted, BribeRedirected                                                                                                                                |
+| Data source                | Start block | Events                                                                                                                                                                 |
+| -------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BorrowAccountFactory`     | 16364338    | AccountCreated (creates a `BorrowAccount` template per clone), ComeBack, timelock Submitted / Revoked / Accepted / PendingInvalidated, every parameter and role event  |
+| `BorrowAccount` (template) | per clone   | Opened, Borrowed (incl. origination fee and LTV), Repaid, Exited, CollateralAdded, CollateralWithdrawn, Swept                                                          |
+| `Morpho` (M1 only)         | 16364340    | CreateMarket, Supply, Withdraw, Borrow, Repay, SupplyCollateral, WithdrawCollateral, Liquidate, AccrueInterest. Mezo's Morpho hosts other markets; handlers skip them. |
+| `WsMUSD`                   | 16364313    | Deposit, Withdraw, RedeemedInKind, Synced, CapRaiseSubmitted / CapRaised / CapRaiseRevoked                                                                             |
+| `VMUSD` (Morpho Vault V2)  | 16366237    | Deposit, Withdraw, AccrueInterest, Allocate, Deallocate, ForceDeallocate                                                                                               |
+| `BaserateAllocator`        | 16366247    | Rebalanced, CheckpointRecorded, IdleAllocated, MarketLiquidityPulled                                                                                                   |
+| `Backstop`                 | 16365855    | Deposit, Checkpoint, CollateralBought, RedeemRequested, RedeemClaimed, RedeemPartiallyClaimed, AuctionTaken, InventorySold, DepositsPausedSet                          |
+| `FlashLiquidator`          | 16365856    | Liquidated (joined to the Morpho Liquidate it follows in the same transaction), NativeKept, NativeSwept                                                                |
+| `FeeRouter`                | 16365872    | Distributed, BribePosted, BribeRedirected, BribeCarried, SmusdYieldDeferred, SmusdYieldFailed, SmusdShareToTreasury                                                    |
 
 Start blocks are the contracts' deploy blocks (`packages/sdk/src/deployments/31611.json`); Morpho starts at M1's
 CreateMarket block. `pnpm check-config` verifies addresses, start blocks, the network and `src/config.ts` against
 that registry (and `contracts/deployments/31611.json`); `pnpm build` runs it first.
+
+WsMusdLiquidityAdapter is not a data source (its address only labels vMUSD's allocations), so its rescue events
+(RescueSubmitted / RescueRevoked / RescueUnwound / RescuedInKind) are not indexed.
+
+### After a redeploy
+
+Once `packages/sdk/src/deployments/31611.json` holds the new addresses and deploy blocks, one command rewrites every
+data source's `address` and `startBlock` in `subgraph.yaml` and the constants in `src/config.ts` from it, then runs the
+same check:
+
+```sh
+pnpm --filter @baserate/subgraph sync-config     # = check-config --write
+```
+
+Morpho's start block is `markets.M1.block` when the registry has one, 16364340 for today's M1, and otherwise the
+factory's deploy block (the deploy script creates M1 right after the factory, in the same broadcast). Then update the
+start blocks in the table above, `pnpm --filter @baserate/subgraph build`, and deploy under a new version (below). The unit tests read M1, wsMUSD and
+the M1 adapter from `src/config.ts`, so they keep passing after a sync.
 
 ### Entities
 
@@ -40,12 +58,26 @@ Aggregates (mutable):
 - `Vault` for wsMUSD, vMUSD and the backstop: supply, total assets, latest share price, flow counts and totals, and
   per-kind state (vesting, backstop inventory and reserved exits, vMUSD fee shares). `SharePricePoint` keeps at most
   one share-price observation per vault per block.
-- `RedeemRequest`: a backstop exit, updated when claimed. `TimelockSubmission`: a queued factory call and how it ended.
+- `RedeemRequest`: a backstop exit. A claim that cash cannot cover pays what there is (RedeemClaimed) and keeps the rest
+  queued (RedeemPartiallyClaimed), so a request stays open across partial payments: `status` (PENDING,
+  PARTIALLY_CLAIMED, CLAIMED), `sharesLeft` / `assetsLeft` (the contract's `redeemRequest(id)`), `paidAssets`,
+  `burnedShares`, `claimCount`, and each payment as a VaultFlow in `payments`. `shares` / `assets` stay the original
+  request; `claimed` and `claimedAssets` (total paid) are set only by the final payment.
+- `TimelockSubmission`: a queued factory call and how it ended (ACCEPTED, REVOKED, INVALIDATED by a decrease of the same
+  parameter, or EXPIRED). It is executable from `executableAt` until `expiresAt` (+14 days); a PENDING submission
+  past `expiresAt` has expired (it is marked EXPIRED only when the same call is resubmitted or its parameter is cut).
 
-Events (immutable): `AccountAction`, `MarketEvent`, `Liquidation` (mutable only so FlashLiquidator can add venue,
-proceeds and profit), `VaultFlow`, `WsMusdSync`, `VaultAllocation`, `Rebalance`, `AllocatorFlow`,
-`AllocatorCheckpoint`, `BackstopTrade`, `Distribution` (id = transaction hash) with its `Bribe`s, and
-`GovernanceEvent` (parameter and role changes on the factory, wsMUSD and the backstop).
+Events (immutable): `AccountAction` (incl. SWEPT), `MarketEvent`, `Liquidation` (mutable only so FlashLiquidator can
+add venue, proceeds, profit and `nativeKept`), `FlashLiquidatorNative` (NativeKept / NativeSwept), `VaultFlow`,
+`WsMusdSync`, `VaultAllocation`, `Rebalance`, `AllocatorFlow`, `AllocatorCheckpoint`, `BackstopTrade`,
+`Distribution` (id = transaction hash) with its `Bribe`s (posted or redirected) and `BribeCarry`s, and
+`GovernanceEvent` (parameter and role changes on the factory, wsMUSD and the backstop, incl. TIMELOCK_INVALIDATED).
+
+`Distribution` follows the FeeRouter's `total == toSmusd + toBribes + toTreasury + retained`: `toSmusd` is what sMUSD
+actually took, `toTreasury` includes `smusdToTreasury` (the sMUSD leg paid to the treasury once sMUSD has failed past
+its grace period), and `retained` is `bribesCarried + smusdCarried`; `smusdOutcome` says what happened to the sMUSD leg
+(NONE, DONATED, DEFERRED, FAILED, TO_TREASURY). `Protocol` adds `totalSmusdToTreasury`, `feeRouterCarried` (the last
+`retained`) and `smusdFailingSince` (0 while sMUSD is healthy).
 
 Share prices come from events only (no eth_calls): vMUSD replays Vault V2's stored total assets and fee shares
 exactly; the backstop uses each Checkpoint's book over the supply; wsMUSD uses each flow's assets / shares (exact up to
@@ -59,6 +91,7 @@ pnpm install                                  # from the repo root
 pnpm --filter @baserate/subgraph build        # check-config, graph codegen, graph build → build/
 pnpm --filter @baserate/subgraph test:unit    # matchstick unit tests (downloads the matchstick 0.6.0 binary once)
 pnpm --filter @baserate/subgraph abis         # refresh abis/ from a forge build (see scripts/extract-abis.mjs)
+pnpm --filter @baserate/subgraph sync-config  # rewrite addresses / start blocks from the SDK registry, then check
 ```
 
 `abis/` holds the event fragments of each contract's ABI (the mappings make no contract calls). To refresh them after
@@ -72,12 +105,16 @@ cd contracts && FOUNDRY_OUT=out-subgraph FOUNDRY_CACHE_PATH=cache-subgraph forge
 cd .. && pnpm --filter @baserate/subgraph abis && ./node_modules/.bin/biome format --write packages/subgraph/abis
 ```
 
+A full build in the default out dir works too: `cd contracts && forge build`, then
+`pnpm --filter @baserate/subgraph abis ../../contracts/out` (the path is relative to `packages/subgraph`).
+
 Morpho Blue compiles with solc 0.8.19, which leaves library events out of the contract ABI, so `abis/Morpho.json` is
 morpho-blue's `EventsLib`.
 
-The unit tests (`tests/`) replay mocked events through the handlers: M1 position and market replay, the
-FlashLiquidator join and bad debt, distributions and bribes, the backstop exit queue, vMUSD and wsMUSD share prices,
-rebalances and the factory timelock. `assemblyscript` 0.19.23 is a direct dev dependency only because matchstick
+The unit tests (`tests/`) replay mocked events through the handlers: M1 position and market replay, BorrowAccount
+sweeps, the FlashLiquidator join, NativeKept / NativeSwept and bad debt, distributions with bribes, carries and the
+sMUSD fallback, the backstop exit queue including a partial claim, vMUSD and wsMUSD share prices, rebalances and the
+factory timelock (acceptance, PendingInvalidated, expiry). `assemblyscript` 0.19.23 is a direct dev dependency only because matchstick
 looks for `node_modules/assemblyscript/bin/asc` inside this package.
 
 ## Deploy to Goldsky
@@ -141,17 +178,40 @@ M1 utilization over time and the last liquidations:
 }
 ```
 
-Fee distributions with their bribes, and vault share prices:
+Fee distributions with their bribes and carries, and vault share prices:
 
 ```graphql
 {
   distributions(orderBy: blockNumber, orderDirection: desc) {
-    total toSmusd toBribes toTreasury epochStart timestamp
+    total toSmusd toBribes toTreasury retained epochStart timestamp
+    bribesCarried smusdCarried smusdToTreasury smusdOutcome smusdFailingSince
     bribes { gauge bribe amount posted redirectReason }
+    bribeCarries { gauge amount reason }
   }
   vaults { kind totalSupply totalAssets sharePrice }
   sharePricePoints(where: { vault: "0x92aa0306c3af1e02d776ea05857653a3839debeb" }, orderBy: blockNumber, first: 1000) {
     sharePrice source timestamp
+  }
+}
+```
+
+An owner's backstop exits, open ones first, with every payment:
+
+```graphql
+query ($owner: Bytes!) {
+  redeemRequests(where: { owner: $owner }, orderBy: requestId, orderDirection: desc) {
+    requestId status shares assets sharesLeft assetsLeft paidAssets claimableAt receiver
+    payments(orderBy: timestamp) { assets shares timestamp transactionHash }
+  }
+}
+```
+
+Factory calls that can still be executed (`$now`: current unix time):
+
+```graphql
+query ($now: BigInt!) {
+  timelockSubmissions(where: { status: PENDING, expiresAt_gte: $now }) {
+    selector data executableAt expiresAt transactionHash
   }
 }
 ```

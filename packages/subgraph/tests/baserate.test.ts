@@ -11,16 +11,25 @@ import {
   Deposit as BackstopDeposit,
   Checkpoint,
   RedeemClaimed,
+  RedeemPartiallyClaimed,
   RedeemRequested,
 } from '../generated/Backstop/Backstop'
 import { CheckpointRecorded, Rebalanced } from '../generated/BaserateAllocator/BaserateAllocator'
 import {
   Accepted,
   AccountCreated,
+  PendingInvalidated,
   Submitted,
 } from '../generated/BorrowAccountFactory/BorrowAccountFactory'
-import { BribePosted, BribeRedirected, Distributed } from '../generated/FeeRouter/FeeRouter'
-import { Liquidated } from '../generated/FlashLiquidator/FlashLiquidator'
+import {
+  BribeCarried,
+  BribePosted,
+  BribeRedirected,
+  Distributed,
+  SmusdShareToTreasury,
+  SmusdYieldFailed,
+} from '../generated/FeeRouter/FeeRouter'
+import { Liquidated, NativeKept, NativeSwept } from '../generated/FlashLiquidator/FlashLiquidator'
 import {
   AccrueInterest,
   Borrow,
@@ -31,22 +40,38 @@ import {
   SupplyCollateral,
   WithdrawCollateral,
 } from '../generated/Morpho/Morpho'
+import { Swept } from '../generated/templates/BorrowAccount/BorrowAccount'
 import {
   Allocate,
   AccrueInterest as VaultAccrueInterest,
   Deposit as VaultDeposit,
 } from '../generated/VMUSD/VaultV2'
 import { Synced, Deposit as WsDeposit } from '../generated/WsMUSD/WsMUSD'
+import { handleSwept } from '../src/account'
 import { handleCheckpointRecorded, handleRebalanced } from '../src/allocator'
 import {
   handleDeposit as handleBackstopDeposit,
   handleCheckpoint,
   handleRedeemClaimed,
+  handleRedeemPartiallyClaimed,
   handleRedeemRequested,
 } from '../src/backstop'
-import { handleAccepted, handleAccountCreated, handleSubmitted } from '../src/factory'
-import { handleBribePosted, handleBribeRedirected, handleDistributed } from '../src/fee-router'
-import { handleLiquidated } from '../src/flash-liquidator'
+import { M1_ADAPTER, M1_MARKET_ID, WS_MUSD } from '../src/config'
+import {
+  handleAccepted,
+  handleAccountCreated,
+  handlePendingInvalidated,
+  handleSubmitted,
+} from '../src/factory'
+import {
+  handleBribeCarried,
+  handleBribePosted,
+  handleBribeRedirected,
+  handleDistributed,
+  handleSmusdShareToTreasury,
+  handleSmusdYieldFailed,
+} from '../src/fee-router'
+import { handleLiquidated, handleNativeKept, handleNativeSwept } from '../src/flash-liquidator'
 import {
   handleAccrueInterest,
   handleBorrow,
@@ -78,6 +103,8 @@ import {
   wad,
 } from './helpers'
 
+// Emitting addresses: any address works (the mappings key vaults by event.address). M1, wsMUSD and the M1 adapter
+// come from src/config.ts, which the mappings compare against.
 const FACTORY = '0xa3a03cd439b4ccb7292ef21a23bb6bb36a4b86fe'
 const MORPHO = '0xce1da828ca15cb1fdafa84c366a53c8106655a73'
 const FLASH = '0x8259050ff9976c9154042ec9d955db8face929c8'
@@ -85,15 +112,15 @@ const FEE_ROUTER = '0x8266d915fb60ac45998bb919a815c8013b9bf1bc'
 const BACKSTOP = '0xc06239d0cb52e51cc0edcf4b181da7ccacd1ac01'
 const VMUSD = '0x00890f9e2367acf6ac26cc06d8bf6c4270da7440'
 const ALLOCATOR = '0x5a28c3f024aecddc4828f2e5841038f647d8a067'
-const WS_MUSD = '0x92aa0306c3af1e02d776ea05857653a3839debeb'
-const M1_ADAPTER = '0xffbdbe74f1f118dde2c2fe09286f3aa9f448b394'
-const M1 = '0xadd5f62435744e4fe91c94212024eba66fe93af38824bf264dee64258aebb13b'
+const M1 = M1_MARKET_ID
 const OTHER_MARKET = '0x1111111111111111111111111111111111111111111111111111111111111111'
 const OWNER = '0x0000000000000000000000000000000000000a11'
 const ACCOUNT = '0x0000000000000000000000000000000000000acc'
 const KEEPER = '0x000000000000000000000000000000000000beef'
 const GAUGE = '0x0000000000000000000000000000000000006a06'
 const BRIBE = '0x000000000000000000000000000000000000b41b'
+const MUSD = '0x118917a40faf1cd7a13db0ef56c86de7973ac503'
+const TREASURY = '0x0000000000000000000000000000000000007eaa'
 const SHARES = BigInt.fromString('1000000') // Morpho virtual shares per asset unit
 const ZERO_BI = BigInt.zero()
 
@@ -238,6 +265,24 @@ describe('accounts and M1 positions', () => {
     assert.entityCount('MarketDailySnapshot', 1)
   })
 
+  test('BorrowAccount.Swept records a SWEPT action for the owner', () => {
+    handleSwept(
+      changetype<Swept>(
+        mockEvent(ACCOUNT, txHash(6), 0, 16, [
+          pAddress('token', MUSD),
+          pAddress('to', OWNER),
+          pUint('amount', wad(3)),
+        ]),
+      ),
+    )
+    const id = eventIdHex(txHash(6), 0)
+    assert.fieldEquals('AccountAction', id, 'kind', 'SWEPT')
+    assert.fieldEquals('AccountAction', id, 'owner', OWNER)
+    assert.fieldEquals('AccountAction', id, 'token', MUSD)
+    assert.fieldEquals('AccountAction', id, 'amount', wad(3).toString())
+    assert.fieldEquals('AccountAction', id, 'recipient', OWNER)
+  })
+
   test('events of other Morpho markets are ignored', () => {
     supply(OTHER_MARKET, wad(1), 14)
     assert.notInStore('Market', OTHER_MARKET)
@@ -326,6 +371,48 @@ describe('liquidations', () => {
     assert.fieldEquals('Protocol', 'baserate', 'totalLiquidatorProfit', wad(12).toString())
   })
 
+  test('NativeKept joins the liquidation it follows; NativeSwept is recorded on its own', () => {
+    const tx = txHash(52)
+    liquidate(tx, 3, wad(400), wad(1), ZERO_BI)
+    handleLiquidated(
+      changetype<Liquidated>(
+        mockEvent(FLASH, tx, 9, 20, [
+          pAddress('caller', KEEPER),
+          pAddress('borrower', ACCOUNT),
+          pSmall('venue', 2),
+          pUint('seized', wad(1)),
+          pUint('repaid', wad(400)),
+          pUint('proceeds', wad(410)),
+          pUint('profit', wad(10)),
+        ]),
+      ),
+    )
+    const leftover = BigInt.fromI32(12345)
+    handleNativeKept(
+      changetype<NativeKept>(
+        mockEvent(FLASH, tx, 10, 20, [pAddress('caller', KEEPER), pUint('amount', leftover)]),
+      ),
+    )
+    const liquidation = eventIdHex(tx, 3)
+    assert.fieldEquals('Liquidation', liquidation, 'nativeKept', leftover.toString())
+    assert.fieldEquals('FlashLiquidatorNative', eventIdHex(tx, 10), 'kind', 'KEPT')
+    assert.fieldEquals('FlashLiquidatorNative', eventIdHex(tx, 10), 'liquidation', liquidation)
+
+    handleNativeSwept(
+      changetype<NativeSwept>(
+        mockEvent(FLASH, txHash(53), 0, 21, [
+          pAddress('caller', OWNER),
+          pAddress('to', KEEPER),
+          pUint('amount', leftover),
+        ]),
+      ),
+    )
+    const swept = eventIdHex(txHash(53), 0)
+    assert.fieldEquals('FlashLiquidatorNative', swept, 'kind', 'SWEPT')
+    assert.fieldEquals('FlashLiquidatorNative', swept, 'to', KEEPER)
+    assert.fieldEquals('FlashLiquidatorNative', swept, 'amount', leftover.toString())
+  })
+
   test('bad debt clears the position and is socialised', () => {
     liquidate(txHash(51), 0, wad(300), wad(2), wad(700))
     assert.fieldEquals('Account', ACCOUNT, 'collateral', '0')
@@ -384,8 +471,109 @@ describe('fee distributions', () => {
     assert.fieldEquals('Bribe', eventIdHex(tx, 2), 'redirectReason', 'GAUGE_DEAD')
     assert.fieldEquals('Protocol', 'baserate', 'totalDistributed', wad(10).toString())
     assert.fieldEquals('Protocol', 'baserate', 'distributionCount', '1')
+    assert.fieldEquals('Distribution', tx.toHexString(), 'smusdOutcome', 'DONATED')
+    assert.fieldEquals('Distribution', tx.toHexString(), 'bribesCarried', '0')
+  })
+
+  test('carries and the sMUSD fallback are split out of retained and toTreasury', () => {
+    const epoch = BigInt.fromI32(1760054400)
+    const since = BigInt.fromI32(1760000000)
+
+    // 10 MUSD of new fees: the gauge's 4 is carried (vote window closed), sMUSD's 4 fails and is carried.
+    const first = txHash(61)
+    handleBribeCarried(
+      changetype<BribeCarried>(
+        mockEvent(FEE_ROUTER, first, 1, 31, [
+          pAddress('gauge', GAUGE),
+          pUint('amount', wad(4)),
+          pSmall('reason', 0),
+        ]),
+      ),
+    )
+    handleSmusdYieldFailed(
+      changetype<SmusdYieldFailed>(
+        mockEvent(FEE_ROUTER, first, 3, 31, [
+          pUint('amount', wad(4)),
+          pUint('failingSince', since),
+        ]),
+      ),
+    )
+    distributed(first, 4, 31, epoch, wad(10), ZERO_BI, ZERO_BI, wad(2), wad(8))
+    const d1 = first.toHexString()
+    assert.fieldEquals('Distribution', d1, 'bribesCarried', wad(4).toString())
+    assert.fieldEquals('Distribution', d1, 'smusdCarried', wad(4).toString())
+    assert.fieldEquals('Distribution', d1, 'smusdToTreasury', '0')
+    assert.fieldEquals('Distribution', d1, 'smusdOutcome', 'FAILED')
+    assert.fieldEquals('Distribution', d1, 'smusdFailingSince', since.toString())
+    assert.fieldEquals('BribeCarry', eventIdHex(first, 1), 'distribution', d1)
+    assert.fieldEquals('BribeCarry', eventIdHex(first, 1), 'reason', 'VOTE_WINDOW_CLOSED')
+    assert.notInStore('PendingDistribution', d1)
+    assert.fieldEquals('Protocol', 'baserate', 'feeRouterCarried', wad(8).toString())
+    assert.fieldEquals('Protocol', 'baserate', 'smusdFailingSince', since.toString())
+
+    // Two epochs later: 10 new + 8 carried. The bribe posts 8; sMUSD still fails, so its 8 go to the treasury.
+    const second = txHash(62)
+    handleBribePosted(
+      changetype<BribePosted>(
+        mockEvent(FEE_ROUTER, second, 1, 32, [
+          pAddress('gauge', GAUGE),
+          pAddress('bribe', BRIBE),
+          pUint('epochStart', epoch),
+          pUint('amount', wad(8)),
+        ]),
+      ),
+    )
+    handleSmusdShareToTreasury(
+      changetype<SmusdShareToTreasury>(
+        mockEvent(FEE_ROUTER, second, 3, 32, [
+          pAddress('treasury', TREASURY),
+          pUint('amount', wad(8)),
+          pUint('failingSince', since),
+        ]),
+      ),
+    )
+    distributed(second, 4, 32, epoch, wad(18), ZERO_BI, wad(8), wad(10), ZERO_BI)
+    const d2 = second.toHexString()
+    assert.fieldEquals('Distribution', d2, 'smusdToTreasury', wad(8).toString())
+    assert.fieldEquals('Distribution', d2, 'smusdOutcome', 'TO_TREASURY')
+    assert.fieldEquals('Distribution', d2, 'bribesCarried', '0')
+    assert.fieldEquals('Protocol', 'baserate', 'totalSmusdToTreasury', wad(8).toString())
+    assert.fieldEquals('Protocol', 'baserate', 'totalToTreasury', wad(12).toString())
+    assert.fieldEquals('Protocol', 'baserate', 'feeRouterCarried', '0')
+
+    // A full donation ends the failure streak.
+    distributed(txHash(63), 2, 33, epoch, wad(10), wad(4), wad(4), wad(2), ZERO_BI)
+    assert.fieldEquals('Distribution', txHash(63).toHexString(), 'smusdOutcome', 'DONATED')
+    assert.fieldEquals('Protocol', 'baserate', 'smusdFailingSince', '0')
+    assert.entityCount('PendingDistribution', 0)
   })
 })
+
+function distributed(
+  tx: Bytes,
+  logIndex: i32,
+  block: i32,
+  epoch: BigInt,
+  total: BigInt,
+  toSmusd: BigInt,
+  toBribes: BigInt,
+  toTreasury: BigInt,
+  retained: BigInt,
+): void {
+  handleDistributed(
+    changetype<Distributed>(
+      mockEvent(FEE_ROUTER, tx, logIndex, block, [
+        pAddress('caller', KEEPER),
+        pUint('epochStart', epoch),
+        pUint('total', total),
+        pUint('toSmusd', toSmusd),
+        pUint('toBribes', toBribes),
+        pUint('toTreasury', toTreasury),
+        pUint('retained', retained),
+      ]),
+    ),
+  )
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Backstop
@@ -434,6 +622,8 @@ describe('backstop exits', () => {
       ),
     )
     assert.fieldEquals('RedeemRequest', '0', 'claimed', 'false')
+    assert.fieldEquals('RedeemRequest', '0', 'status', 'PENDING')
+    assert.fieldEquals('RedeemRequest', '0', 'sharesLeft', wad(40).toString())
     assert.fieldEquals('Vault', BACKSTOP, 'reservedAssets', wad(40).toString())
     assert.fieldEquals('Vault', BACKSTOP, 'pendingRedeemCount', '1')
 
@@ -450,7 +640,9 @@ describe('backstop exits', () => {
       ),
     )
     assert.fieldEquals('RedeemRequest', '0', 'claimed', 'true')
+    assert.fieldEquals('RedeemRequest', '0', 'status', 'CLAIMED')
     assert.fieldEquals('RedeemRequest', '0', 'claimedAssets', wad(40).toString())
+    assert.fieldEquals('RedeemRequest', '0', 'sharesLeft', '0')
     assert.fieldEquals('Vault', BACKSTOP, 'totalSupply', wad(60).toString())
     assert.fieldEquals('Vault', BACKSTOP, 'reservedAssets', '0')
     assert.fieldEquals('Vault', BACKSTOP, 'pendingRedeemCount', '0')
@@ -458,7 +650,95 @@ describe('backstop exits', () => {
     const point = Bytes.fromHexString(BACKSTOP).concatI32(80).toHexString()
     assert.fieldEquals('SharePricePoint', point, 'sharePrice', WAD.toString())
   })
+
+  test('a partial claim keeps the request open with the remainder; the last payment closes it', () => {
+    checkpoint(ZERO_BI, 70, 0)
+    handleBackstopDeposit(
+      changetype<BackstopDeposit>(
+        mockEvent(BACKSTOP, txHash(70), 1, 70, [
+          pAddress('sender', OWNER),
+          pAddress('owner', OWNER),
+          pUint('assets', wad(100)),
+          pUint('shares', wad(100)),
+        ]),
+      ),
+    )
+    // The deposit's closing Checkpoint (after Deposit) sets the exact book.
+    checkpoint(wad(100), 70, 2)
+    redeemRequested(wad(100), wad(100), 71)
+
+    // Cash covers 30: pays 30, burns ceil(100 x 30 / 100) = 30 shares, keeps 70 shares (NAV cap 70) queued.
+    checkpoint(wad(70), 80, 1)
+    redeemClaimed(wad(30), wad(30), 80, 2)
+    handleRedeemPartiallyClaimed(
+      changetype<RedeemPartiallyClaimed>(
+        mockEvent(BACKSTOP, txHash(80), 3, 80, [
+          pUint('id', ZERO_BI),
+          pUint('sharesLeft', wad(70)),
+          pUint('assetsLeft', wad(70)),
+        ]),
+      ),
+    )
+    assert.fieldEquals('RedeemRequest', '0', 'status', 'PARTIALLY_CLAIMED')
+    assert.fieldEquals('RedeemRequest', '0', 'claimed', 'false')
+    assert.fieldEquals('RedeemRequest', '0', 'shares', wad(100).toString())
+    assert.fieldEquals('RedeemRequest', '0', 'sharesLeft', wad(70).toString())
+    assert.fieldEquals('RedeemRequest', '0', 'assetsLeft', wad(70).toString())
+    assert.fieldEquals('RedeemRequest', '0', 'paidAssets', wad(30).toString())
+    assert.fieldEquals('RedeemRequest', '0', 'burnedShares', wad(30).toString())
+    assert.fieldEquals('RedeemRequest', '0', 'claimCount', '1')
+    assert.fieldEquals('RedeemRequest', '0', 'lastClaimTransactionHash', txHash(80).toHexString())
+    assert.fieldEquals('Vault', BACKSTOP, 'reservedAssets', wad(70).toString())
+    assert.fieldEquals('Vault', BACKSTOP, 'pendingRedeemCount', '1')
+    assert.fieldEquals('Vault', BACKSTOP, 'totalSupply', wad(70).toString())
+    assert.fieldEquals('VaultFlow', eventIdHex(txHash(80), 2), 'redeemRequest', '0')
+
+    // Later the book is 65 for the 70 shares left: the claim pays min(70, 65) and burns the rest.
+    checkpoint(ZERO_BI, 90, 1)
+    redeemClaimed(wad(70), wad(65), 90, 2)
+    assert.fieldEquals('RedeemRequest', '0', 'status', 'CLAIMED')
+    assert.fieldEquals('RedeemRequest', '0', 'claimed', 'true')
+    assert.fieldEquals('RedeemRequest', '0', 'claimedAssets', wad(95).toString())
+    assert.fieldEquals('RedeemRequest', '0', 'paidAssets', wad(95).toString())
+    assert.fieldEquals('RedeemRequest', '0', 'sharesLeft', '0')
+    assert.fieldEquals('RedeemRequest', '0', 'assetsLeft', '0')
+    assert.fieldEquals('RedeemRequest', '0', 'claimCount', '2')
+    assert.fieldEquals('RedeemRequest', '0', 'claimTransactionHash', txHash(90).toHexString())
+    assert.fieldEquals('Vault', BACKSTOP, 'reservedAssets', '0')
+    assert.fieldEquals('Vault', BACKSTOP, 'pendingRedeemCount', '0')
+    assert.fieldEquals('Vault', BACKSTOP, 'totalSupply', '0')
+    assert.fieldEquals('Vault', BACKSTOP, 'withdrawCount', '2')
+    assert.fieldEquals('Vault', BACKSTOP, 'totalWithdrawn', wad(95).toString())
+  })
 })
+
+function redeemRequested(shares: BigInt, assets: BigInt, block: i32): void {
+  handleRedeemRequested(
+    changetype<RedeemRequested>(
+      mockEvent(BACKSTOP, txHash(block), 1, block, [
+        pUint('id', ZERO_BI),
+        pAddress('owner', OWNER),
+        pAddress('receiver', OWNER),
+        pUint('shares', shares),
+        pUint('assets', assets),
+        pUint('claimableAt', BigInt.fromI32(1760999999)),
+      ]),
+    ),
+  )
+}
+
+function redeemClaimed(shares: BigInt, assets: BigInt, block: i32, logIndex: i32): void {
+  handleRedeemClaimed(
+    changetype<RedeemClaimed>(
+      mockEvent(BACKSTOP, txHash(block), logIndex, block, [
+        pUint('id', ZERO_BI),
+        pAddress('receiver', OWNER),
+        pUint('shares', shares),
+        pUint('assets', assets),
+      ]),
+    ),
+  )
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Vaults and allocator
@@ -626,6 +906,109 @@ describe('factory timelock', () => {
       'resolveTransactionHash',
       txHash(101).toHexString(),
     )
+    assert.fieldEquals('TimelockSubmission', id, 'expiresAt', '1761382400')
     assert.entityCount('GovernanceEvent', 2)
   })
+
+  test('PendingInvalidated closes only the calls queued for the decreased parameter', () => {
+    const cap = Bytes.fromHexString(SET_CAP + word('0de0b6b3a7640000'))
+    const canary = Bytes.fromHexString(
+      SET_LIMITS + word('01') + word('0de0b6b3a7640000') + word('1c84'),
+    )
+    const standard = Bytes.fromHexString(
+      SET_LIMITS + word('00') + word('0de0b6b3a7640000') + word('1c84'),
+    )
+    submitted(cap, 110)
+    submitted(canary, 111)
+    submitted(standard, 112)
+    const capId = eventIdHex(txHash(110), 0)
+    const canaryId = eventIdHex(txHash(111), 0)
+    const standardId = eventIdHex(txHash(112), 0)
+    assert.fieldEquals('TimelockSubmission', capId, 'param', ZERO_WORD)
+    assert.fieldEquals('TimelockSubmission', canaryId, 'param', '0x' + word('01'))
+
+    // A cap cut invalidates the queued cap raise only (its param is always zero).
+    invalidated(SET_CAP, ZERO_WORD, 113)
+    assert.fieldEquals('TimelockSubmission', capId, 'status', 'INVALIDATED')
+    assert.fieldEquals(
+      'TimelockSubmission',
+      capId,
+      'resolveTransactionHash',
+      txHash(113).toHexString(),
+    )
+    assert.fieldEquals('TimelockSubmission', canaryId, 'status', 'PENDING')
+    assert.fieldEquals('TimelockSubmission', standardId, 'status', 'PENDING')
+    assert.fieldEquals(
+      'GovernanceEvent',
+      eventIdHex(txHash(113), 0),
+      'kind',
+      'TIMELOCK_INVALIDATED',
+    )
+    assert.fieldEquals('GovernanceEvent', eventIdHex(txHash(113), 0), 'value', '1')
+
+    // A CANARY limits cut leaves the STANDARD raise queued.
+    invalidated(SET_LIMITS, '0x' + word('01'), 114)
+    assert.fieldEquals('TimelockSubmission', canaryId, 'status', 'INVALIDATED')
+    assert.fieldEquals('TimelockSubmission', standardId, 'status', 'PENDING')
+
+    // The same cap raise can be queued again, and its execution resolves the new submission.
+    submitted(cap, 115)
+    handleAccepted(
+      changetype<Accepted>(
+        mockEvent(FACTORY, txHash(116), 0, 116, [pFixed('selector', SET_CAP), pBytes('data', cap)]),
+      ),
+    )
+    assert.fieldEquals('TimelockSubmission', eventIdHex(txHash(115), 0), 'status', 'ACCEPTED')
+    assert.fieldEquals('TimelockSubmission', capId, 'status', 'INVALIDATED')
+  })
+
+  test('an expired submission is marked EXPIRED when resubmitted or invalidated', () => {
+    const cap = Bytes.fromHexString(SET_CAP + word('0de0b6b3a7640000'))
+    const limits = Bytes.fromHexString(
+      SET_LIMITS + word('00') + word('0de0b6b3a7640000') + word('1c84'),
+    )
+    // executableAt far in the past: the 14-day window ended before these blocks.
+    submittedAt(cap, 120, BigInt.fromI32(1000))
+    submittedAt(limits, 121, BigInt.fromI32(1000))
+    submitted(cap, 122)
+    assert.fieldEquals('TimelockSubmission', eventIdHex(txHash(120), 0), 'status', 'EXPIRED')
+    assert.fieldEquals('TimelockSubmission', eventIdHex(txHash(122), 0), 'status', 'PENDING')
+
+    invalidated(SET_LIMITS, ZERO_WORD, 123)
+    assert.fieldEquals('TimelockSubmission', eventIdHex(txHash(121), 0), 'status', 'EXPIRED')
+    assert.fieldEquals('GovernanceEvent', eventIdHex(txHash(123), 0), 'value', '0')
+  })
 })
+
+const SET_CAP = '0xfccdf210' // setGlobalBorrowCap(uint256)
+const SET_LIMITS = '0x8c793536' // setLimits(uint8,uint128,uint16)
+const ZERO_WORD = '0x0000000000000000000000000000000000000000000000000000000000000000'
+
+/** A 32-byte ABI word (hex, no 0x) holding `hex`, left-padded. */
+function word(hex: string): string {
+  return '0000000000000000000000000000000000000000000000000000000000000000'.slice(hex.length) + hex
+}
+
+function submittedAt(data: Bytes, n: i32, executableAt: BigInt): void {
+  handleSubmitted(
+    changetype<Submitted>(
+      mockEvent(FACTORY, txHash(n), 0, n, [
+        pFixed('selector', data.toHexString().slice(0, 10)),
+        pBytes('data', data),
+        pUint('executableAt', executableAt),
+      ]),
+    ),
+  )
+}
+
+function submitted(data: Bytes, n: i32): void {
+  submittedAt(data, n, BigInt.fromI32(1760172800))
+}
+
+function invalidated(selector: string, param: string, n: i32): void {
+  handlePendingInvalidated(
+    changetype<PendingInvalidated>(
+      mockEvent(FACTORY, txHash(n), 0, n, [pFixed('selector', selector), pFixed('param', param)]),
+    ),
+  )
+}

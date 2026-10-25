@@ -8,6 +8,7 @@
   "scripts": {
     "abis": "node scripts/extract-abis.mjs",
     "check-config": "node scripts/check-config.mjs",
+    "sync-config": "node scripts/check-config.mjs --write",
     "codegen": "graph codegen",
     "build": "node scripts/check-config.mjs && graph codegen && graph build",
     "test:unit": "graph codegen && graph test -v 0.6.0",

@@ -3,8 +3,12 @@
 // (packages/sdk/src/deployments/31611.json) and, when present, contracts/deployments/31611.json.
 //
 //   pnpm --filter @baserate/subgraph check-config     (also the first step of `pnpm build`)
+//   pnpm --filter @baserate/subgraph sync-config      (= check-config --write)
+//
+// With --write it first rewrites every data source's address and startBlock in subgraph.yaml, and the constants in
+// src/config.ts, from the SDK registry (after a redeploy), then verifies as usual. Nothing else in those files changes.
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -12,16 +16,24 @@ const here = dirname(fileURLToPath(import.meta.url))
 const pkg = resolve(here, '..')
 const repo = resolve(pkg, '..', '..')
 const NETWORK = 'mezo-testnet'
-/** Block of M1's CreateMarket on Morpho (tx 0x4810d361…), where the Morpho data source starts. */
-const M1_CREATED_BLOCK = 16364340
+const WRITE = process.argv.includes('--write')
+/** Blocks of M1's CreateMarket on Morpho, by market id (0xadd5…: tx 0x4810d361…). */
+const M1_CREATED_BLOCKS = {
+  '0xadd5f62435744e4fe91c94212024eba66fe93af38824bf264dee64258aebb13b': 16364340,
+}
 
 const registry = JSON.parse(
   readFileSync(join(repo, 'packages', 'sdk', 'src', 'deployments', '31611.json'), 'utf8'),
 )
 const c = registry.contracts
+// Where the Morpho data source starts: M1's CreateMarket block. Deploy.s.sol creates M1 right after deploying the
+// factory in the same broadcast, so for a market this script does not know (a redeploy), the factory's block is a
+// safe start (Morpho events of other markets in between are skipped by the mappings).
+const m1Id = registry.markets.M1.id.toLowerCase()
+const m1Block = registry.markets.M1.block ?? M1_CREATED_BLOCKS[m1Id] ?? c.factory.block
 const expected = {
   BorrowAccountFactory: { address: c.factory.address, startBlock: c.factory.block },
-  Morpho: { address: registry.external.morpho, startBlock: M1_CREATED_BLOCK },
+  Morpho: { address: registry.external.morpho, startBlock: m1Block },
   WsMUSD: { address: c.wsMusd.address, startBlock: c.wsMusd.block },
   VMUSD: { address: c.vMusd.address, startBlock: c.vMusd.block },
   BaserateAllocator: { address: c.allocator.address, startBlock: c.allocator.block },
@@ -38,9 +50,44 @@ const constants = {
 
 const problems = []
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase()
+const manifestPath = join(pkg, 'subgraph.yaml')
+const configPath = join(pkg, 'src', 'config.ts')
+const DATA_SOURCE = /(\n {2}- kind: ethereum\n)/
+
+if (WRITE) {
+  // subgraph.yaml: per data source, its `address:` and `startBlock:` lines (templates have neither).
+  const before = readFileSync(manifestPath, 'utf8')
+  const parts = before.split(DATA_SOURCE)
+  for (let i = 2; i < parts.length; i += 2) {
+    const name = parts[i].match(/^ {4}name: (\S+)/m)?.[1]
+    const want = name && expected[name]
+    if (!want) continue
+    parts[i] = parts[i]
+      .replace(/^( {6}address: )["']?0x[0-9a-fA-F]{40}["']?$/m, `$1"${want.address}"`)
+      .replace(/^( {6}startBlock: )\d+$/m, `$1${want.startBlock}`)
+  }
+  const after = parts.join('')
+  if (after !== before) writeFileSync(manifestPath, after)
+
+  // src/config.ts: the lowercase constants.
+  const configBefore = readFileSync(configPath, 'utf8')
+  let configAfter = configBefore
+  for (const [key, value] of Object.entries(constants)) {
+    configAfter = configAfter.replace(
+      new RegExp(`(export const ${key} = ')0x[0-9a-fA-F]+(')`),
+      `$1${value.toLowerCase()}$2`,
+    )
+  }
+  if (configAfter !== configBefore) writeFileSync(configPath, configAfter)
+  console.log(
+    `sync-config: subgraph.yaml ${after === before ? 'unchanged' : 'updated'}, src/config.ts ${
+      configAfter === configBefore ? 'unchanged' : 'updated'
+    } (from packages/sdk/src/deployments/31611.json)`,
+  )
+}
 
 // subgraph.yaml: one block per data source / template, split on the list markers.
-const manifest = readFileSync(join(pkg, 'subgraph.yaml'), 'utf8')
+const manifest = readFileSync(manifestPath, 'utf8')
 const blocks = manifest.split(/\n {2}- kind: ethereum\n/).slice(1)
 const seen = new Set()
 for (const block of blocks) {
@@ -67,7 +114,7 @@ for (const name of [...Object.keys(expected), 'BorrowAccount']) {
 }
 
 // src/config.ts
-const config = readFileSync(join(pkg, 'src', 'config.ts'), 'utf8')
+const config = readFileSync(configPath, 'utf8')
 for (const [key, value] of Object.entries(constants)) {
   const actual = config.match(new RegExp(`export const ${key} = '(0x[0-9a-fA-F]+)'`))?.[1]
   if (actual !== value.toLowerCase())

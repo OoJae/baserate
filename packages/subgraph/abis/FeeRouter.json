@@ -1,6 +1,31 @@
 [
   {
     "type": "event",
+    "name": "BribeCarried",
+    "inputs": [
+      {
+        "name": "gauge",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "reason",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum IFeeRouter.CarryReason"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "BribePosted",
     "inputs": [
       {
@@ -106,10 +131,54 @@
   },
   {
     "type": "event",
+    "name": "SmusdShareToTreasury",
+    "inputs": [
+      {
+        "name": "treasury",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "failingSince",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "SmusdYieldDeferred",
     "inputs": [
       {
         "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SmusdYieldFailed",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "failingSince",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"

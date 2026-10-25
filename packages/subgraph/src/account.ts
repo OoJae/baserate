@@ -10,6 +10,7 @@ import {
   Exited,
   Opened,
   Repaid,
+  Swept,
 } from '../generated/templates/BorrowAccount/BorrowAccount'
 import { eventId, getProtocol, ZERO } from './common'
 
@@ -118,5 +119,17 @@ export function handleCollateralWithdrawn(event: CollateralWithdrawn): void {
   const action = newAction(event, account, event.params.owner, 'COLLATERAL_WITHDRAWN')
   action.btc = event.params.amount
   action.recipient = event.params.btcTo
+  action.save()
+}
+
+/** The owner swept tokens sent to the clone directly (`sweep`). */
+export function handleSwept(event: Swept): void {
+  const account = touch(event)
+  if (account == null) return
+  account.save()
+  const action = newAction(event, account, account.owner, 'SWEPT')
+  action.token = event.params.token
+  action.amount = event.params.amount
+  action.recipient = event.params.to
   action.save()
 }
