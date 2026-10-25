@@ -2,7 +2,7 @@
   "name": "@baserate/keeper",
   "version": "0.1.0",
   "private": true,
-  "description": "Baserate keeper: hourly vMUSD allocator upkeep, liquidations of unhealthy M1 positions, and FeeRouter distributions on Mezo.",
+  "description": "Baserate keeper: liquidations, vMUSD allocator and wsMUSD upkeep, backstop upkeep, once-per-epoch fee flush, canaries, depth-linked caps, sMUSD watcher, health alerts.",
   "license": "GPL-2.0-or-later",
   "type": "module",
   "engines": {
@@ -13,6 +13,7 @@
     "check": "node --check src/keeper.mjs"
   },
   "dependencies": {
-    "viem": "2.57.11"
+    "viem": "2.57.11",
+    "pg": "8.16.3"
   }
 }

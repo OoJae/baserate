@@ -6,5 +6,7 @@ packages:
 # ethereum-cryptography; each has a pure-JS fallback, so no build scripts run.
 allowBuilds:
   bufferutil: false
+  # esbuild (tsup, the SDK build) ships its binary as an optional platform package; its install script only checks it.
+  esbuild: false
   keccak: false
   utf-8-validate: false
