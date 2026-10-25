@@ -1,4 +1,5 @@
 {
+  "allocator": "0x5a28C3f024aecDdC4828F2E5841038f647d8a067",
   "backstop": "0xc06239D0cB52e51cc0Edcf4b181dA7cCAcD1aC01",
   "backstopDiscountWad": 37056928034371643,
   "backstopSentinel": "0x787b4E3AaD7DA9217Ca222E4C6112B2ebC0da330",
@@ -16,11 +17,19 @@
   "irm": "0x0c97Fe017628636649ff374aD499529F91167441",
   "liquidationDeployBlock": 16365847,
   "lltv": 770000000000000000,
+  "m1Adapter": "0xffbdbe74f1f118Dde2C2Fe09286f3AA9f448B394",
   "marketId": "0xadd5f62435744e4fe91c94212024eba66fe93af38824bf264dee64258aebb13b",
   "maxImpactBps": 689,
   "maxKeeperSale": 50000000000000000,
   "morpho": "0xCe1da828cA15cb1FDAfa84C366A53C8106655a73",
   "oracle": "0x99F948b6955Ac7b579b2d8847178911645Ffe77F",
   "riskLens": "0x78ba4aA497887ECFcAE8468ECAcCe95d2c397d68",
-  "wsMusd": "0x92aa0306c3af1e02D776EA05857653A3839DeBEB"
+  "vMusd": "0x00890F9e2367acF6aC26CC06d8BF6c4270Da7440",
+  "vMusdCap": "250000000000000000000000",
+  "vMusdDeployBlock": 16366225,
+  "vMusdM1Cap": "5000000000000000000000",
+  "vMusdRolesNote": "Testnet: the deployer EOA is vMUSD owner, curator and sentinel. Only allocator: BaserateAllocator. Timelocks 48h.",
+  "vaultV2Factory": "0x25eB93DA2F1b5D8f5D60c7563B8009a0330eb239",
+  "wsMusd": "0x92aa0306c3af1e02D776EA05857653A3839DeBEB",
+  "wsMusdAdapter": "0x75a44270a2Ca424d3cF4A70BdE4d018fc1Adf24F"
 }
