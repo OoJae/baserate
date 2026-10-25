@@ -159,6 +159,10 @@ export function TxButton({
         timeout: 180_000,
         // Mezo makes a block every ~4s; viem's default 4s poll could hold the spinner up to two blocks late.
         pollingInterval: 1_000,
+        // The public RPC's backends sometimes briefly answer "not found" for a mined transaction. viem retries
+        // that lookup with exponential backoff (up to 6.4s a step), which kept the spinner up 10-20s after the
+        // block landed; retry every second instead.
+        retryDelay: 1_000,
       })
       if (receipt.status === 'success') {
         toast.update(hash, {
