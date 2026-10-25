@@ -10,10 +10,40 @@ optimizer_runs = 10_000
 via_ir = false
 bytecode_hash = "ipfs"
 cbor_metadata = true
+# Dynamic test linking (forge's default) lets scripts skip recompiling when src changes and then deploy stale
+# creation code: a DeployVault dry run after a src edit deployed the previous BaserateAllocator bytecode. Off, so
+# every script and test always embeds the current build.
+dynamic_test_linking = false
 fs_permissions = [
   { access = "read-write", path = "./deployments" },
   { access = "read", path = "./test/fork" },
+  { access = "read", path = "./out" },
 ]
+
+# vault-v2 (Morpho Vault V2 and its adapters) only compiles with via-IR. Mezo's VaultV2Factory was built with solc
+# 0.8.28, cancun, via-IR and 100k optimizer runs; these restrictions pin those settings for the three vault-v2
+# contracts we compile (VaultV2/VaultV2Factory for the local suites, MorphoMarketV1AdapterV2 for deployment).
+# Paths are listed one by one because a glob's `*` also matches `/`: vault-v2's interfaces must stay unrestricted so
+# our own sources (which import them) keep the project's non-IR settings.
+[[profile.default.compilation_restrictions]]
+paths = "lib/vault-v2/src/VaultV2.sol"
+via_ir = true
+optimizer_runs = 100000
+
+[[profile.default.compilation_restrictions]]
+paths = "lib/vault-v2/src/VaultV2Factory.sol"
+via_ir = true
+optimizer_runs = 100000
+
+[[profile.default.compilation_restrictions]]
+paths = "lib/vault-v2/src/adapters/MorphoMarketV1AdapterV2.sol"
+via_ir = true
+optimizer_runs = 100000
+
+[[profile.default.additional_compiler_profiles]]
+name = "vault-v2"
+via_ir = true
+optimizer_runs = 100000
 
 [profile.default.fuzz]
 runs = 512

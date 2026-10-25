@@ -1,3 +1,5 @@
 @openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
 morpho-blue/=lib/morpho-blue/src/
 forge-std/=lib/forge-std/src/
+vault-v2/=lib/vault-v2/src/
+morpho-blue-irm/=lib/vault-v2/lib/morpho-blue-irm/src/
