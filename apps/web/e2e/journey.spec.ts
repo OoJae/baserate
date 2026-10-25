@@ -1084,6 +1084,17 @@ test.describe('judge journey on Mezo testnet', () => {
         p.getByRole('region', { name: 'Liquidation depth' }).locator('tbody tr'),
       ).toHaveCount(8)
     })
+    await photograph(
+      browser,
+      'risk-mobile',
+      '/risk',
+      async (p) => {
+        await expect(
+          p.getByRole('region', { name: 'Liquidation depth' }).locator('tbody tr'),
+        ).toHaveCount(8)
+      },
+      MOBILE,
+    )
   })
 
   test('9 · fees: FeeRouter preview, distributions and the timelocked fee switch', async ({
@@ -1136,6 +1147,17 @@ test.describe('judge journey on Mezo testnet', () => {
         timeout: 60_000,
       })
     })
+    await photograph(
+      browser,
+      'fees-mobile',
+      '/fees',
+      async (p) => {
+        await expect(p.getByRole('region', { name: 'Distributions' })).toContainText('MUSD split', {
+          timeout: 60_000,
+        })
+      },
+      MOBILE,
+    )
   })
 })
 
