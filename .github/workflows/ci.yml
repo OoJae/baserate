@@ -25,7 +25,7 @@ jobs:
       - run: forge fmt --check
       - run: forge build --sizes
       - name: Tests (forked suites run in their own job)
-        run: forge test --no-match-path "test/fork/*" -vvv
+        run: forge test --no-match-path "test/fork/*" -j 2 -vvv
         env:
           FOUNDRY_PROFILE: ci
 
@@ -46,7 +46,7 @@ jobs:
         with:
           path: ~/.foundry/cache/rpc
           key: fork-rpc-${{ hashFiles('contracts/test/fork/blocks.json') }}
-      - run: forge test --match-path "test/fork/*" -vvv
+      - run: forge test --match-path "test/fork/*" -j 1 -vvv
 
   web:
     name: SDK and web app

@@ -40,6 +40,9 @@ struct MezoNetwork {
     int24 clBtcMusdTickSpacing;
     // Slipstream pool pairing MUSD with a USD stablecoin, for a MUSD TWAP (mainnet CL10 mUSDC/MUSD; 0 on testnet).
     address clMusdUsdPool;
+    // Slipstream swap router (ExactInputSingleParams keyed by tickSpacing). Zero on testnet, where the BTC/MUSD CL200
+    // pool and QuoterV2 are absent, which disables the CL200 liquidation venue.
+    address clSwapRouter;
 }
 
 library MezoAddresses {
@@ -78,6 +81,7 @@ library MezoAddresses {
         n.poolsVoter = 0x263F1Fd5fB7F866881e1B6cD7d5d6c40Fd985F0D;
         n.gauge0 = 0x72D88B0795373437E86792DEd8362D66dC43Cd2c;
         n.bribe0 = 0x75b6B35Fc78826A0B7E1f9c08bb7d84bd70D0ee1;
+        // No BTC/MUSD CL200 pool and no QuoterV2 on testnet: clSwapRouter, clQuoter and clBtcMusdPool stay zero.
     }
 
     function mainnet() internal pure returns (MezoNetwork memory n) {
@@ -107,6 +111,7 @@ library MezoAddresses {
         n.clBtcMusdPool = 0x9CBc1537d255768b431488305b1C7EFc2ac95022;
         n.clBtcMusdTickSpacing = 200;
         n.clMusdUsdPool = 0xCC372B7E15535aB225fe17c1075831D38ef7aC1a;
+        n.clSwapRouter = 0x37cDd11919ec3860eaD9efB8673d7476E5326225;
     }
 
     function forChain(uint256 chainId) internal pure returns (MezoNetwork memory) {

@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 
 import {MezoAddresses, MezoNetwork} from "../../script/config/MezoAddresses.sol";
+import {BtcPrecompileMock} from "./BtcPrecompileMock.sol";
 import {SkipMock} from "./SkipMock.sol";
 
 /// @notice Base for fork tests against Mezo testnet or mainnet at pinned blocks.
@@ -34,5 +35,16 @@ abstract contract MezoFork is Test {
         vm.label(net.musd, "MUSD");
         vm.label(net.smusd, "sMUSD");
         vm.label(net.morpho, "Morpho");
+    }
+
+    /// @dev Etches the BTC precompile mock (native-balance mirror) at 0x7b7C...0000. On a fork Foundry only lets
+    /// accounts it considers local call cheatcodes, and the precompile address exists on the forked chain, so the
+    /// mock's `vm.deal` needs `allowCheatcodes` (verified: without it the first transfer reverts "cheatcodes are not
+    /// enabled for 0x7b7C...").
+    function _etchBtc() internal returns (BtcPrecompileMock btc) {
+        vm.etch(MezoAddresses.BTC, address(new BtcPrecompileMock()).code);
+        vm.allowCheatcodes(MezoAddresses.BTC);
+        vm.label(MezoAddresses.BTC, "BTC");
+        btc = BtcPrecompileMock(MezoAddresses.BTC);
     }
 }
