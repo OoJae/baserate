@@ -25,8 +25,9 @@ import {MezoAddresses, MezoNetwork} from "./config/MezoAddresses.sol";
 /// Mezo charges more gas on-chain than local simulation for sMUSD calls, so broadcast with
 /// `--gas-estimate-multiplier 130` (the factory deploy still fits the 10M block gas limit).
 ///
-/// Testnet: the deployer EOA holds the governor and sentinel roles, receives the origination fee until the timelocked
-/// switch to the FeeRouter, queues its own canary-operator grant (timelocked, executable after 48 h), supplies
+/// Testnet: the deployer EOA holds the governor role (and the sentinel role unless `SENTINEL` is set), receives the
+/// origination fee until the timelocked switch to the FeeRouter, queues the canary-operator grant for
+/// `CANARY_OPERATOR` (default: itself; timelocked, executable after 48 h), supplies
 /// `TESTNET_M1_SEED` to M1 and funds the judge MUSD dispenser; this is labelled in the registry.
 ///
 /// Mainnet (proof mode, docs/design/contracts.md sections 3 and 8): every role is explicit and none defaults to the
@@ -126,9 +127,10 @@ contract Deploy is Script {
         }
 
         if (!cfg.mainnet) {
-            // Testnet only: the deployer is the governor and queues its own canary grant (a timelocked raise since
-            // audit D-7); anyone executes `setCanaryOperator(deployer, true)` once it is due, 48 h later.
-            d.factory.submit(abi.encodeCall(IBorrowAccountFactory.setCanaryOperator, (d.deployer, true)));
+            // Testnet only: the deployer is the governor and queues the canary grant (a timelocked raise since audit
+            // D-7) for `CANARY_OPERATOR` (the keeper's canary key) or itself; anyone executes it once due, 48 h later.
+            address canaryOperator = vm.envOr("CANARY_OPERATOR", d.deployer);
+            d.factory.submit(abi.encodeCall(IBorrowAccountFactory.setCanaryOperator, (canaryOperator, true)));
             d.dispenser = new MusdDispenser(d.deployer, net.musd, 25e18, 300e18);
             IERC20(net.musd).transfer(address(d.dispenser), DISPENSER_FUND);
         }
@@ -141,7 +143,8 @@ contract Deploy is Script {
 
     function _testnetConfig(address deployer) internal view returns (CoreConfig memory c) {
         c.governor = deployer;
-        c.sentinel = deployer;
+        // The keeper's SENTINEL key when given (decrease-only role); the deployer otherwise.
+        c.sentinel = vm.envOr("SENTINEL", deployer);
         c.feeRecipient = deployer;
         c.capAdmin = deployer;
         c.globalBorrowCap = 5000e18;

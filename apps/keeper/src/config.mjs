@@ -67,7 +67,8 @@ export const LIMITS = {
   depthImpactBps: 400n,
   depthSizesBtc: ['0.005', '0.01', '0.02', '0.05', '0.1', '0.2', '0.5'],
   capCeiling: MUSD(env('CAP_CEILING_MUSD', IS_MAINNET ? '2000' : '5000')),
-  lowGasWei: BigInt(env('LOW_GAS_WEI', '500000000000000')),
+  /** 0.0001 BTC: at Mezo's ~146 wei gas price that is still ~300 sends of 2M gas. */
+  lowGasWei: BigInt(env('LOW_GAS_WEI', '100000000000000')),
   lowDispenserMusd: MUSD(env('LOW_DISPENSER_MUSD', '100')),
 }
 
