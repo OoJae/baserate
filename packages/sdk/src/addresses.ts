@@ -15,9 +15,9 @@ import {
   MEZO_TESTNET_ID,
   type SupportedChainId,
 } from './chains'
-import localFork from './deployments/31337.json'
-import testnet from './deployments/31611.json'
-import mainnet from './deployments/31612.json'
+import localFork from './deployments/31337.json' with { type: 'json' }
+import testnet from './deployments/31611.json' with { type: 'json' }
+import mainnet from './deployments/31612.json' with { type: 'json' }
 
 /**
  * Typed address registry, loaded from `deployments/<chainId>.json`.

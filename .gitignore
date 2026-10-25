@@ -22,3 +22,6 @@ contracts/broadcast/**/dry-run/
 
 # Claude Code worktrees and local state
 .claude/
+
+# Playwright e2e output (journey logs, traces, raw videos)
+apps/web/e2e/.output/
