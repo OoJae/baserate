@@ -132,16 +132,35 @@ export async function verifyTx(
 export interface AddressInfo {
   isContract: boolean
   isVerified: boolean
+  /** Which service holds the verified source. Sourcify is checked when Blockscout has none. */
+  verifiedBy: 'blockscout' | 'sourcify' | null
   name?: string | null
+}
+
+async function sourcifyMatch(chainId: number, address: string): Promise<boolean> {
+  try {
+    const res = await fetch(`https://sourcify.dev/server/v2/contract/${chainId}/${address}`)
+    if (!res.ok) return false
+    const s = (await res.json()) as { match?: string | null }
+    return s.match === 'exact_match' || s.match === 'match'
+  } catch {
+    return false
+  }
 }
 
 export async function fetchAddressInfo(chainId: number, address: string): Promise<AddressInfo> {
   const res = await fetch(`${blockscoutApi(chainId)}/addresses/${address}`)
-  if (!res.ok) throw new Error(`Blockscout ${res.status}`)
-  const a = (await res.json()) as {
-    is_contract?: boolean
-    is_verified?: boolean
-    name?: string | null
+  // Blockscout returns 404 for contracts it has not indexed yet (e.g. ones created inside another constructor).
+  if (!res.ok && res.status !== 404) throw new Error(`Blockscout ${res.status}`)
+  const a = res.ok
+    ? ((await res.json()) as { is_contract?: boolean; is_verified?: boolean; name?: string | null })
+    : {}
+  if (a.is_verified) return { isContract: true, isVerified: true, verifiedBy: 'blockscout', name: a.name }
+  const onSourcify = await sourcifyMatch(chainId, address)
+  return {
+    isContract: !!a.is_contract || onSourcify,
+    isVerified: onSourcify,
+    verifiedBy: onSourcify ? 'sourcify' : null,
+    name: a.name,
   }
-  return { isContract: !!a.is_contract, isVerified: !!a.is_verified, name: a.name }
 }

@@ -222,7 +222,7 @@ function VerifiedBadge({ row }: { row: ContractRow }) {
   return q.data.isVerified ? (
     <Badge tone="good">
       <IconCheck className="size-3.5" />
-      Verified source
+      {q.data.verifiedBy === 'sourcify' ? 'Verified (Sourcify)' : 'Verified source'}
     </Badge>
   ) : (
     <Badge tone="warn">Unverified</Badge>
@@ -236,7 +236,7 @@ function ContractsTable() {
       <CardHeader
         id="contracts-title"
         title="Contracts"
-        subtitle={`${appChain.name} · source-verification status read live from Blockscout`}
+        subtitle={`${appChain.name} · source-verification status read live from Blockscout and Sourcify`}
       />
       <div className="-mx-4 overflow-x-auto sm:mx-0">
         <table className="w-full min-w-[560px] text-left text-sm">
