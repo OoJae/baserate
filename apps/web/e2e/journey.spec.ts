@@ -134,6 +134,7 @@ test.describe('judge journey on Mezo testnet', () => {
         {
           ...journey,
           castLog: chain?.castLog ?? [],
+          castUnavailable: chain?.unavailable ?? [],
           sent: wallet.sent,
           signed: wallet.signedTypedData,
         },
@@ -235,16 +236,31 @@ test.describe('judge journey on Mezo testnet', () => {
     const tx = await wallet.nextTx(n)
     const tSent = Date.now()
     expect(tx.to && isAddressEqual(tx.to, expectTo), `${step} must call ${expectTo}`).toBe(true)
-    const receipt = await chain.receipt(tx.hash)
-    const tMined = Date.now()
+    // Watch for the 9-second success toast while independently waiting for the receipt: the RPC can serve
+    // either side late, and the toast must not expire while the harness is still waiting.
+    const toast = page
+      .getByRole('region', { name: 'Notifications' })
+      .getByRole('status')
+      .filter({ hasText: successToast })
+    let tToast = 0
+    let tMined = 0
+    const [receipt] = await Promise.all([
+      chain.receipt(tx.hash).then((r) => {
+        tMined = Date.now()
+        return r
+      }),
+      (async () => {
+        await expect(toast.getByText(successToast, { exact: true })).toBeVisible({
+          timeout: 120_000,
+        })
+        tToast = Date.now()
+        if (successMessage) await expect(toast.getByText(successMessage)).toBeVisible()
+      })(),
+    ])
     expect(receipt.status, `${step} reverted on-chain (${tx.hash})`).toBe('success')
-    const toasts = page.getByRole('region', { name: 'Notifications' })
-    const toast = toasts.getByRole('status').filter({ hasText: successToast })
-    await expect(toast.getByText(successToast, { exact: true })).toBeVisible({ timeout: 90_000 })
-    if (successMessage) await expect(toast.getByText(successMessage)).toBeVisible()
     const secs = (a: number, b: number) => ((b - a) / 1000).toFixed(1)
     console.log(
-      `[e2e] ${step}: ${tx.hash} (block ${receipt.blockNumber}, gas ${receipt.gasUsed}) · click→sent ${secs(t0, tSent)}s, sent→mined ${secs(tSent, tMined)}s, mined→toast ${secs(tMined, Date.now())}s`,
+      `[e2e] ${step}: ${tx.hash} (block ${receipt.blockNumber}, gas ${receipt.gasUsed}) · click→sent ${secs(t0, tSent)}s, sent→receipt ${secs(tSent, tMined)}s, sent→toast ${secs(tSent, tToast)}s`,
     )
     return { tx, receipt, before }
   }
@@ -362,7 +378,11 @@ test.describe('judge journey on Mezo testnet', () => {
     await expect(page.locator('#ltv')).toHaveValue('3000')
     await expect(card.getByText('30.0%', { exact: true })).toBeVisible()
     const slippageNote = card.getByText(/^Reverts instead of borrowing if the price moves/)
-    await expect(slippageNote).toHaveCount(0) // nothing to borrow yet
+    // Once the live quote has loaded (Debt reads 0.00), an empty form must not talk about reverting a borrow.
+    await expect(card.locator('dt:has-text("Debt") + dd')).toHaveText('0.00 MUSD', {
+      timeout: 30_000,
+    })
+    await expect(slippageNote).toHaveCount(0)
     await page.locator('#btc-in').pressSequentially(BTC_IN_TEXT, { delay: 90 })
     await expect(slippageNote).toBeVisible()
 

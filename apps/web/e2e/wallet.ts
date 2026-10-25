@@ -103,12 +103,11 @@ export class E2EWallet {
     const rpcUrl = opts.chain.rpcUrls.default.http[0]
     if (!rpcUrl) throw new Error(`Chain ${opts.chain.id} has no RPC URL`)
     this.rpcUrl = rpcUrl
-    this.publicClient = createPublicClient({ chain: opts.chain, transport: http(rpcUrl) })
-    this.walletClient = createWalletClient({
-      account: this.account,
-      chain: opts.chain,
-      transport: http(rpcUrl),
-    })
+    // The single public testnet RPC drops connections in bursts; retry patiently (re-broadcasting the same
+    // signed transaction is idempotent).
+    const transport = http(rpcUrl, { retryCount: 6, retryDelay: 1_000 })
+    this.publicClient = createPublicClient({ chain: opts.chain, transport })
+    this.walletClient = createWalletClient({ account: this.account, chain: opts.chain, transport })
     this.currentChainId = opts.startChainId ?? opts.chain.id
     this.knownChains.add(this.currentChainId)
     this.hud = opts.hud ?? false
@@ -338,16 +337,28 @@ export class E2EWallet {
     }
   }
 
+  /** Forwards a read to the RPC, retrying transport failures; a JSON-RPC error is the node's answer. */
   private async forward(method: string, params: unknown[]): Promise<unknown> {
-    const res = await fetch(this.rpcUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: ++this.rpcId, method, params }),
-    })
-    if (!res.ok) throw rpcError(-32603, `RPC HTTP ${res.status} for ${method}`)
-    const body = (await res.json()) as { result?: unknown; error?: RpcErrorShape }
-    if (body.error) throw rpcError(body.error.code, body.error.message, body.error.data)
-    return body.result
+    let lastError: unknown
+    for (let attempt = 0; attempt < 4; attempt++) {
+      let body: { result?: unknown; error?: RpcErrorShape }
+      try {
+        const res = await fetch(this.rpcUrl, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: ++this.rpcId, method, params }),
+        })
+        if (!res.ok) throw new Error(`RPC HTTP ${res.status} for ${method}`)
+        body = (await res.json()) as typeof body
+      } catch (e) {
+        lastError = e
+        await new Promise((r) => setTimeout(r, 750 * (attempt + 1)))
+        continue
+      }
+      if (body.error) throw rpcError(body.error.code, body.error.message, body.error.data)
+      return body.result
+    }
+    throw rpcError(-32603, `RPC unreachable for ${method}: ${String(lastError)}`)
   }
 }
 

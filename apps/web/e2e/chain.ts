@@ -37,6 +37,8 @@ export class Chain {
   private readonly castBin: string | null
   /** Every cast invocation and its output, for the journey log. */
   readonly castLog: { cmd: string; out: string }[] = []
+  /** Cross-checks cast could not complete because the RPC was unreachable (values disagreeing always throw). */
+  readonly unavailable: string[] = []
 
   constructor(
     readonly client: PublicClient,
@@ -137,9 +139,18 @@ export class Chain {
       checks.push(['collateral', s.collateral, call(s.account, 'collateral()(uint256)')])
       checks.push(['debt', s.debt, call(s.account, 'debt()(uint256)')])
     }
-    const outs = await Promise.all(checks.map(([, , out]) => out))
+    const outs = await Promise.allSettled(checks.map(([, , out]) => out))
     checks.forEach(([name, viemValue], i) => {
-      const castValue = BigInt(outs[i]?.split(/\s+/)[0] ?? 'NaN')
+      const out = outs[i]
+      if (!out || out.status === 'rejected') {
+        // The single public RPC sometimes drops every retry for a minute; the viem read above already
+        // confirmed this value, so a transport failure is logged rather than failing the journey.
+        const why = out?.status === 'rejected' ? String(out.reason).split('\n')[0] : 'no result'
+        this.unavailable.push(`${name} @${b}: ${why}`)
+        console.warn(`[e2e] cast cross-check of ${name} at block ${b} unavailable: ${why}`)
+        return
+      }
+      const castValue = BigInt(out.value.split(/\s+/)[0] ?? 'NaN')
       if (castValue !== viemValue)
         throw new Error(
           `cast and viem disagree on ${name} at block ${b}: ${castValue} vs ${viemValue}`,
@@ -147,10 +158,13 @@ export class Chain {
     })
   }
 
-  /** `cast receipt <hash> status` for the log, or null without cast. */
+  /** `cast receipt <hash> status` for the log, or null without cast (or when the RPC stays unreachable). */
   async castReceipt(hash: Hex): Promise<string | null> {
     if (!this.castBin) return null
-    return this.cast(['receipt', hash, 'status'])
+    return this.cast(['receipt', hash, 'status']).catch((e) => {
+      this.unavailable.push(`receipt ${hash}: ${String(e).split('\n')[0]}`)
+      return null
+    })
   }
 
   async receipt(hash: Hex): Promise<TransactionReceipt> {
@@ -159,6 +173,7 @@ export class Chain {
       timeout: 180_000,
       pollingInterval: 1_000,
       retryCount: 10,
+      retryDelay: 1_000,
     })
   }
 
@@ -167,15 +182,15 @@ export class Chain {
     if (!this.castBin) throw new Error('cast not available')
     const full = [...args, '--rpc-url', this.rpcUrl]
     let lastError: unknown
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < 6; attempt++) {
       try {
-        const { stdout } = await run(this.castBin, full, { encoding: 'utf8', timeout: 60_000 })
+        const { stdout } = await run(this.castBin, full, { encoding: 'utf8', timeout: 20_000 })
         const out = stdout.trim()
         this.castLog.push({ cmd: `cast ${full.join(' ')}`, out })
         return out
       } catch (e) {
         lastError = e
-        await new Promise((r) => setTimeout(r, 1_000 * (attempt + 1)))
+        await new Promise((r) => setTimeout(r, 2_000 * (attempt + 1)))
       }
     }
     throw lastError
