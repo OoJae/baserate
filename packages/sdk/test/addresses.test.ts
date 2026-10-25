@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { getAddress } from 'viem'
+import { getAddress, zeroAddress } from 'viem'
 import { describe, expect, it } from 'vitest'
 import {
   computeMarketId,
@@ -13,13 +13,27 @@ import {
   registries,
   SKIP_BTC_USD,
 } from '../src/addresses'
-import { MEZO_MAINNET_ID, MEZO_TESTNET_ID, MULTICALL3, mezo, mezoTestnet } from '../src/chains'
+import {
+  MEZO_LOCAL_FORK_ID,
+  MEZO_MAINNET_ID,
+  MEZO_TESTNET_ID,
+  MULTICALL3,
+  mezo,
+  mezoTestnet,
+} from '../src/chains'
 import testnetJson from '../src/deployments/31611.json'
 
 const solPath = fileURLToPath(
   new URL('../../../contracts/script/config/MezoAddresses.sol', import.meta.url),
 )
 const sol = readFileSync(solPath, 'utf8')
+
+/** Address-typed fields of `struct MezoNetwork`, in declaration order. */
+function solAddressFields(): string[] {
+  // The struct closes on a line of its own; comments inside it may contain braces.
+  const body = sol.match(/struct MezoNetwork \{([\s\S]*?)\n\}/)?.[1] ?? ''
+  return [...body.matchAll(/^\s*address\s+(\w+);/gm)].map((m) => m[1] as string)
+}
 
 /** Pulls `n.<field> = 0x…;` assignments out of one network function in MezoAddresses.sol. */
 function solNetwork(fn: 'testnet' | 'mainnet'): Record<string, string> {
@@ -33,18 +47,30 @@ function solNetwork(fn: 'testnet' | 'mainnet'): Record<string, string> {
 }
 
 describe('registry', () => {
-  it('mirrors contracts/script/config/MezoAddresses.sol for both networks', () => {
+  it('mirrors every address field of MezoAddresses.sol for both networks', () => {
+    const fields = solAddressFields()
+    // Sanity: the parser found the struct (MUSD system, Morpho, Pyth, Tigris, gauges and Slipstream).
+    expect(fields).toContain('musd')
+    expect(fields).toContain('clSwapRouter')
     for (const [fn, chainId] of [
       ['testnet', MEZO_TESTNET_ID],
       ['mainnet', MEZO_MAINNET_ID],
     ] as const) {
-      const expected = solNetwork(fn)
-      expect(Object.keys(expected).length).toBe(15)
+      const assigned = solNetwork(fn)
+      // Every assignment targets a declared address field (catches a typo on either side).
+      for (const key of Object.keys(assigned)) expect(fields, `${fn}.${key}`).toContain(key)
       const ext = getRegistry(chainId).external as unknown as Record<string, string>
-      for (const [key, address] of Object.entries(expected)) {
-        expect(ext[key], `${fn}.${key}`).toBe(address)
+      // Fields a network leaves unassigned (e.g. Slipstream on testnet) are zero in the registry.
+      for (const key of fields) {
+        expect(ext[key], `${fn}.${key}`).toBe(assigned[key] ?? zeroAddress)
       }
     }
+  })
+
+  it('gives the local fork the testnet external addresses', () => {
+    const fork = getRegistry(MEZO_LOCAL_FORK_ID).external
+    const testnet = getRegistry(MEZO_TESTNET_ID).external
+    expect(fork).toEqual(testnet)
   })
 
   it('carries the precompile, feed and LLTV constants from MezoAddresses.sol', () => {
@@ -60,9 +86,14 @@ describe('registry', () => {
     }
   })
 
-  it('has the Wave 1 testnet deployment wired in', () => {
+  it('has every Baserate contract deployed on testnet, with its deploy transaction', () => {
     const r = getRegistry(MEZO_TESTNET_ID)
-    expect(isDeployed(r.contracts.factory.address)).toBe(true)
+    for (const [name, c] of Object.entries(r.contracts)) {
+      expect(isDeployed(c.address), name).toBe(true)
+      expect(c.tx, name).toMatch(/^0x[0-9a-f]{64}$/)
+      expect(c.block, name).toBeGreaterThanOrEqual(r.startBlock)
+    }
+    expect(isDeployed(r.external.vaultV2Factory)).toBe(true)
     expect(isMarketKnown(r.markets.M1.id)).toBe(true)
     expect(r.markets.M1.params.collateralToken).toBe(r.contracts.collateral.address)
     expect(r.markets.M1.params.oracle).toBe(r.contracts.oracle.address)
@@ -71,7 +102,10 @@ describe('registry', () => {
 
   it('keeps mainnet Baserate contracts as explicit zero-address placeholders until deployment', () => {
     const r = getRegistry(MEZO_MAINNET_ID)
-    expect(isDeployed(r.contracts.factory.address)).toBe(false)
+    for (const [name, c] of Object.entries(r.contracts)) {
+      expect(isDeployed(c.address), name).toBe(false)
+      expect(c.tx, name).toBeNull()
+    }
     expect(isMarketKnown(r.markets.M1.id)).toBe(false)
     expect(isDeployed(r.external.musd)).toBe(true)
   })

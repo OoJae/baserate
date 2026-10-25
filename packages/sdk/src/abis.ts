@@ -35,12 +35,19 @@ const marketComponents = [
 // ---------------------------------------------------------------------------------------------------------------
 
 import {
+  backstopGenerated,
+  baserateAllocatorGenerated,
   borrowAccountFactoryGenerated,
   borrowAccountGenerated,
   btcMusdOracleGenerated,
   collateralBTCGenerated,
+  feeRouterGenerated,
+  flashLiquidatorGenerated,
   musdDispenserGenerated,
+  riskLensGenerated,
+  vaultV2Generated,
   wsMUSDGenerated,
+  wsMusdLiquidityAdapterGenerated,
 } from './generated'
 
 type AbiItem = { readonly type: string }
@@ -215,6 +222,13 @@ export const baserateErrorsAbi = [
   ...errorsOf(borrowAccountFactoryGenerated),
   ...errorsOf(borrowAccountGenerated),
   ...errorsOf(musdDispenserGenerated),
+  ...errorsOf(backstopGenerated),
+  ...errorsOf(flashLiquidatorGenerated),
+  ...errorsOf(feeRouterGenerated),
+  ...errorsOf(riskLensGenerated),
+  ...errorsOf(baserateAllocatorGenerated),
+  ...errorsOf(wsMusdLiquidityAdapterGenerated),
+  ...errorsOf(vaultV2Generated),
   ...oracleErrorsAbi,
   ...accountErrorsAbi,
   ...collateralErrorsAbi,
@@ -250,6 +264,39 @@ export const borrowAccountAbi = [...borrowAccountGenerated, ...baserateErrorsAbi
 
 /** `contract MusdDispenser` (testnet judge top-ups). */
 export const musdDispenserAbi = [...musdDispenserGenerated, ...baserateErrorsAbi] as const
+
+/** `contract Backstop` (bMUSD): ERC-4626 over MUSD that buys seized BTC; exits through a 7-day redeem queue. */
+export const backstopAbi = [...backstopGenerated, ...baserateErrorsAbi] as const
+
+/**
+ * `contract FlashLiquidator`. `previewLiquidation` and `quoteVenues` are non-view (QuoterV2 simulates a swap):
+ * call them with `simulateContract` / `eth_call`, never in a transaction.
+ */
+export const flashLiquidatorAbi = [...flashLiquidatorGenerated, ...baserateErrorsAbi] as const
+
+/** `contract FeeRouter`: permissionless 40/40/20 fee splitter (sMUSD yield, gauge bribes, treasury). */
+export const feeRouterAbi = [...feeRouterGenerated, ...baserateErrorsAbi] as const
+
+/**
+ * `contract RiskLens`. `snapshot` is declared view but needs a CALL context for CL quotes; read it with a plain
+ * `eth_call` that is not batched with other Skip reads (Mezo's 20-precompile limit applies per call).
+ */
+export const riskLensAbi = [...riskLensGenerated, ...baserateErrorsAbi] as const
+
+/** `contract BaserateAllocator`: vMUSD's permissionless allocator and buffer-aware withdraw path. */
+export const baserateAllocatorAbi = [...baserateAllocatorGenerated, ...baserateErrorsAbi] as const
+
+/** `contract WsMusdLiquidityAdapter`: vMUSD's liquidity adapter into wsMUSD. */
+export const wsMusdLiquidityAdapterAbi = [
+  ...wsMusdLiquidityAdapterGenerated,
+  ...baserateErrorsAbi,
+] as const
+
+/**
+ * Morpho Vault V2 (vMUSD). `maxDeposit`/`maxWithdraw`/`maxMint`/`maxRedeem` always return 0 by design: derive
+ * deposit room from the liquidity adapter's cap (`absoluteCap(id) - heldAssets`) instead.
+ */
+export const vaultV2Abi = [...vaultV2Generated, ...baserateErrorsAbi] as const
 
 export const morphoAbi = [
   {

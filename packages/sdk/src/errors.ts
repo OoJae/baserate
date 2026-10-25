@@ -171,6 +171,131 @@ export function describeCustomError(
       return { title: 'Owner only', message: 'Only the contract owner can do this.' }
     case 'EnforcedPause':
       return { title: 'Paused', message: 'This contract is paused.' }
+    // FlashLiquidator
+    case 'NothingToLiquidate':
+      return {
+        title: 'Nothing to liquidate',
+        message: 'This position has no debt in the market, so there is nothing to liquidate.',
+      }
+    case 'ImpactTooHigh':
+      return {
+        title: 'Price impact too high',
+        message: `The venue would pay ${formatMusd(big(0))} MUSD, below the ${formatMusd(big(1))} MUSD floor (the seized BTC at the oracle price minus the maximum impact). Try another venue.`,
+      }
+    case 'InsufficientProceeds':
+      return {
+        title: 'Sale does not cover the debt',
+        message: `Selling the seized BTC would return ${formatMusd(big(0))} MUSD but ${formatMusd(big(1))} MUSD must be repaid. Try another venue.`,
+      }
+    case 'ProfitTooLow':
+      return {
+        title: 'Profit below your minimum',
+        message: `This liquidation would pay ${formatMusd(big(0), { dp: 4 })} MUSD, below your ${formatMusd(big(1), { dp: 4 })} MUSD minimum. Prices moved; refresh the preview.`,
+      }
+    case 'VenueUnavailable':
+      return {
+        title: 'Venue unavailable',
+        message: `${['The backstop', 'The CL200 pool', 'The vAMM pool'][Number(args[0])] ?? 'This venue'} is not available on this network.`,
+      }
+    // Backstop
+    case 'InsufficientCash':
+      return {
+        title: 'Backstop is short of cash',
+        message: `The backstop needs ${formatMusd(big(0))} MUSD but only ${formatMusd(big(1))} MUSD is free. Sell on a DEX venue instead.`,
+      }
+    case 'InsufficientOutput':
+      return {
+        title: 'Output below minimum',
+        message: `The call would pay ${formatMusd(big(0))} MUSD, below the ${formatMusd(big(1))} MUSD minimum.`,
+      }
+    case 'ExcessiveInput':
+      return {
+        title: 'Auction price moved',
+        message: `The auction now costs ${formatMusd(big(0))} MUSD, above your ${formatMusd(big(1))} MUSD maximum. Refresh the quote.`,
+      }
+    case 'ExceedsInventory':
+      return {
+        title: 'More BTC than the backstop holds',
+        message: `At most ${formatMusd(big(1), { dp: 8 })} BTC is available.`,
+      }
+    case 'UseRedeemQueue':
+      return {
+        title: 'Use the redeem queue',
+        message: 'Backstop exits go through Request redeem, then Claim after 7 days.',
+      }
+    case 'UnknownRequest':
+      return {
+        title: 'No such request',
+        message: `Redeem request #${big(0).toString()} is not pending (already claimed or never made).`,
+      }
+    case 'NotClaimable':
+      return {
+        title: 'Not claimable yet',
+        message: `Redeem request #${big(0).toString()} unlocks on ${new Date(Number(big(1)) * 1000).toUTCString()}.`,
+      }
+    case 'OracleUnavailable':
+      return {
+        title: 'Oracle unavailable',
+        message:
+          'The backstop holds BTC and the oracle is down, so its NAV cannot be computed now.',
+      }
+    case 'NotLiquidator':
+      return {
+        title: 'Liquidator only',
+        message: 'Only the FlashLiquidator can sell collateral to the backstop.',
+      }
+    // BaserateAllocator
+    case 'CooldownActive':
+      return {
+        title: 'Rebalance cooling down',
+        message: `The allocator moved funds less than an hour ago. Next rebalance from ${new Date(Number(big(0)) * 1000).toUTCString()}.`,
+      }
+    // FeeRouter
+    case 'NothingToDistribute':
+      return {
+        title: 'Nothing to distribute',
+        message:
+          'The fee router holds no MUSD yet. Origination fees arrive once the factory points at it.',
+      }
+    case 'InsufficientGas':
+      return {
+        title: 'Not enough gas',
+        message: 'Send the distribution with more gas so every bribe gets its full stipend.',
+      }
+    // RiskLens
+    case 'TooManySizes':
+      return {
+        title: 'Too many depth sizes',
+        message: `At most ${big(1).toString()} BTC sizes fit in one snapshot.`,
+      }
+    case 'TooManyTroves':
+      return {
+        title: 'Too many troves',
+        message: `At most ${big(1).toString()} troves fit in one snapshot.`,
+      }
+    // Morpho Vault V2 (vMUSD)
+    case 'AbsoluteCapExceeded':
+    case 'RelativeCapExceeded':
+      return {
+        title: 'Vault cap reached',
+        message: 'This would take one of vMUSD’s allocations above its cap. Try a smaller amount.',
+      }
+    case 'ZeroAbsoluteCap':
+      return {
+        title: 'Allocation not enabled',
+        message: 'The curator has not set a cap for this allocation yet.',
+      }
+    case 'CannotReceiveShares':
+    case 'CannotSendShares':
+    case 'CannotReceiveAssets':
+    case 'CannotSendAssets':
+      return { title: 'Blocked by a vault gate', message: 'A vMUSD gate rejected this address.' }
+    case 'TransferFromReverted':
+    case 'TransferFromReturnedFalse':
+      return {
+        title: 'Token transfer failed',
+        message: 'The vault could not pull your MUSD. Check your balance and approval.',
+      }
     default:
       return { title: `Reverted: ${name}`, message: `The contract reverted with ${name}.` }
   }

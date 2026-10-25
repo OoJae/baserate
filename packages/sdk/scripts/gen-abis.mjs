@@ -11,6 +11,14 @@ const contracts = [
   'BorrowAccountFactory',
   'BorrowAccount',
   'MusdDispenser',
+  'Backstop',
+  'FlashLiquidator',
+  'FeeRouter',
+  'RiskLens',
+  'BaserateAllocator',
+  'WsMusdLiquidityAdapter',
+  // Morpho Vault V2 (vault-v2 tag 2026-08-13), the contract behind vMUSD.
+  'VaultV2',
 ]
 const out = new URL('../../../contracts/out/', import.meta.url)
 

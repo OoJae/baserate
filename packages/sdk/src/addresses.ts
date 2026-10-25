@@ -22,9 +22,10 @@ import mainnet from './deployments/31612.json' with { type: 'json' }
 /**
  * Typed address registry, loaded from `deployments/<chainId>.json`.
  *
- * External Mezo addresses mirror `contracts/script/config/MezoAddresses.sol`. Baserate's own contracts are
- * zero-address placeholders until deployment (TODO(deploy): regenerate the JSON from the forge broadcast with the
- * registry export script). Use {@link isDeployed} before reading any Baserate contract.
+ * External Mezo addresses mirror `contracts/script/config/MezoAddresses.sol` (zero where a network lacks one, e.g.
+ * Slipstream on testnet). Baserate's own contracts come from `contracts/deployments/<chainId>.json` and the forge
+ * broadcasts; they are zero-address placeholders on networks not deployed yet. Use {@link isDeployed} before reading
+ * any Baserate contract.
  */
 
 /** Mezo's Skip BTC/USD precompile (same address on every network). Only `decimals()` and `latestRoundData()`. */
@@ -65,6 +66,24 @@ export interface ExternalAddresses {
   btcMusdVolatilePool: Address
   multicall3: Address
   create2Deployer: Address
+  /** Mezo Earn PoolsVoter (gauges and their BribeVotingRewards). */
+  poolsVoter: Address
+  /** Primary BTC/MUSD pool gauge and its bribe (mainnet CL200, testnet vAMM). */
+  gauge0: Address
+  bribe0: Address
+  /** Second BTC/MUSD gauge and bribe (mainnet vAMM; zero on testnet). */
+  gauge1: Address
+  bribe1: Address
+  /** Slipstream QuoterV2 (zero on testnet). */
+  clQuoter: Address
+  /** Slipstream BTC/MUSD CL200 pool (zero on testnet). */
+  clBtcMusdPool: Address
+  /** Slipstream MUSD/USD-stable pool used for the MUSD TWAP (mainnet CL10 mUSDC/MUSD; zero on testnet). */
+  clMusdUsdPool: Address
+  /** Slipstream swap router (zero on testnet, which disables the CL200 liquidation venue). */
+  clSwapRouter: Address
+  /** Mezo's Morpho VaultV2Factory (vMUSD is created through it). */
+  vaultV2Factory: Address
 }
 
 export interface BaserateContracts {
@@ -80,6 +99,22 @@ export interface BaserateContracts {
   borrowAccountImpl: DeployedContract
   /** MusdDispenser (testnet only). */
   dispenser: DeployedContract
+  /** Backstop (bMUSD): ERC-4626 that buys seized BTC, exits through a 7-day queue. */
+  backstop: DeployedContract
+  /** FlashLiquidator: zero-capital M1 liquidations through the backstop, CL200 or the vAMM. */
+  flashLiquidator: DeployedContract
+  /** FeeRouter: splits origination fees 40% sMUSD / 40% gauge bribes / 20% treasury. */
+  feeRouter: DeployedContract
+  /** RiskLens: one-call risk snapshot (oracle, market, caps, depth, trove queue). */
+  riskLens: DeployedContract
+  /** vMUSD, a Morpho Vault V2 created through Mezo's VaultV2Factory (`tx` is the createVaultV2 call). */
+  vMusd: DeployedContract
+  /** vMUSD's WsMusdLiquidityAdapter (parks idle MUSD in wsMUSD). */
+  wsMusdAdapter: DeployedContract
+  /** vMUSD's MorphoMarketV1AdapterV2 (holds the vault's M1 supply). */
+  m1Adapter: DeployedContract
+  /** BaserateAllocator: vMUSD's permissionless allocator (buffer + APY policy). */
+  allocator: DeployedContract
 }
 
 export interface MarketParams {
@@ -164,6 +199,16 @@ const EXTERNAL_KEYS: (keyof ExternalAddresses)[] = [
   'btcMusdVolatilePool',
   'multicall3',
   'create2Deployer',
+  'poolsVoter',
+  'gauge0',
+  'bribe0',
+  'gauge1',
+  'bribe1',
+  'clQuoter',
+  'clBtcMusdPool',
+  'clMusdUsdPool',
+  'clSwapRouter',
+  'vaultV2Factory',
 ]
 
 const CONTRACT_KEYS: (keyof BaserateContracts)[] = [
@@ -173,6 +218,14 @@ const CONTRACT_KEYS: (keyof BaserateContracts)[] = [
   'collateral',
   'borrowAccountImpl',
   'dispenser',
+  'backstop',
+  'flashLiquidator',
+  'feeRouter',
+  'riskLens',
+  'vMusd',
+  'wsMusdAdapter',
+  'm1Adapter',
+  'allocator',
 ]
 
 /** Validates a raw deployments JSON and returns the typed registry. Throws on any malformed entry. */

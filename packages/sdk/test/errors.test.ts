@@ -103,3 +103,43 @@ describe('decodeBaserateError', () => {
     expect(decodeBaserateError('weird').message).toBe('weird')
   })
 })
+
+describe('Wave 2 periphery errors', () => {
+  const decode = (errorName: string, args: readonly unknown[] = []) =>
+    decodeRevertData(
+      encodeErrorResult({ abi: baserateErrorsAbi, errorName, args } as Parameters<
+        typeof encodeErrorResult
+      >[0]),
+    )
+
+  it('decodes FlashLiquidator reverts with amounts', () => {
+    expect(decode('ImpactTooHigh', [70n * 10n ** 18n, 75n * 10n ** 18n]).message).toContain(
+      '75.00 MUSD floor',
+    )
+    expect(decode('InsufficientProceeds', [1n, 2n]).title).toBe('Sale does not cover the debt')
+    expect(decode('ProfitTooLow', [10n ** 17n, 2n * 10n ** 17n]).message).toContain('0.2000')
+    expect(decode('VenueUnavailable', [1]).message).toContain('CL200')
+    expect(decode('NothingToLiquidate', ['0x0000000000000000000000000000000000000001']).title).toBe(
+      'Nothing to liquidate',
+    )
+  })
+
+  it('decodes backstop, allocator and fee-router reverts', () => {
+    expect(decode('InsufficientCash', [80n * 10n ** 18n, 10n ** 18n]).message).toContain(
+      '1.00 MUSD is free',
+    )
+    expect(decode('CooldownActive', [1_792_960_240n]).message).toContain('Sun, 25 Oct 2026')
+    expect(decode('NothingToDistribute').title).toBe('Nothing to distribute')
+    expect(decode('NotClaimable', [3n, 1_793_000_000n]).title).toBe('Not claimable yet')
+    expect(decode('AbsoluteCapExceeded').title).toBe('Vault cap reached')
+  })
+
+  it('maps Morpho’s healthy-position revert', () => {
+    const data = encodeErrorResult({
+      abi: [{ type: 'error', name: 'Error', inputs: [{ name: 'message', type: 'string' }] }],
+      errorName: 'Error',
+      args: ['position is healthy'],
+    })
+    expect(decodeRevertData(data).title).toBe('Position is healthy')
+  })
+})

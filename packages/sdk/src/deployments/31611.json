@@ -1,7 +1,7 @@
 {
-  "$comment": "Mezo testnet registry (Wave 1 deploy, 2026-10-25). External addresses mirror contracts/script/config/MezoAddresses.sol. Baserate addresses from contracts/deployments/31611.json; all six contracts are verified on Sourcify (exact match). The deployer EOA holds governor and sentinel roles on testnet.",
+  "$comment": "Mezo testnet registry. External addresses mirror contracts/script/config/MezoAddresses.sol (zero where testnet lacks one: no Slipstream CL200 pool, QuoterV2 or second gauge). Baserate addresses from contracts/deployments/31611.json, deploy txs and blocks from contracts/broadcast/{Deploy,DeployLiquidation,DeployPeriphery,DeployVault}.s.sol/31611/run-latest.json (vMusd: the VaultV2Factory.createVaultV2 call). The deployer EOA holds governor and sentinel roles, and is vMUSD owner, curator and sentinel, on testnet.",
   "chainId": 31611,
-  "version": "w1",
+  "version": "w2",
   "startBlock": 16364312,
   "external": {
     "musd": "0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503",
@@ -23,7 +23,17 @@
     "poolFactory": "0x4947243CC818b627A5D06d14C4eCe7398A23Ce1A",
     "btcMusdVolatilePool": "0xd16A5Df82120ED8D626a1a15232bFcE2366d6AA9",
     "multicall3": "0xcA11bde05977b3631167028862bE2a173976CA11",
-    "create2Deployer": "0x4e59b44847b379578588920cA78FbF26c0B4956C"
+    "create2Deployer": "0x4e59b44847b379578588920cA78FbF26c0B4956C",
+    "poolsVoter": "0x263F1Fd5fB7F866881e1B6cD7d5d6c40Fd985F0D",
+    "gauge0": "0x72D88B0795373437E86792DEd8362D66dC43Cd2c",
+    "bribe0": "0x75b6B35Fc78826A0B7E1f9c08bb7d84bd70D0ee1",
+    "gauge1": "0x0000000000000000000000000000000000000000",
+    "bribe1": "0x0000000000000000000000000000000000000000",
+    "clQuoter": "0x0000000000000000000000000000000000000000",
+    "clBtcMusdPool": "0x0000000000000000000000000000000000000000",
+    "clMusdUsdPool": "0x0000000000000000000000000000000000000000",
+    "clSwapRouter": "0x0000000000000000000000000000000000000000",
+    "vaultV2Factory": "0x25eB93DA2F1b5D8f5D60c7563B8009a0330eb239"
   },
   "lltv": "770000000000000000",
   "feeds": {
@@ -60,6 +70,46 @@
       "address": "0x92F13D33aF38BbAc45a7E880826a787d895654c8",
       "tx": "0x7e491445ba9f8e770f78d7df610bc8166aa6fd78e96b6843065d71c4dcb152a2",
       "block": 16364343
+    },
+    "backstop": {
+      "address": "0xc06239D0cB52e51cc0Edcf4b181dA7cCAcD1aC01",
+      "tx": "0xf960a3ee1d0710bf59caf2a845e03963bde5190568cd22a27f9b30b7e29c0746",
+      "block": 16365855
+    },
+    "flashLiquidator": {
+      "address": "0x8259050FF9976C9154042EC9d955dB8fAcE929C8",
+      "tx": "0x0c31794424f9897d99895b405d8b70056e4af43389e7830b1bfc7c4f6ada317c",
+      "block": 16365856
+    },
+    "feeRouter": {
+      "address": "0x8266d915fb60ac45998BB919A815C8013b9Bf1bC",
+      "tx": "0x212946af67ad29cc5853b296da13532972ecf9baef5335a1f8addb6a98c1e7dd",
+      "block": 16365872
+    },
+    "riskLens": {
+      "address": "0x78ba4aA497887ECFcAE8468ECAcCe95d2c397d68",
+      "tx": "0xe8831351cb771ce905e91dfe494a98f8224c99de3aefe7861fbb6faf914c385c",
+      "block": 16365873
+    },
+    "vMusd": {
+      "address": "0x00890F9e2367acF6aC26CC06d8BF6c4270Da7440",
+      "tx": "0x37d5279dd0501dfbac52cb7cf931d151c276c6aaae2023ebe5111b433ed9deef",
+      "block": 16366237
+    },
+    "wsMusdAdapter": {
+      "address": "0x75a44270a2Ca424d3cF4A70BdE4d018fc1Adf24F",
+      "tx": "0xf9a7c7ff104888333c701f3fed71311cdc753e66a2eded5c7039894433861e41",
+      "block": 16366246
+    },
+    "m1Adapter": {
+      "address": "0xffbdbe74f1f118Dde2C2Fe09286f3AA9f448B394",
+      "tx": "0x2b3992361c2afbd6eb0b7463957f40e34cb2c38e4c71cb7e839ee7b05ce1832a",
+      "block": 16366244
+    },
+    "allocator": {
+      "address": "0x5a28C3f024aecDdC4828F2E5841038f647d8a067",
+      "tx": "0x0a1dc51cb3813d28ba2a8267193b4989cd79e4fa31ae3a8102699f92642e562f",
+      "block": 16366247
     }
   },
   "markets": {
