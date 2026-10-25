@@ -3,13 +3,16 @@ import {
   explorerBlockUrl,
   explorerTxUrl,
   formatBtc,
+  formatDuration,
+  formatPercentWad,
   isDeployed,
   shortAddress,
 } from '@baserate/sdk'
 import { useQuery } from '@tanstack/react-query'
 import type { Address } from 'viem'
-import { IconCheck, IconEvidence } from '../components/icons'
+import { IconCheck, IconClock, IconEvidence } from '../components/icons'
 import {
+  AddressLink,
   Badge,
   Card,
   CardHeader,
@@ -18,8 +21,10 @@ import {
   Notice,
   PageHeader,
   Skeleton,
+  Stat,
   type Tone,
 } from '../components/ui'
+import { env } from '../env'
 import {
   EVIDENCE_AREAS,
   type EvidenceArea,
@@ -29,7 +34,9 @@ import {
   type TxVerification,
   verifyTx,
 } from '../lib/evidence'
+import { fetchKeeperStatus, type KeeperJob } from '../lib/keeper'
 import { NEXT_RELEASE, PLANNED_INFRA } from '../lib/roadmap'
+import { useNow } from '../lib/useNow'
 import { appChain, registry } from '../wagmi'
 
 const CHAIN_NAME: Record<number, string> = { 31611: 'Testnet', 31612: 'Mainnet' }
@@ -59,6 +66,7 @@ export function EvidencePage() {
       />
       <div className="space-y-5">
         <EvidenceList />
+        <KeeperCard />
         <ContractsTable />
         <BuiltVsPlanned />
       </div>
@@ -180,6 +188,169 @@ function EvidenceRow({ entry }: { entry: EvidenceEntry }) {
       </div>
       {v?.detail ? <p className="mt-1 text-xs text-warn">{v.detail}</p> : null}
     </li>
+  )
+}
+
+const KEEPER_JOBS: { job: KeeperJob; label: string; cadence: string; staleAfterS: number }[] = [
+  { job: 'liquidations', label: 'Liquidation scan', cadence: 'every 30 s', staleAfterS: 180 },
+  {
+    job: 'allocator',
+    label: 'Allocator rebalance and checkpoint',
+    cadence: 'hourly',
+    staleAfterS: 7_500,
+  },
+  { job: 'fees', label: 'FeeRouter distribution', cadence: 'every 6 h', staleAfterS: 23_400 },
+]
+
+function KeeperCard() {
+  const now = useNow(1_000)
+  const q = useQuery({
+    queryKey: ['keeper-status', env.keeperUrl],
+    queryFn: ({ signal }) => fetchKeeperStatus(signal),
+    refetchInterval: 30_000,
+    retry: 1,
+  })
+  const s = q.data
+  const ageS = (iso?: string) => (iso ? Math.max(0, (now - Date.parse(iso)) / 1_000) : undefined)
+  const scanAge = ageS(s?.lastRun.liquidations)
+  const status: { tone: Tone; label: string } = q.isError
+    ? { tone: 'warn', label: 'Unreachable' }
+    : !s
+      ? { tone: 'neutral', label: 'Checking' }
+      : scanAge !== undefined && scanAge < 180
+        ? { tone: 'good', label: 'Running' }
+        : { tone: 'warn', label: 'Stalled' }
+
+  return (
+    <Card aria-labelledby="keeper-title">
+      <CardHeader
+        id="keeper-title"
+        icon={<IconClock className="size-4" />}
+        title="Keeper"
+        subtitle="apps/keeper on Railway. Every call it makes is permissionless; this is its public status, refreshed every 30 s"
+        action={<Badge tone={status.tone}>{status.label}</Badge>}
+      />
+      {q.isError ? (
+        <Notice tone="warn" title="The keeper’s status endpoint did not answer">
+          Rebalances, liquidations and fee distributions stay open to anyone from the Lend,
+          Liquidate and Fees pages.{' '}
+          <ExternalLink href={`${env.keeperUrl}/status`}>Open /status</ExternalLink>
+        </Notice>
+      ) : !s ? (
+        <Skeleton className="h-28 w-full" />
+      ) : (
+        <div className="space-y-5">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <Stat
+              label="Keeper address"
+              value={
+                <AddressLink
+                  href={explorerAddressUrl(appChain.id, s.keeper)}
+                  address={s.keeper}
+                  chars={5}
+                />
+              }
+            />
+            <Stat
+              label="Gas balance"
+              value={s.gasBalanceBtc ? `${Number(s.gasBalanceBtc).toFixed(5)} BTC` : '—'}
+            />
+            <Stat
+              label="Up for"
+              value={formatDuration(ageS(s.startedAt) ?? 0)}
+              sub={s.startedAt ? `since ${new Date(s.startedAt).toUTCString()}` : undefined}
+            />
+          </div>
+
+          <div>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+              Jobs
+            </h3>
+            <ul className="divide-y divide-line text-sm">
+              {KEEPER_JOBS.map((j) => {
+                const age = ageS(s.lastRun[j.job])
+                return (
+                  <li
+                    key={j.job}
+                    className="flex flex-wrap items-baseline justify-between gap-x-4 py-2"
+                  >
+                    <span className="text-ink">
+                      {j.label} <span className="text-muted">· {j.cadence}</span>
+                    </span>
+                    <span
+                      className={`num text-xs ${age !== undefined && age < j.staleAfterS ? 'text-muted' : 'text-warn'}`}
+                    >
+                      {age === undefined ? 'not run yet' : `last run ${formatDuration(age)} ago`}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+
+          <div>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+              Positions it watches (liquidation above {formatPercentWad(registry.lltv, 0)} LTV)
+            </h3>
+            {s.accounts.length === 0 ? (
+              <p className="py-2 text-sm text-muted">No open M1 positions right now.</p>
+            ) : (
+              <ul className="divide-y divide-line text-sm">
+                {s.accounts.slice(0, 5).map((a) => (
+                  <li key={a.account} className="flex items-center justify-between gap-3 py-2">
+                    <AddressLink
+                      href={explorerAddressUrl(appChain.id, a.account)}
+                      address={a.account}
+                    />
+                    <span className="flex items-center gap-2">
+                      <span className="num text-ink">{a.ltvPct.toFixed(2)}% LTV</span>
+                      {a.liquidatable ? (
+                        <Badge tone="bad">Liquidatable</Badge>
+                      ) : (
+                        <Badge tone="good">Healthy</Badge>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+              Recent keeper transactions
+            </h3>
+            {s.actions.length === 0 ? (
+              <p className="py-2 text-sm text-muted">
+                None since the last restart: nothing has needed doing (calls that would revert are
+                skipped, not sent).
+              </p>
+            ) : (
+              <ul className="divide-y divide-line text-sm">
+                {s.actions.slice(0, 6).map((a) => (
+                  <li
+                    key={a.tx}
+                    className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Badge tone="brand">{a.job}</Badge>
+                      <span className="font-mono text-xs text-ink">{a.fn}()</span>
+                    </span>
+                    <span className="flex items-center gap-3 text-xs text-muted">
+                      <ExternalLink href={explorerTxUrl(appChain.id, a.tx)}>
+                        <span className="num font-mono">{shortAddress(a.tx, 6)}</span>
+                      </ExternalLink>
+                      <Badge tone={a.status === 'success' ? 'good' : 'bad'}>{a.status}</Badge>
+                      <span className="num">{formatDuration(ageS(a.t) ?? 0)} ago</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </Card>
   )
 }
 
@@ -376,6 +547,7 @@ function BuiltVsPlanned() {
     'Fees: FeeRouter preview and distribute, gauge bribes, the timelocked fee switch',
     'Get test funds: faucet link, dispenser claim, add MUSD to wallet',
     'Evidence: live Blockscout verification of every recorded transaction',
+    'Keeper on Railway: allocator upkeep, liquidation scan, fee distribution, public status',
   ]
   return (
     <Card aria-labelledby="built-title">
