@@ -4,14 +4,28 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  backstopAbi,
   borrowAccountAbi,
   borrowAccountFactoryAbi,
   btcMusdOracleAbi,
+  erc20PermitAbi,
+  feeRouterAbi,
+  flashLiquidatorAbi,
   formatBtc,
   formatMusd,
+  impliedMusdLeg,
+  liquidationBtcUsd,
   mezoTestnet,
   musdDispenserAbi,
+  RiskSource,
+  riskLensAbi,
+  shortAddress,
+  toFixedDecimal,
+  Venue,
+  vaultV2Abi,
+  WAD,
   wsMusdAbi,
+  wsMusdLiquidityAdapterAbi,
 } from '@baserate/sdk'
 import {
   type Browser,
@@ -24,25 +38,31 @@ import {
 import {
   type Abi,
   decodeFunctionData,
+  encodeFunctionData,
   type Hex,
   isAddressEqual,
+  parseEventLogs,
   type TransactionReceipt,
 } from 'viem'
 import evidenceJson from '../src/evidence.json' with { type: 'json' }
-import { Chain, fmt18, parseUiNumber, type Snapshot } from './chain'
+import { formatUtc } from '../src/lib/time'
+import { Chain, canaryAccounts, fmt18, parseUiNumber, type Snapshot, uiNumberOrNaN } from './chain'
 import { E2EWallet, type SentTx } from './wallet'
 
 /**
  * The 5-minute judge journey (docs/JUDGES.md), end to end on Mezo testnet with a real signing wallet:
  * connect → borrow 0.0009 BTC at 30% LTV → claim test MUSD → wsMUSD deposit (permit), redeem, redeem in kind →
- * repay & withdraw → Evidence. Each on-chain step is confirmed from the RPC (and with `cast` when installed),
- * never from the UI alone.
+ * repay & withdraw → Evidence, then the Wave 2 pages: vMUSD deposit and withdrawal on Lend, and live reads on
+ * Liquidate, Risk and Fees (a liquidation is sent only if a position is actually liquidatable). Each on-chain step
+ * is confirmed from the RPC (and with `cast` when installed), never from the UI alone.
  */
 
 const here = dirname(fileURLToPath(import.meta.url))
 const BASE_URL = (process.env.E2E_BASE_URL ?? 'https://baserate-mezo.vercel.app').replace(/\/$/, '')
 const KEY_FILE = process.env.E2E_WALLET_KEY_FILE ?? join(homedir(), '.baserate', 'e2e-wallet.key')
 const MEDIA_DIR = process.env.E2E_MEDIA_DIR ? resolve(process.env.E2E_MEDIA_DIR) : null
+/** Full-page screenshots only (no video): E2E_PHOTO_DIR, else alongside the videos in E2E_MEDIA_DIR. */
+const PHOTO_DIR = process.env.E2E_PHOTO_DIR ? resolve(process.env.E2E_PHOTO_DIR) : MEDIA_DIR
 const START_CHAIN = Number(process.env.E2E_START_CHAIN ?? 1)
 /** The dispenser allows one claim per address per UTC day; debugging runs can save it for the real run. */
 const SKIP_CLAIM = process.env.E2E_SKIP_CLAIM === '1'
@@ -56,6 +76,9 @@ const DEPOSIT_TEXT = '5'
 const DEPOSIT = 5n * 10n ** 18n
 const REDEEM_TEXT = '2'
 const REDEEM = 2n * 10n ** 18n
+const LEND_TEXT = '3'
+const LEND = 3n * 10n ** 18n
+const MOBILE = { width: 390, height: 844 }
 /** Gas (in wei of BTC) the journey may spend; Mezo testnet fees are tiny, this is a generous ceiling. */
 const GAS_BUDGET = 100_000_000_000_000n
 
@@ -118,6 +141,7 @@ test.describe('judge journey on Mezo testnet', () => {
         `Wallet ${wallet.address} has ${fmt18(s.btc)} BTC; the journey needs ${fmt18(needBtc)}. Fund it from the faucet or the deployer.`,
       )
     if (MEDIA_DIR) mkdirSync(MEDIA_DIR, { recursive: true })
+    if (PHOTO_DIR) mkdirSync(PHOTO_DIR, { recursive: true })
     mkdirSync(OUTPUT_DIR, { recursive: true })
   })
 
@@ -176,10 +200,11 @@ test.describe('judge journey on Mezo testnet', () => {
     name: string,
     path: string,
     ready: (page: Page) => Promise<void> = async () => {},
+    viewport: { width: number; height: number } = VIEWPORT,
   ) {
-    if (!MEDIA_DIR) return
+    if (!PHOTO_DIR) return
     const context = await browser.newContext({
-      viewport: VIEWPORT,
+      viewport,
       deviceScaleFactor: 1,
       colorScheme: 'light',
     })
@@ -194,7 +219,7 @@ test.describe('judge journey on Mezo testnet', () => {
         .toHaveCount(0, { timeout: 30_000 })
         .catch(() => console.log(`[e2e] ${name}.png: some values were still loading`))
       await page.waitForTimeout(1_500)
-      await page.screenshot({ path: join(MEDIA_DIR, `${name}.png`), fullPage: true })
+      await page.screenshot({ path: join(PHOTO_DIR, `${name}.png`), fullPage: true })
     } finally {
       await context.close()
     }
@@ -691,8 +716,9 @@ test.describe('judge journey on Mezo testnet', () => {
     const ours = page
       .getByRole('region', { name: 'Contracts' })
       .locator('tr', { hasText: 'Baserate' })
-    await expect(ours).toHaveCount(6)
-    for (let i = 0; i < 6; i++)
+    const ourCount = Object.keys(chain.registry.contracts).length
+    await expect(ours).toHaveCount(ourCount)
+    for (let i = 0; i < ourCount; i++)
       await expect(ours.nth(i), 'Baserate contract verified').toContainText(/Verified/, {
         timeout: 60_000,
       })
@@ -702,6 +728,394 @@ test.describe('judge journey on Mezo testnet', () => {
     await photograph(browser, 'evidence', '/evidence', async (page) => {
       await expect(page.getByText('Verified live', { exact: true })).toHaveCount(entries, {
         timeout: 90_000,
+      })
+    })
+  })
+
+  // ---------------------------------------------------------------------------------------------------------
+  // Wave 2 pages
+  // ---------------------------------------------------------------------------------------------------------
+
+  test('6 · lend: deposit 3 MUSD into vMUSD, then withdraw it all', async ({ browser }) => {
+    const r = chain.registry
+    const vault = r.contracts.vMusd.address
+    const adapter = r.contracts.wsMusdAdapter.address
+    const c = wallet.publicClient
+    const start = await chain.snapshot(wallet.address)
+    if (start.musd < LEND) journey.skipped.push(`lend: wallet holds ${fmt18(start.musd, 2)} MUSD`)
+    test.skip(start.musd < LEND, 'Not enough MUSD for the vMUSD deposit')
+
+    const { page } = await open(browser, '06-lend', '/lend')
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+      'vMUSD: lend MUSD to BTC borrowers',
+    )
+    // The vault card agrees with the chain.
+    const vaultCard = page.getByRole('region', { name: 'Vault', exact: true })
+    const totalAssets = await c.readContract({
+      address: vault,
+      abi: vaultV2Abi,
+      functionName: 'totalAssets',
+    })
+    await expect
+      .poll(
+        async () =>
+          uiNumberOrNaN(await vaultCard.locator('p:text-is("Total assets") + p').textContent()),
+        {
+          timeout: 60_000,
+        },
+      )
+      .toBeCloseTo(Number(fmt18(totalAssets, 2)), 0)
+
+    // Deposit: approve (when needed), then deposit; the liquidity adapter parks it in wsMUSD in the same call.
+    await page.locator('#vault-deposit').pressSequentially(LEND_TEXT, { delay: 90 })
+    await expect(page.getByText(/^You receive ≈ [\d.,]+ vMUSD$/)).toBeVisible()
+    const allowance = await c.readContract({
+      address: r.external.musd,
+      abi: erc20PermitAbi,
+      functionName: 'allowance',
+      args: [wallet.address, vault],
+    })
+    if (allowance < LEND) {
+      const approve = page.getByRole('button', { name: /^1\. Approve [\d.,]+ MUSD$/ })
+      const a = await sendViaUi(page, 'vmusd-approve', approve, 'MUSD approved', r.external.musd)
+      const call = decode(erc20PermitAbi, a.tx)
+      expect(call.functionName).toBe('approve')
+      expect(call.args).toEqual([vault, LEND])
+      await record('vmusd-approve', a, await chain.snapshot(wallet.address))
+    }
+    const deposit = page.getByRole('button', { name: /^Deposit [\d.,]+ MUSD$/ })
+    await expect(page.getByText('Simulating on Mezo…')).toHaveCount(0, { timeout: 30_000 })
+    await pause(page, 1_200)
+    const expectedShares = await c.readContract({
+      address: vault,
+      abi: vaultV2Abi,
+      functionName: 'previewDeposit',
+      args: [LEND],
+    })
+    const d = await sendViaUi(
+      page,
+      'vmusd-deposit',
+      deposit,
+      'Deposited',
+      vault,
+      /vMUSD minted for/,
+    )
+    const depCall = decode(vaultV2Abi, d.tx)
+    expect(depCall.functionName).toBe('deposit')
+    expect(depCall.args).toEqual([LEND, wallet.address])
+    const deposited = await settled((s) => s.vMusd > d.before.vMusd, 'vMUSD minted')
+    expect(d.before.musd - deposited.musd).toBe(LEND)
+    const minted = deposited.vMusd - d.before.vMusd
+    expect(minted <= expectedShares && expectedShares - minted < 10n ** 15n).toBe(true)
+    const [allocated] = parseEventLogs({
+      abi: wsMusdLiquidityAdapterAbi,
+      logs: d.receipt.logs.filter((l) => isAddressEqual(l.address, adapter)),
+      eventName: 'Allocated',
+    })
+    expect(allocated?.args.assets, 'deposit allocated to the wsMUSD adapter').toBe(LEND)
+    const mine = page.getByRole('region', { name: 'Your position' })
+    await expect
+      .poll(async () => uiNumberOrNaN(await mine.locator('p:text-is("vMUSD") + p').textContent()))
+      .toBeCloseTo(Number(fmt18(deposited.vMusd, 4)), 3)
+    await record('vmusd-deposit', d, deposited, {
+      shares: fmt18(minted, 8),
+      wsMusdDeposited: fmt18(allocated?.args.deposited ?? 0n, 8),
+    })
+    await pause(page, 1_500)
+
+    // Withdraw everything with Max: exact shares through vMUSD.redeem (idle + wsMUSD covers it, no allocator).
+    await page.getByRole('tab', { name: 'Withdraw' }).click()
+    await expect(
+      page.getByText(
+        new RegExp(`^${formatMusd(deposited.vMusd, { dp: 4 }).replace('.', '\\.')} vMUSD ≈`),
+      ),
+    ).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('button', { name: 'Max', exact: true }).click()
+    await expect(page.getByText('Straight from vMUSD (redeem).')).toBeVisible()
+    const withdraw = page.getByRole('button', { name: /^Withdraw [\d.,]+ MUSD$/ })
+    await expect(page.getByText('Simulating on Mezo…')).toHaveCount(0, { timeout: 30_000 })
+    const expectedAssets = await c.readContract({
+      address: vault,
+      abi: vaultV2Abi,
+      functionName: 'previewRedeem',
+      args: [deposited.vMusd],
+    })
+    await pause(page, 1_200)
+    const w = await sendViaUi(
+      page,
+      'vmusd-withdraw',
+      withdraw,
+      'Withdrawn',
+      vault,
+      /MUSD sent to your wallet/,
+    )
+    const wCall = decode(vaultV2Abi, w.tx)
+    expect(wCall.functionName).toBe('redeem')
+    expect(wCall.args).toEqual([w.before.vMusd, wallet.address, wallet.address])
+    const out = await settled((s) => s.vMusd === 0n, 'every vMUSD share redeemed')
+    const got = out.musd - w.before.musd
+    // The share price only rises, so at least the preview; and the round trip loses at most rounding dust.
+    expect(got >= expectedAssets && got - expectedAssets < 10n ** 15n).toBe(true)
+    expect(LEND - got < 10n ** 15n, 'deposit → withdraw round trip').toBe(true)
+    await record('vmusd-withdraw', w, out, { musdOut: fmt18(got, 8) })
+    await pause(page, 1_500)
+    await finishStage()
+    await photograph(browser, 'lend', '/lend', async (p) => {
+      await expect(p.getByText('MUSD per vMUSD')).toBeVisible()
+    })
+    await photograph(
+      browser,
+      'lend-mobile',
+      '/lend',
+      async (p) => {
+        await expect(p.getByText('MUSD per vMUSD')).toBeVisible()
+      },
+      MOBILE,
+    )
+  })
+
+  test('7 · liquidate: positions and previews match FlashLiquidator, canary badged', async ({
+    browser,
+  }) => {
+    const r = chain.registry
+    const flash = r.contracts.flashLiquidator.address
+    const c = wallet.publicClient
+    const canaries = await canaryAccounts(chain)
+    expect(canaries.length, 'a canary account exists').toBeGreaterThan(0)
+    const previews = await Promise.all(
+      canaries.map(async (a) => {
+        const { result } = await c.simulateContract({
+          address: flash,
+          abi: flashLiquidatorAbi,
+          functionName: 'previewLiquidation',
+          args: [a],
+        })
+        return { account: a, p: result }
+      }),
+    )
+    const live = previews.find((x) => x.p.debt > 0n)
+    expect(live, 'an open canary position').toBeTruthy()
+    if (!live) return
+    const sentBefore = wallet.sent.length
+
+    const { page } = await open(browser, '07-liquidate', '/liquidate')
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+      'Zero-capital liquidations for M1',
+    )
+    const positions = page.getByRole('region', { name: 'Positions' })
+    const row = positions.getByRole('button', { name: new RegExp(shortAddress(live.account, 5)) })
+    await expect(row).toBeVisible({ timeout: 60_000 })
+    await expect(row).toContainText('Canary')
+    // LTV in the row vs previewLiquidation read directly (prices tick every few seconds: ±0.1 point).
+    await expect(row).toContainText(/Healthy|Liquidatable/, { timeout: 60_000 })
+    const ltvUi = parseUiNumber(await row.locator('dt:text-is("LTV · health") + dd').textContent())
+    expect(Math.abs(ltvUi - Number(fmt18(live.p.ltvWad * 100n, 2)))).toBeLessThan(0.1)
+    // "Liquidatable if BTC ≤ $X": debt / (collateral × LLTV), times the oracle's MUSD leg.
+    const status = await c.readContract({
+      address: r.contracts.oracle.address,
+      abi: btcMusdOracleAbi,
+      functionName: 'status',
+    })
+    const threshold = liquidationBtcUsd(
+      live.p.debt,
+      live.p.collateral,
+      r.lltv,
+      impliedMusdLeg(status) ?? WAD,
+    )
+    const thresholdUi = parseUiNumber(
+      await row.locator('dt:text-is("Liquidatable if BTC ≤") + dd').textContent(),
+    )
+    expect(Math.abs(thresholdUi / Number(fmt18(threshold ?? 0n, 2)) - 1)).toBeLessThan(0.002)
+
+    await row.click()
+    const card = page.getByRole('region', { name: 'Liquidation preview' })
+    await expect(card).toContainText(shortAddress(live.account))
+    const backstopCard = page.getByRole('region', { name: 'Backstop' })
+    const nav = await c.readContract({
+      address: r.contracts.backstop.address,
+      abi: backstopAbi,
+      functionName: 'convertToAssets',
+      args: [WAD],
+    })
+    await expect(backstopCard.locator('p:text-is("NAV") + p')).toHaveText(
+      toFixedDecimal(nav, 18, 6),
+    )
+
+    const fresh = await c.simulateContract({
+      address: flash,
+      abi: flashLiquidatorAbi,
+      functionName: 'previewLiquidation',
+      args: [live.account],
+    })
+    if (fresh.result.liquidatable) {
+      // A real liquidation, only because the position is liquidatable right now.
+      const venue = [Venue.BACKSTOP, Venue.VAMM].find((v) => fresh.result.quotes[v].ok)
+      test.skip(venue === undefined, 'Liquidatable, but no testnet venue can clear it')
+      if (venue === undefined) return
+      await card
+        .getByRole('radio', { name: venue === Venue.VAMM ? /Tigris vAMM/ : /Backstop/ })
+        .check()
+      const button = card.getByRole('button', { name: /^Liquidate for ≈ [\d.,]+ MUSD profit$/ })
+      const l = await sendViaUi(
+        page,
+        'liquidate',
+        button,
+        'Liquidated',
+        flash,
+        /profit sent to you/,
+      )
+      const call = decode(flashLiquidatorAbi, l.tx)
+      expect(call.functionName).toBe('liquidate')
+      const [ev] = parseEventLogs({
+        abi: flashLiquidatorAbi,
+        logs: l.receipt.logs,
+        eventName: 'Liquidated',
+      })
+      expect(ev?.args.borrower).toBe(live.account)
+      await record('liquidate', l, await chain.snapshot(wallet.address), {
+        venue: String(venue),
+        seized: fmt18(ev?.args.seized ?? 0n, 8),
+        profit: fmt18(ev?.args.profit ?? 0n, 8),
+      })
+    } else {
+      // Healthy: the button stays disabled with the threshold, and nothing is sent.
+      await expect(card).toContainText('Healthy')
+      await expect(card.getByRole('button', { name: 'Liquidate', exact: true })).toBeDisabled()
+      await expect(
+        card.getByText(/^Healthy: liquidatable once BTC is at or below \$[\d,]+\.$/),
+      ).toBeVisible()
+      // What the vAMM would pay for the whole collateral, against quoteVenues read directly.
+      const { result: quote } = await c.simulateContract({
+        address: flash,
+        abi: flashLiquidatorAbi,
+        functionName: 'quoteVenues',
+        args: [live.p.collateral],
+      })
+      const vamm = card.getByText(/^would pay [\d.,]+ MUSD for all/)
+      await expect(vamm.first()).toBeVisible({ timeout: 60_000 })
+      const vammText = (await vamm.first().textContent()) ?? ''
+      const vammUi = parseUiNumber(vammText.replace(/^would pay /, ''))
+      expect(Math.abs(vammUi / Number(fmt18(quote[1][Venue.VAMM], 2)) - 1)).toBeLessThan(0.005)
+      expect(wallet.sent.length, 'no transaction sent for a healthy position').toBe(sentBefore)
+      journey.skipped.push(
+        `liquidation: canary ${live.account} healthy at ${fmt18(fresh.result.ltvWad * 100n, 2)}% LTV`,
+      )
+    }
+    await pause(page, 1_500)
+    await finishStage()
+    await photograph(browser, 'liquidate', '/liquidate', async (p) => {
+      await expect(p.getByRole('region', { name: 'Liquidation preview' })).toBeVisible({
+        timeout: 60_000,
+      })
+    })
+    await photograph(
+      browser,
+      'liquidate-mobile',
+      '/liquidate',
+      async (p) => {
+        await expect(p.getByRole('region', { name: 'Liquidation preview' })).toBeVisible({
+          timeout: 60_000,
+        })
+      },
+      MOBILE,
+    )
+  })
+
+  test('8 · risk: the RiskLens dashboard shows the live snapshot', async ({ browser }) => {
+    const r = chain.registry
+    const { page } = await open(browser, '08-risk', '/risk')
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+      'RiskLens: the whole risk picture in one call',
+    )
+    const snap = await wallet.publicClient.readContract({
+      address: r.contracts.riskLens.address,
+      abi: riskLensAbi,
+      functionName: 'snapshot',
+      args: [
+        {
+          backstop: r.contracts.backstop.address,
+          btcSizes: [10n ** 15n],
+          troveCount: 10n,
+          twapWindow: 0,
+        },
+      ],
+    })
+    // Testnet has no MUSD/USD CL pool and no CL200 depth: skipped = 48, and nothing fails.
+    expect(snap.skipped).toBe(RiskSource.MUSD_POOL | RiskSource.CL_DEPTH)
+    expect(snap.failed).toBe(0n)
+    const sources = page.getByRole('region', { name: 'Sources' })
+    await expect(sources).toContainText('MUSD/USD pool: not on this network', { timeout: 60_000 })
+    await expect(sources).toContainText('Oracle: read')
+    await expect(sources).toContainText('vAMM depth: read')
+    const depth = page.getByRole('region', { name: 'Liquidation depth' })
+    await expect(depth.locator('tbody tr')).toHaveCount(8)
+    const first = parseUiNumber(
+      await depth.locator('tbody tr').first().locator('td').nth(2).textContent(),
+    )
+    expect(Math.abs(first / Number(fmt18(snap.depth[0]?.vammOut ?? 0n, 2)) - 1)).toBeLessThan(0.01)
+    const troves = page.getByRole('region', { name: 'MUSD redemption queue' })
+    await expect(troves.locator('tbody tr')).toHaveCount(Math.min(10, Number(snap.troves.size)))
+    await expect(page.getByRole('region', { name: 'Oracle' })).toContainText(
+      snap.oracle.ok ? 'Price OK' : 'Guard active',
+    )
+    await pause(page, 1_500)
+    await smoothScroll(page)
+    await finishStage()
+    await photograph(browser, 'risk', '/risk', async (p) => {
+      await expect(
+        p.getByRole('region', { name: 'Liquidation depth' }).locator('tbody tr'),
+      ).toHaveCount(8)
+    })
+  })
+
+  test('9 · fees: FeeRouter preview, distributions and the timelocked fee switch', async ({
+    browser,
+  }) => {
+    const r = chain.registry
+    const c = wallet.publicClient
+    const router = r.contracts.feeRouter.address
+    const executableAt = await c.readContract({
+      address: r.contracts.factory.address,
+      abi: borrowAccountFactoryAbi,
+      functionName: 'executableAt',
+      args: [
+        encodeFunctionData({
+          abi: borrowAccountFactoryAbi,
+          functionName: 'setFeeRecipient',
+          args: [router],
+        }),
+      ],
+    })
+    const plan = await c.readContract({
+      address: router,
+      abi: feeRouterAbi,
+      functionName: 'previewDistribute',
+    })
+    const { page } = await open(browser, '09-fees', '/fees')
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+      'Origination fees go back to Mezo',
+    )
+    const sw = page.getByRole('region', { name: 'Pending governance: fee switch' })
+    if (executableAt > 0n) {
+      await expect(sw).toContainText(formatUtc(Number(executableAt)), { timeout: 60_000 })
+      if (Number(executableAt) > Date.now() / 1000) await expect(sw).toContainText('Timelocked')
+    }
+    await expect(sw.getByRole('link', { name: /0xeedbd3…/ })).toBeVisible({ timeout: 60_000 })
+    const history = page.getByRole('region', { name: 'Distributions' })
+    await expect(history).toContainText('20.00 MUSD split', { timeout: 60_000 })
+    await expect(history).toContainText('Bribe 8.00 MUSD on gauge')
+    const distribute = page.getByRole('region', { name: 'Next distribution' }).getByRole('button', {
+      name: /^Distribute/,
+    })
+    if (plan.total === 0n) {
+      await expect(distribute).toBeDisabled()
+      await expect(page.getByText(/^Nothing to distribute: the router holds 0 MUSD/)).toBeVisible()
+    }
+    await pause(page, 1_500)
+    await finishStage()
+    await photograph(browser, 'fees', '/fees', async (p) => {
+      await expect(p.getByRole('region', { name: 'Distributions' })).toContainText('MUSD split', {
+        timeout: 60_000,
       })
     })
   })

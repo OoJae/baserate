@@ -5,8 +5,10 @@ import {
   borrowAccountFactoryAbi,
   erc20PermitAbi,
   getRegistry,
+  minBig,
   musdDispenserAbi,
   Profile,
+  vaultV2Abi,
   wsMusdAbi,
 } from '@baserate/sdk'
 import type { Address, Hex, PublicClient, TransactionReceipt } from 'viem'
@@ -24,6 +26,8 @@ export interface Snapshot {
   btc: bigint
   musd: bigint
   wsMusd: bigint
+  /** vMUSD shares (Morpho Vault V2). */
+  vMusd: bigint
   smusd: bigint
   account: Address
   accountDeployed: boolean
@@ -72,12 +76,19 @@ export class Chain {
         args: [who],
         ...at,
       })
-    const [btc, musd, wsMusd, smusd, dispenserClaimable, position] = await Promise.all([
+    const [btc, musd, wsMusd, vMusd, smusd, dispenserClaimable, position] = await Promise.all([
       c.getBalance({ address: owner, ...at }),
       erc20(r.external.musd, owner),
       c.readContract({
         address: r.contracts.wsMusd.address,
         abi: wsMusdAbi,
+        functionName: 'balanceOf',
+        args: [owner],
+        ...at,
+      }),
+      c.readContract({
+        address: r.contracts.vMusd.address,
+        abi: vaultV2Abi,
         functionName: 'balanceOf',
         args: [owner],
         ...at,
@@ -112,6 +123,7 @@ export class Chain {
       btc,
       musd,
       wsMusd,
+      vMusd,
       smusd,
       account,
       accountDeployed,
@@ -134,6 +146,7 @@ export class Chain {
       ['musd', s.musd, call(r.external.musd, 'balanceOf(address)(uint256)', owner)],
       ['wsMusd', s.wsMusd, call(r.contracts.wsMusd.address, 'balanceOf(address)(uint256)', owner)],
       ['smusd', s.smusd, call(r.external.smusd, 'balanceOf(address)(uint256)', owner)],
+      ['vMusd', s.vMusd, call(r.contracts.vMusd.address, 'balanceOf(address)(uint256)', owner)],
     ]
     if (s.accountDeployed) {
       checks.push(['collateral', s.collateral, call(s.account, 'collateral()(uint256)')])
@@ -221,4 +234,29 @@ export function parseUiNumber(text: string | null | undefined): number {
   const m = (text ?? '').replace(/,/g, '').match(/-?\d+(?:\.\d+)?/)
   if (!m) throw new Error(`No number in "${text}"`)
   return Number(m[0])
+}
+
+/** Accounts the factory opened with the CANARY profile (AccountCreated logs, read in 10k-block windows). */
+export async function canaryAccounts(c: Chain): Promise<Address[]> {
+  const r = c.registry
+  const head = await c.client.getBlockNumber()
+  const out: Address[] = []
+  for (let from = BigInt(r.contracts.factory.block); from <= head; from += 10_000n) {
+    const to = minBig(from + 9_999n, head)
+    const logs = await c.client.getContractEvents({
+      address: r.contracts.factory.address,
+      abi: borrowAccountFactoryAbi,
+      eventName: 'AccountCreated',
+      fromBlock: from,
+      toBlock: to,
+    })
+    for (const l of logs)
+      if (Number(l.args.profile) === Profile.CANARY && l.args.account) out.push(l.args.account)
+  }
+  return out
+}
+
+/** Like parseUiNumber, but NaN while the text has no number yet (a skeleton), so expect.poll keeps polling. */
+export function uiNumberOrNaN(text: string | null | undefined): number {
+  return /\d/.test(text ?? '') ? parseUiNumber(text) : Number.NaN
 }
