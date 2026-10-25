@@ -26,6 +26,11 @@ struct MezoNetwork {
     address router;
     address poolFactory;
     address btcMusdVolatilePool;
+    // Tigris CL (Slipstream, ExactInputSingleParams keyed by tickSpacing). Zero where the BTC/MUSD CL200 pool or
+    // QuoterV2 is absent (testnet), which disables the CL200 liquidation venue.
+    address clSwapRouter;
+    address clQuoter;
+    address btcMusdCl200Pool;
 }
 
 library MezoAddresses {
@@ -61,6 +66,7 @@ library MezoAddresses {
         n.router = 0x9a1ff7FE3a0F69959A3fBa1F1e5ee18e1A9CD7E9;
         n.poolFactory = 0x4947243CC818b627A5D06d14C4eCe7398A23Ce1A;
         n.btcMusdVolatilePool = 0xd16A5Df82120ED8D626a1a15232bFcE2366d6AA9;
+        // No BTC/MUSD CL200 pool and no QuoterV2 on testnet: clSwapRouter, clQuoter and btcMusdCl200Pool stay zero.
     }
 
     function mainnet() internal pure returns (MezoNetwork memory n) {
@@ -81,6 +87,9 @@ library MezoAddresses {
         n.router = 0x16A76d3cd3C1e3CE843C6680d6B37E9116b5C706;
         n.poolFactory = 0x83FE469C636C4081b87bA5b3Ae9991c6Ed104248;
         n.btcMusdVolatilePool = 0x52e604c44417233b6CcEDDDc0d640A405Caacefb;
+        n.clSwapRouter = 0x37cDd11919ec3860eaD9efB8673d7476E5326225;
+        n.clQuoter = 0x4E56aF2d49D3D8F9a99155b31dd117ccDD545dC7;
+        n.btcMusdCl200Pool = 0x9CBc1537d255768b431488305b1C7EFc2ac95022;
     }
 
     function forChain(uint256 chainId) internal pure returns (MezoNetwork memory) {
