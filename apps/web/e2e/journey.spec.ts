@@ -211,6 +211,9 @@ test.describe('judge journey on Mezo testnet', () => {
     try {
       await photoWallet.install(context)
       const page = await context.newPage()
+      // Media is optional: bound every wait so a stuck load or capture is logged, never fatal to the journey.
+      page.setDefaultTimeout(60_000)
+      page.setDefaultNavigationTimeout(60_000)
       await page.goto(`${BASE_URL}${path}`)
       await ensureConnected(page, photoWallet)
       await ready(page)
@@ -219,9 +222,15 @@ test.describe('judge journey on Mezo testnet', () => {
         .toHaveCount(0, { timeout: 30_000 })
         .catch(() => console.log(`[e2e] ${name}.png: some values were still loading`))
       await page.waitForTimeout(1_500)
-      await page.screenshot({ path: join(PHOTO_DIR, `${name}.png`), fullPage: true })
+      await page.screenshot({
+        path: join(PHOTO_DIR, `${name}.png`),
+        fullPage: true,
+        animations: 'disabled',
+      })
+    } catch (e) {
+      console.log(`[e2e] ${name}.png not captured: ${String(e).split('\n')[0]}`)
     } finally {
-      await context.close()
+      await context.close().catch(() => {})
     }
   }
 
@@ -229,12 +238,21 @@ test.describe('judge journey on Mezo testnet', () => {
     const account = page.getByTestId('rk-account-button')
     const connect = page.getByTestId('rk-connect-button')
     await expect(account.or(connect).first()).toBeVisible({ timeout: 30_000 })
-    if (await connect.isVisible()) {
-      await connect.click()
-      const dialog = page.getByRole('dialog')
-      await dialog.getByRole('button', { name: /Baserate E2E Wallet/ }).click()
+    // wagmi may still be reconnecting an already-authorised wallet when the Connect button first shows, and
+    // then swaps it for the account button mid-click: retry short clicks until the account button is there.
+    const deadline = Date.now() + 60_000
+    while (!(await account.isVisible())) {
+      if (Date.now() > deadline) throw new Error('The wallet did not connect within 60s')
+      if (await connect.isVisible()) {
+        await connect.click({ timeout: 5_000 }).catch(() => {})
+        await page
+          .getByRole('dialog')
+          .getByRole('button', { name: /Baserate E2E Wallet/ })
+          .click({ timeout: 5_000 })
+          .catch(() => {})
+      }
+      await page.waitForTimeout(500)
     }
-    await expect(account).toBeVisible({ timeout: 30_000 })
     // A wallet that starts on another chain either switches while connecting or gets the one-click banner.
     const switchBtn = page.getByRole('button', { name: /^Switch to Mezo Testnet$/ }).first()
     if (w.chainId !== mezoTestnet.id && (await switchBtn.isVisible().catch(() => false)))
