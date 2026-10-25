@@ -1,0 +1,196 @@
+@import "tailwindcss";
+
+/*
+ * Baserate design tokens. Calm paper-and-ink palette with a deep sea-green brand; amber marks BTC.
+ * Every token flips for dark mode, so components only use semantic names (bg-surface, text-ink, …).
+ */
+:root {
+  --canvas: #f6f5f1;
+  --surface: #ffffff;
+  --raised: #f0eee8;
+  --line: #e3e0d7;
+  --line-strong: #cfcbc0;
+  --ink: #14181d;
+  --muted: #565d68;
+  --faint: #676e78;
+  --brand: #0b6e5f;
+  --brand-strong: #07574b;
+  --brand-soft: #e2f0ec;
+  --on-brand: #ffffff;
+  --btc: #a65f0f;
+  --btc-soft: #fbf0e1;
+  --good: #11704f;
+  --good-soft: #e3f3eb;
+  --warn: #8f5200;
+  --warn-soft: #fdf1dc;
+  --bad: #b42318;
+  --bad-soft: #fde8e6;
+  --focus: #1d7fd6;
+  --shadow: 0 1px 2px rgb(20 24 29 / 0.05), 0 4px 16px rgb(20 24 29 / 0.04);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #0d1013;
+    --surface: #14191e;
+    --raised: #1a2027;
+    --line: #262e37;
+    --line-strong: #36404b;
+    --ink: #e9edf0;
+    --muted: #a3acb6;
+    --faint: #7f8994;
+    --brand: #3cc2a6;
+    --brand-strong: #6dd6c0;
+    --brand-soft: #10302a;
+    --on-brand: #04201a;
+    --btc: #f0a54a;
+    --btc-soft: #34230d;
+    --good: #4cc792;
+    --good-soft: #0f2c21;
+    --warn: #f2b54f;
+    --warn-soft: #33250c;
+    --bad: #ff7a6e;
+    --bad-soft: #3a1513;
+    --focus: #6cb6ff;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 20px rgb(0 0 0 / 0.25);
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-soft: var(--brand-soft);
+  --color-on-brand: var(--on-brand);
+  --color-btc: var(--btc);
+  --color-btc-soft: var(--btc-soft);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-focus: var(--focus);
+  --shadow-card: var(--shadow);
+}
+
+@theme {
+  --font-sans:
+    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-display:
+    "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, ui-serif, serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --breakpoint-xs: 22.5rem;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    min-height: 100dvh;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  ::selection {
+    background: var(--brand-soft);
+  }
+}
+
+@utility num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Range input styled as a risk track. */
+.ltv-range {
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ltv-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--track, var(--line));
+}
+
+.ltv-range::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--track, var(--line));
+}
+
+.ltv-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -8px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 2px solid var(--brand);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.2);
+}
+
+.ltv-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 2px solid var(--brand);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.2);
+}
+
+.ltv-range:focus-visible {
+  outline: none;
+}
+
+.ltv-range:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.toast-in {
+  animation: toast-in 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast-in {
+    animation: none;
+  }
+}
