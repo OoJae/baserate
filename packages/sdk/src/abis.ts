@@ -30,21 +30,6 @@ const marketComponents = [
   { name: 'fee', type: 'uint128' },
 ] as const
 
-/** `BtcMusdOracle.Status`. Prices are 1e18 USD; `price` is Morpho's 1e36 scale. */
-const oracleStatusComponents = [
-  { name: 'price', type: 'uint256' },
-  { name: 'ok', type: 'bool' },
-  { name: 'skipPrice', type: 'uint256' },
-  { name: 'skipAge', type: 'uint256' },
-  { name: 'pythBtcPrice', type: 'uint256' },
-  { name: 'pythBtcAge', type: 'uint256' },
-  { name: 'pythBtcFresh', type: 'bool' },
-  { name: 'musdPrice', type: 'uint256' },
-  { name: 'musdAge', type: 'uint256' },
-  { name: 'musdFresh', type: 'bool' },
-  { name: 'deviationBps', type: 'uint256' },
-] as const
-
 // ---------------------------------------------------------------------------------------------------------------
 // Custom errors
 // ---------------------------------------------------------------------------------------------------------------
@@ -255,7 +240,10 @@ export const Profile = { STANDARD: 0, CANARY: 1 } as const
 export type ProfileId = (typeof Profile)[keyof typeof Profile]
 
 /** `contract BorrowAccountFactory`. */
-export const borrowAccountFactoryAbi = [...borrowAccountFactoryGenerated, ...baserateErrorsAbi] as const
+export const borrowAccountFactoryAbi = [
+  ...borrowAccountFactoryGenerated,
+  ...baserateErrorsAbi,
+] as const
 
 /** `contract BorrowAccount` (EIP-1167 clone, owner-only). */
 export const borrowAccountAbi = [...borrowAccountGenerated, ...baserateErrorsAbi] as const
