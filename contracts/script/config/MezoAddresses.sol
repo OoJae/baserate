@@ -26,6 +26,20 @@ struct MezoNetwork {
     address router;
     address poolFactory;
     address btcMusdVolatilePool;
+    // Mezo Earn pool gauges (PoolsVoter; verified gaugeToBribe mapping) and Slipstream, used by the Wave 2 periphery.
+    address poolsVoter;
+    // Primary BTC/MUSD gauge and its BribeVotingReward (mainnet CL200, testnet vAMM).
+    address gauge0;
+    address bribe0;
+    // Second BTC/MUSD gauge and bribe (mainnet vAMM; 0 on testnet).
+    address gauge1;
+    address bribe1;
+    // Slipstream QuoterV2 and the BTC/MUSD CL pool it prices (0 on testnet, where QuoterV2 is absent).
+    address clQuoter;
+    address clBtcMusdPool;
+    int24 clBtcMusdTickSpacing;
+    // Slipstream pool pairing MUSD with a USD stablecoin, for a MUSD TWAP (mainnet CL10 mUSDC/MUSD; 0 on testnet).
+    address clMusdUsdPool;
 }
 
 library MezoAddresses {
@@ -61,6 +75,9 @@ library MezoAddresses {
         n.router = 0x9a1ff7FE3a0F69959A3fBa1F1e5ee18e1A9CD7E9;
         n.poolFactory = 0x4947243CC818b627A5D06d14C4eCe7398A23Ce1A;
         n.btcMusdVolatilePool = 0xd16A5Df82120ED8D626a1a15232bFcE2366d6AA9;
+        n.poolsVoter = 0x263F1Fd5fB7F866881e1B6cD7d5d6c40Fd985F0D;
+        n.gauge0 = 0x72D88B0795373437E86792DEd8362D66dC43Cd2c;
+        n.bribe0 = 0x75b6B35Fc78826A0B7E1f9c08bb7d84bd70D0ee1;
     }
 
     function mainnet() internal pure returns (MezoNetwork memory n) {
@@ -81,6 +98,15 @@ library MezoAddresses {
         n.router = 0x16A76d3cd3C1e3CE843C6680d6B37E9116b5C706;
         n.poolFactory = 0x83FE469C636C4081b87bA5b3Ae9991c6Ed104248;
         n.btcMusdVolatilePool = 0x52e604c44417233b6CcEDDDc0d640A405Caacefb;
+        n.poolsVoter = 0x48233cCC97B87Ba93bCA212cbEe48e3210211f03;
+        n.gauge0 = 0x21d7AcB0D128fA039064B6aCe8Db88c0aDe0209E;
+        n.bribe0 = 0x80cCC053a90fc310150603C0274faf0a998B0e1a;
+        n.gauge1 = 0x8Be20a5fF57E381025aE5E3A121B697269569AaF;
+        n.bribe1 = 0x94A9A494872BF7231D8378d0Aef7d32BA552E305;
+        n.clQuoter = 0x4E56aF2d49D3D8F9a99155b31dd117ccDD545dC7;
+        n.clBtcMusdPool = 0x9CBc1537d255768b431488305b1C7EFc2ac95022;
+        n.clBtcMusdTickSpacing = 200;
+        n.clMusdUsdPool = 0xCC372B7E15535aB225fe17c1075831D38ef7aC1a;
     }
 
     function forChain(uint256 chainId) internal pure returns (MezoNetwork memory) {
