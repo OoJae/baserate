@@ -19,3 +19,6 @@ contracts/broadcast/**/dry-run/
 .playwright-mcp/
 .DS_Store
 .vercel
+
+# Claude Code worktrees and local state
+.claude/

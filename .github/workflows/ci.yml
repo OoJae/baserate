@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: Contracts (unit, fuzz, invariant)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.3
+      - run: forge fmt --check
+      - run: forge build --sizes
+      - name: Tests (forked suites run in their own job)
+        run: forge test --no-match-path "test/fork/*" -vvv
+        env:
+          FOUNDRY_PROFILE: ci
+
+  fork:
+    name: Contracts (Mezo mainnet + testnet forks)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.3
+      - uses: actions/cache@v4
+        with:
+          path: ~/.foundry/cache/rpc
+          key: fork-rpc-${{ hashFiles('contracts/test/fork/blocks.json') }}
+      - run: forge test --match-path "test/fork/*" -vvv
+
+  web:
+    name: SDK and web app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r typecheck
+      - run: pnpm --filter @baserate/sdk test
+      - run: pnpm --filter web build
+      - name: No secrets in the web bundle
+        run: node scripts/check-bundle.mjs
+
+  gitleaks:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
