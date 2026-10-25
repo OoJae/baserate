@@ -10,8 +10,9 @@ import {IFlashLiquidator} from "../../src/interfaces/IFlashLiquidator.sol";
 import {ILiquidationVenues, Venue} from "../../src/interfaces/ILiquidationVenues.sol";
 import {FlashLiquidator} from "../../src/liquidation/FlashLiquidator.sol";
 
-/// @notice FlashLiquidator unit tests that need no Morpho: construction, incentive math, venue gating and the
-/// callback guards. The economic paths run on the mainnet and testnet forks.
+/// @notice FlashLiquidator unit tests that need no Morpho: construction, incentive math, venue gating, the callback
+/// guards and `sweepNative`. The economic paths run on the mainnet and testnet forks and in the local audit suite
+/// (test/audit/LiquidationAudit.t.sol), which also covers native-BTC forwarding.
 contract FlashLiquidatorTest is Test {
     using MarketParamsLib for MarketParams;
 
@@ -96,5 +97,29 @@ contract FlashLiquidatorTest is Test {
         (bool ok,) = address(liq).call{value: 0.1 ether}("");
         assertTrue(ok);
         assertEq(address(liq).balance, 0.1 ether);
+    }
+
+    function test_sweepNative_permissionlessToAnyReceiver() public {
+        vm.deal(address(liq), 5);
+        address anyone = makeAddr("anyone");
+        address to = makeAddr("to");
+        vm.expectEmit(address(liq));
+        emit IFlashLiquidator.NativeSwept(anyone, to, 5);
+        vm.prank(anyone);
+        assertEq(liq.sweepNative(to), 5);
+        assertEq(to.balance, 5);
+        assertEq(address(liq).balance, 0);
+        // Nothing left: a no-op.
+        assertEq(liq.sweepNative(to), 0);
+    }
+
+    function test_sweepNative_rejectsZeroAndRevertsIfTheReceiverRefuses() public {
+        vm.deal(address(liq), 5);
+        vm.expectRevert(IFlashLiquidator.ZeroAddress.selector);
+        liq.sweepNative(address(0));
+        // This test contract has no receive(): the sweep reverts and the BTC stays.
+        vm.expectRevert(abi.encodeWithSelector(IFlashLiquidator.NativeSendFailed.selector, address(this), 5));
+        liq.sweepNative(address(this));
+        assertEq(address(liq).balance, 5);
     }
 }

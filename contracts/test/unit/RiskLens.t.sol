@@ -18,6 +18,7 @@ import {BtcMusdOracle} from "../../src/oracle/BtcMusdOracle.sol";
 import {IBtcMusdOracle} from "../../src/oracle/IBtcMusdOracle.sol";
 import {MezoAddresses} from "../../script/config/MezoAddresses.sol";
 import {
+    MockBackstopViews,
     MockIrm,
     MockMorphoMarkets,
     MockQuoter,
@@ -604,5 +605,107 @@ contract RiskLensTest is Test {
         // Guards the interface against drift: the lens reads exactly these selectors.
         assertEq(IMusdTroveManager.getCurrentICR.selector, MockTroves.getCurrentICR.selector);
         assertEq(IMusdTroveManager.getEntireDebtAndColl.selector, MockTroves.getEntireDebtAndColl.selector);
+    }
+
+    // ---------------------------------------------------------------- backstop views (audit D-5)
+
+    function _backstopViews(uint256 musdHeld, uint256 nativeHeld) internal returns (MockBackstopViews b) {
+        b = new MockBackstopViews();
+        musd.mint(address(b), musdHeld);
+        vm.deal(address(b), nativeHeld);
+    }
+
+    function test_backstop_usesAvailableCashAndInventory() public {
+        // 1,000 MUSD held, 999 of it reserved for queued exits; 0.2 BTC of inventory plus 0.3 BTC donated.
+        MockBackstopViews b = _backstopViews(1000e18, 0.5e18);
+        b.set(1e18, 0.2e18, 1001e18);
+        IRiskLens.BackstopState memory st = lens.backstopState(address(b));
+        assertEq(st.musd, 1000e18, "raw balance still reported");
+        assertEq(st.freeMusd, 1e18, "reserved exits are not free");
+        assertEq(st.nativeBtc, 0.2e18, "donated BTC is not inventory");
+        assertTrue(st.vaultRead);
+        assertEq(st.vaultTotalAssets, 1001e18);
+    }
+
+    function test_backstop_fallsBackWhenViewsRevert() public {
+        MockBackstopViews b = _backstopViews(70e18, 0.4e18);
+        b.set(1e18, 0.2e18, 5e18);
+        b.setMode(MockBackstopViews.Mode.REVERT);
+        IRiskLens.Query memory q = _query(1);
+        q.backstop = address(b);
+        IRiskLens.Snapshot memory s = _snap(lens, q);
+        assertEq(s.failed, 0, "missing views are not a failure");
+        assertEq(s.backstop.freeMusd, 70e18, "raw MUSD");
+        assertEq(s.backstop.nativeBtc, 0.4e18, "native balance");
+        assertFalse(s.backstop.vaultRead);
+    }
+
+    function test_backstop_shortReturnDataFallsBackInsteadOfReverting() public {
+        MockBackstopViews b = _backstopViews(70e18, 0.4e18);
+        b.set(1e18, 0.2e18, 5e18);
+        b.setMode(MockBackstopViews.Mode.SHORT);
+        IRiskLens.BackstopState memory st = lens.backstopState(address(b));
+        assertEq(st.freeMusd, 70e18);
+        assertEq(st.nativeBtc, 0.4e18);
+        assertFalse(st.vaultRead);
+        assertEq(st.vaultTotalAssets, 0);
+    }
+
+    // ---------------------------------------------------------------- oversized Skip answer (audit D-6)
+
+    function test_maxSkipPriceMatchesOracle() public view {
+        assertEq(lens.MAX_SKIP_PRICE(), oracle.MAX_SKIP_ANSWER());
+    }
+
+    function test_snapshot_oversizedSkipAnswerIsUnavailableNotAPanic() public {
+        SkipMock(MezoAddresses.SKIP_BTC_USD).setAnswer(type(int256).max);
+        IRiskLens.Snapshot memory s = _snap(); // reverts the test if the lens panics
+        assertFalse(s.oracle.ok);
+        assertGt(s.oracle.skipPrice, lens.MAX_SKIP_PRICE());
+        for (uint256 i; i < s.depth.length; ++i) {
+            assertEq(s.depth[i].referenceOut, 0, "no reference price");
+            assertGt(s.depth[i].bestOut, 0, "venue quotes unaffected");
+            assertFalse(s.depth[i].clean);
+        }
+        assertEq(s.failed, lens.SRC_TROVES(), "unusable price flagged on the trove source only");
+        assertEq(s.troves.price, 0);
+        assertEq(s.troves.entries.length, 3, "queue still listed");
+    }
+
+    function test_snapshot_skipAnswerAtTheLimitIsPriced() public {
+        SkipMock(MezoAddresses.SKIP_BTC_USD).setAnswer(int256(lens.MAX_SKIP_PRICE()));
+        IRiskLens.Snapshot memory s = _snap();
+        assertFalse(s.oracle.ok, "outside the Pyth band");
+        assertEq(s.depth[0].referenceOut, s.depth[0].btcIn * (lens.MAX_SKIP_PRICE() * 1e18) / 1e36);
+    }
+
+    // ---------------------------------------------------------------- sub-MCR troves (audit D-8)
+
+    function test_troveQueue_subMcrTrovesAreSkippedInDebtAhead() public {
+        MockTroves t3 = new MockTroves();
+        address hi = makeAddr("hi");
+        address mid = makeAddr("mid");
+        address lo = makeAddr("lo");
+        t3.push(hi, 1e18, 20_000e18, 0); // ICR 400%
+        // Higher NICR than `lo` (principal only) but heavy interest: ICR 100%, below MCR. Redemptions skip it.
+        t3.push(mid, 1e18, 30_000e18, 50_000e18);
+        t3.push(lo, 1e18, 40_000e18, 300e18); // ICR ~198.5%, redeemed first
+        IRiskLens.LensConfig memory c = _config();
+        c.troveManager = address(t3);
+        c.sortedTroves = address(t3);
+        RiskLens l = new RiskLens(c);
+
+        IRiskLens.TroveQueue memory q = l.troveQueue(3, SKIP_PX);
+        assertEq(q.entries[0].borrower, lo);
+        assertEq(q.entries[0].debtAhead, 0);
+        assertEq(q.entries[1].borrower, mid);
+        assertLt(q.entries[1].icr, l.MCR(), "marked: below MCR");
+        assertEq(q.entries[1].debtAhead, 40_300e18);
+        assertEq(q.entries[2].borrower, hi);
+        assertEq(q.entries[2].debtAhead, 40_300e18, "the skipped trove shields no one");
+
+        // Without a price nothing can be excluded.
+        q = l.troveQueue(3, 0);
+        assertEq(q.entries[2].debtAhead, 40_300e18 + 80_000e18);
     }
 }

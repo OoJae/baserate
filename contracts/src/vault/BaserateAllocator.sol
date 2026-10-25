@@ -21,19 +21,34 @@ import {IMorphoMarketV1AdapterV2Lite} from "../interfaces/external/IMorphoMarket
 /// @title BaserateAllocator
 /// @notice Holds vMUSD's allocator role and runs a fixed, permissionless policy:
 /// 1. Buffer: M1's idle liquidity (supply - borrow) is kept at or above `max(2,000 MUSD, 15% of M1 supply)`, so
-///    borrowers can always borrow. If it is below, vMUSD supplies the deficit regardless of rates.
-/// 2. Excess: above the buffer, funds move between the wsMUSD liquidity adapter and M1 only by comparing M1's supply
-///    APY (`IRM.borrowRateView * utilization * (1 - fee)`) with wsMUSD's trailing 7-day APY (ring buffer of
-///    `convertToAssets(1e18)` checkpoints). A move never overshoots: the amount is bisected so the post-move M1 rate
-///    still beats (or still trails) wsMUSD. M1 supply is never withdrawn below the buffer.
-/// 3. Bounds: at most `MAX_MOVE` per call and a `COOLDOWN` between moves; every move fits the vault's absolute and
-///    relative caps for all ids it touches (computed up front, so the vault's own checks never trip).
-/// It also offers `withdraw`/`redeem` for vMUSD holders: idle and wsMUSD pay first, and only the shortfall is
-/// deallocated from M1, without the force-deallocate penalty, because it is consumed by the same withdrawal.
+///    borrowers can always borrow. If it is below, vMUSD supplies the deficit regardless of rates. A buffer top-up
+///    ignores the cooldown and does not start it, so no earlier move can delay one.
+/// 2. Excess: above the buffer, funds move between the wsMUSD liquidity adapter and M1 only when two views agree:
+///    - the direction comes from trailing, realized APYs over the same checkpoint window (about 7 days, at least 1):
+///      the growth of M1's supply-share price against the growth of wsMUSD's `convertToAssets(1e18)`. Neither moves
+///      inside a transaction: supplying, withdrawing, borrowing or repaying does not change a share price (only
+///      accrued interest and realized bad debt do), and Morpho accrues interest on the state left by earlier blocks;
+///    - the size comes from the spot rate: the amount is bisected so M1's post-move supply APY
+///      (`IRM.borrowRateView * utilization * (1 - fee)`) still beats (or still trails) wsMUSD's trailing APY.
+///    Rate-driven moves only run on M1 state left by earlier blocks: when M1 was touched earlier in the same block
+///    (Morpho's `lastUpdate == now`), its totals may hold a transient supply, repay or borrow, and nothing moves.
+/// 3. `TO_LIQUIDITY` is sized on a conservative M1 liquidity: vMUSD's own M1 position plus the lowest "external"
+///    liquidity (M1 supply by others minus borrow) seen now and at every checkpoint of the last `LIQUIDITY_WINDOW`.
+///    A move never leaves that conservative liquidity below the buffer, so M1 liquidity that appeared in the last day
+///    (outside supply, repayments) is never what vMUSD withdraws against.
+/// 4. Bounds: at most `MAX_MOVE` per call and a `COOLDOWN` between rate-driven moves; every move fits the vault's
+///    absolute and relative caps for all ids it touches (computed up front, so the vault's own checks never trip).
+/// It also offers `withdraw`/`redeem` for vMUSD holders: idle and wsMUSD pay first and only the shortfall is
+/// deallocated from M1, without the force-deallocate penalty, because it is consumed by the same withdrawal. If the
+/// wsMUSD leg reverts (for instance sMUSD's withdraw is broken), the exit is retried M1-first, so the M1-backed part of
+/// vMUSD always exits penalty-free.
 /// @dev No owner, no parameters to change: the curator governs through vault caps and can revoke the role.
-/// Manipulation surface: a borrower can spike M1 utilization to attract at most `MAX_MOVE` per `COOLDOWN` into M1
-/// (inside the curator's caps), and wsMUSD's share price only moves through vested yield, so neither rate can be
-/// pushed far within one block. APYs are annualized simple rates (WAD), compared like for like.
+/// Remaining manipulation surface, each bounded by `MAX_MOVE` per call and the curator's caps:
+/// - a borrower can briefly borrow to trigger a buffer top-up; it only adds M1 liquidity (a yield drag at worst);
+/// - touching M1 earlier in a block skips that block's rate-driven move (liveness only; top-ups still run);
+/// - capital parked in M1 across blocks moves the spot sizing, not the direction, and for a day it is excluded from the
+///   liquidity `TO_LIQUIDITY` withdraws against.
+/// The trailing direction lags real rate changes by up to the window. APYs are annualized simple rates (WAD).
 contract BaserateAllocator is IBaserateAllocator, ReentrancyGuardTransient {
     using MarketParamsLib for MarketParams;
     using MorphoBalancesLib for IMorpho;
@@ -51,18 +66,25 @@ contract BaserateAllocator is IBaserateAllocator, ReentrancyGuardTransient {
     uint256 public constant MAX_MOVE = 1000e18;
     /// @notice Moves smaller than this are skipped (dust).
     uint256 public constant MIN_MOVE = 1e18;
-    /// @notice Minimum time between two moves.
+    /// @notice Minimum time between two rate-driven moves (buffer top-ups are exempt).
     uint256 public constant COOLDOWN = 1 hours;
-    /// @notice Minimum time between two wsMUSD checkpoints.
+    /// @notice Minimum time between two checkpoints.
     uint256 public constant CHECKPOINT_INTERVAL = 1 hours;
-    /// @notice Look-back of the wsMUSD trailing APY.
+    /// @notice Look-back of the trailing APYs.
     uint256 public constant APY_WINDOW = 7 days;
-    /// @notice APY-driven moves need at least this much wsMUSD history (buffer top-ups do not).
+    /// @notice APY-driven moves need at least this much checkpoint history (buffer top-ups do not).
     uint256 public constant MIN_APY_WINDOW = 1 days;
+    /// @notice Look-back of the conservative M1 liquidity that `TO_LIQUIDITY` is sized on.
+    uint256 public constant LIQUIDITY_WINDOW = 1 days;
     /// @notice Ring buffer size: 8 days of hourly checkpoints.
     uint256 public constant CHECKPOINT_CAPACITY = 192;
     /// @notice Bisection steps used to size an APY-driven move (resolution `MAX_MOVE / 2**8`).
     uint256 internal constant BISECTION_STEPS = 8;
+    /// @dev M1's supply-share price is quoted in MUSD wei per 1e24 shares (Morpho mints 1e6 shares per wei at par).
+    uint256 internal constant M1_PRICE_SHARES = 1e24;
+    /// @dev Morpho Blue's virtual shares and assets (SharesMathLib).
+    uint256 internal constant VIRTUAL_SHARES = 1e6;
+    uint256 internal constant VIRTUAL_ASSETS = 1;
 
     /// @dev Inputs of a post-move M1 APY check: market totals, the wsMUSD APY and the direction of the move.
     struct Simulation {
@@ -141,7 +163,7 @@ contract BaserateAllocator is IBaserateAllocator, ReentrancyGuardTransient {
         MARKET_PARAMS_ID = keccak256(abi.encode("this/marketParams", marketAdapter, params));
         LIQUIDITY_ID = IWsMusdLiquidityAdapter(liquidityAdapter).adapterId();
 
-        _checkpoint();
+        _checkpoint(_marketTouched());
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -150,34 +172,36 @@ contract BaserateAllocator is IBaserateAllocator, ReentrancyGuardTransient {
 
     /// @inheritdoc IBaserateAllocator
     function checkpoint() external nonReentrant returns (bool recorded) {
-        recorded = _checkpoint();
+        recorded = _checkpoint(_marketTouched());
     }
 
     /// @inheritdoc IBaserateAllocator
     function rebalance() external nonReentrant returns (Action action, uint256 amount) {
-        uint256 ready = readyAt();
-        if (block.timestamp < ready) revert CooldownActive(ready);
-
-        _checkpoint();
+        // Read before this contract's own accrual below touches M1.
+        bool touched = _marketTouched();
+        _checkpoint(touched);
         MarketParams memory params = marketParams();
         // Accrue so the market totals are current and the IRM view returns the instantaneous rate.
         IMorpho(MORPHO).accrueInterest(params);
 
-        Snapshot memory s = _snapshot(params);
+        Snapshot memory s = _snapshot(params, touched);
         (action, amount) = _plan(params, s);
+        // Buffer top-ups ignore the cooldown and do not start it: no earlier move can ever delay one.
+        if (action != Action.BUFFER_TOP_UP) {
+            uint256 ready = _cooldownEnd();
+            if (block.timestamp < ready) revert CooldownActive(ready);
+            // forge-lint: disable-next-line(unsafe-typecast)
+            if (action != Action.NONE) lastRebalance = uint64(block.timestamp);
+        }
         emit Rebalanced(action, amount, s.m1SupplyApy, s.wsMusdApy, s.apyWindow, s.m1Liquidity, s.bufferTarget);
 
-        if (action != Action.NONE) {
-            // forge-lint: disable-next-line(unsafe-typecast)
-            lastRebalance = uint64(block.timestamp);
-            if (action == Action.TO_LIQUIDITY) {
-                IVaultV2(VAULT).deallocate(MARKET_ADAPTER, abi.encode(params), amount);
-                IVaultV2(VAULT).allocate(LIQUIDITY_ADAPTER, "", amount);
-            } else {
-                uint256 fromIdle = Math.min(amount, s.vaultIdle);
-                if (amount > fromIdle) IVaultV2(VAULT).deallocate(LIQUIDITY_ADAPTER, "", amount - fromIdle);
-                IVaultV2(VAULT).allocate(MARKET_ADAPTER, abi.encode(params), amount);
-            }
+        if (action == Action.TO_LIQUIDITY) {
+            IVaultV2(VAULT).deallocate(MARKET_ADAPTER, abi.encode(params), amount);
+            IVaultV2(VAULT).allocate(LIQUIDITY_ADAPTER, "", amount);
+        } else if (action != Action.NONE) {
+            uint256 fromIdle = Math.min(amount, s.vaultIdle);
+            if (amount > fromIdle) IVaultV2(VAULT).deallocate(LIQUIDITY_ADAPTER, "", amount - fromIdle);
+            IVaultV2(VAULT).allocate(MARKET_ADAPTER, abi.encode(params), amount);
         }
 
         _allocateIdle();
@@ -185,14 +209,25 @@ contract BaserateAllocator is IBaserateAllocator, ReentrancyGuardTransient {
 
     /// @inheritdoc IBaserateAllocator
     function withdraw(uint256 assets, address receiver) external nonReentrant returns (uint256 shares) {
-        _pullFromMarket(assets);
-        shares = IVaultV2(VAULT).withdraw(assets, receiver, msg.sender);
+        _pullFromMarket(assets, false);
+        try IVaultV2(VAULT).withdraw(assets, receiver, msg.sender) returns (uint256 burnt) {
+            shares = burnt;
+        } catch {
+            // The liquidity adapter could not pay (a reverting wsMUSD/sMUSD withdraw): pay from M1 first.
+            _pullFromMarket(assets, true);
+            shares = IVaultV2(VAULT).withdraw(assets, receiver, msg.sender);
+        }
     }
 
     /// @inheritdoc IBaserateAllocator
     function redeem(uint256 shares, address receiver) external nonReentrant returns (uint256 assets) {
-        _pullFromMarket(IVaultV2(VAULT).previewRedeem(shares));
-        assets = IVaultV2(VAULT).redeem(shares, receiver, msg.sender);
+        _pullFromMarket(IVaultV2(VAULT).previewRedeem(shares), false);
+        try IVaultV2(VAULT).redeem(shares, receiver, msg.sender) returns (uint256 paid) {
+            assets = paid;
+        } catch {
+            _pullFromMarket(IVaultV2(VAULT).previewRedeem(shares), true);
+            assets = IVaultV2(VAULT).redeem(shares, receiver, msg.sender);
+        }
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -202,13 +237,13 @@ contract BaserateAllocator is IBaserateAllocator, ReentrancyGuardTransient {
     /// @inheritdoc IBaserateAllocator
     function previewRebalance() external view returns (Action action, uint256 amount, Snapshot memory s) {
         MarketParams memory params = marketParams();
-        s = _snapshot(params);
+        s = _snapshot(params, _marketTouched());
         (action, amount) = _plan(params, s);
     }
 
     /// @inheritdoc IBaserateAllocator
     function snapshot() external view returns (Snapshot memory) {
-        return _snapshot(marketParams());
+        return _snapshot(marketParams(), _marketTouched());
     }
 
     /// @inheritdoc IBaserateAllocator
@@ -219,27 +254,13 @@ contract BaserateAllocator is IBaserateAllocator, ReentrancyGuardTransient {
     }
 
     /// @inheritdoc IBaserateAllocator
-    function wsMusdApy() public view returns (uint256 apy, uint256 window) {
-        uint256 count = checkpointCount;
-        uint256 n = Math.min(count, CHECKPOINT_CAPACITY);
-        if (n == 0) return (0, 0);
-        uint256 first = count - n;
-        uint256 target = block.timestamp > APY_WINDOW ? block.timestamp - APY_WINDOW : 0;
+    function wsMusdApy() external view returns (uint256 apy, uint256 window) {
+        (apy,, window) = _trailingApys(_expectedMarket(marketParams()));
+    }
 
-        // Latest retained checkpoint at or before `target`; the oldest one if history is shorter than the window.
-        uint256 lo = 0;
-        uint256 hi = n;
-        while (hi - lo > 1) {
-            uint256 mid = (lo + hi) / 2;
-            if (_checkpoints[(first + mid) % CHECKPOINT_CAPACITY].timestamp <= target) lo = mid;
-            else hi = mid;
-        }
-        Checkpoint memory c = _checkpoints[(first + lo) % CHECKPOINT_CAPACITY];
-
-        window = block.timestamp - c.timestamp;
-        uint256 priceNow = IERC4626(WSMUSD).convertToAssets(1e18);
-        if (window == 0 || priceNow <= c.sharePrice) return (0, window);
-        apy = Math.mulDiv(priceNow - c.sharePrice, WAD * YEAR, uint256(c.sharePrice) * window);
+    /// @inheritdoc IBaserateAllocator
+    function m1TrailingApy() external view returns (uint256 apy, uint256 window) {
+        (, apy, window) = _trailingApys(_expectedMarket(marketParams()));
     }
 
     /// @inheritdoc IBaserateAllocator
@@ -251,9 +272,14 @@ contract BaserateAllocator is IBaserateAllocator, ReentrancyGuardTransient {
     }
 
     /// @inheritdoc IBaserateAllocator
-    function readyAt() public view returns (uint256) {
-        uint256 last = lastRebalance;
-        return last == 0 ? 0 : last + COOLDOWN;
+    function readyAt() external view returns (uint256) {
+        uint256 ready = _cooldownEnd();
+        if (block.timestamp < ready) {
+            MarketParams memory params = marketParams();
+            (Action action,) = _plan(params, _snapshot(params, _marketTouched()));
+            if (action == Action.BUFFER_TOP_UP) return block.timestamp;
+        }
+        return ready;
     }
 
     /// @inheritdoc IBaserateAllocator
@@ -265,27 +291,31 @@ contract BaserateAllocator is IBaserateAllocator, ReentrancyGuardTransient {
     // Policy
     // ---------------------------------------------------------------------------------------------------------------
 
-    /// @dev Decision inputs at this block (market totals with interest accrued to now).
-    function _snapshot(MarketParams memory params) internal view returns (Snapshot memory s) {
+    /// @dev Decision inputs at this block (market totals with interest accrued to now). `touched`: M1 was touched
+    /// earlier in this block, so its totals may be transient.
+    function _snapshot(MarketParams memory params, bool touched) internal view returns (Snapshot memory s) {
         Market memory m = _expectedMarket(params);
         s.m1SupplyAssets = m.totalSupplyAssets;
         s.m1BorrowAssets = m.totalBorrowAssets;
         s.m1Liquidity = s.m1SupplyAssets > s.m1BorrowAssets ? s.m1SupplyAssets - s.m1BorrowAssets : 0;
         s.bufferTarget = _bufferTarget(s.m1SupplyAssets);
         s.m1SupplyApy = _supplyApy(params, m, s.m1SupplyAssets, s.m1BorrowAssets);
-        (s.wsMusdApy, s.apyWindow) = wsMusdApy();
+        (s.wsMusdApy, s.m1TrailingApy, s.apyWindow) = _trailingApys(m);
         s.vaultMarketAssets = IMorphoMarketV1AdapterV2Lite(MARKET_ADAPTER).expectedSupplyAssets(MARKET_ID);
         s.vaultIdle = IERC20(MUSD).balanceOf(VAULT);
         s.liquidityAvailable = _liquidityAvailable();
+        s.conservativeLiquidity = _conservativeLiquidity(s.m1Liquidity, s.vaultMarketAssets);
+        s.marketTouched = touched;
     }
 
-    /// @dev The buffer rule first, then the APY rule on the excess. Amounts respect `MAX_MOVE`, the vault caps and
-    /// what each side can release.
+    /// @dev The buffer rule first, then the APY rule on the excess: the trailing APYs pick the direction and the spot
+    /// model must agree (`_bisect` returns 0 otherwise). Amounts respect `MAX_MOVE`, the vault caps and what each side
+    /// can release.
     function _plan(MarketParams memory params, Snapshot memory s) internal view returns (Action, uint256) {
         if (s.m1Liquidity < s.bufferTarget) return _planBufferTopUp(s);
-        if (s.apyWindow < MIN_APY_WINDOW) return (Action.NONE, 0);
-        if (s.m1SupplyApy > s.wsMusdApy) return _planToMarket(params, s);
-        if (s.m1SupplyApy < s.wsMusdApy) return _planToLiquidity(params, s);
+        if (s.marketTouched || s.apyWindow < MIN_APY_WINDOW) return (Action.NONE, 0);
+        if (s.m1TrailingApy > s.wsMusdApy) return _planToMarket(params, s);
+        if (s.m1TrailingApy < s.wsMusdApy) return _planToLiquidity(params, s);
         return (Action.NONE, 0);
     }
 
@@ -308,9 +338,10 @@ contract BaserateAllocator is IBaserateAllocator, ReentrancyGuardTransient {
     }
 
     /// @dev wsMUSD pays more: withdraw M1 supply above the buffer, as much as keeps M1's post-move APY below wsMUSD's.
-    /// Withdrawing x lowers liquidity by x but the 15% target by 0.15x: x <= min(L - floor, (L - 0.15 S) / 0.85).
+    /// Withdrawing x lowers liquidity by x but the 15% target by 0.15x: x <= min(L - floor, (L - 0.15 S) / 0.85), with
+    /// L the conservative liquidity (<= spot), so the buffer holds both on spot and once recent outside supply leaves.
     function _planToLiquidity(MarketParams memory params, Snapshot memory s) internal view returns (Action, uint256) {
-        uint256 liquidity = s.m1Liquidity;
+        uint256 liquidity = s.conservativeLiquidity;
         uint256 pct = s.m1SupplyAssets * BUFFER_BPS;
         uint256 excess = 0;
         if (liquidity > BUFFER_FLOOR && liquidity * BPS > pct) {
@@ -385,6 +416,73 @@ contract BaserateAllocator is IBaserateAllocator, ReentrancyGuardTransient {
         return Math.max(BUFFER_FLOOR, supply * BUFFER_BPS / BPS);
     }
 
+    /// @dev Whether M1 was touched earlier in this block: Morpho stamps `lastUpdate` on the first interaction of a
+    /// block, before any change to its supply or borrow totals.
+    function _marketTouched() internal view returns (bool) {
+        return IMorpho(MORPHO).market(Id.wrap(MARKET_ID)).lastUpdate == block.timestamp;
+    }
+
+    /// @dev M1's supply-share price: MUSD wei per `M1_PRICE_SHARES` shares, with Morpho's virtual shares and assets.
+    function _m1SharePrice(Market memory m) internal pure returns (uint256) {
+        return Math.mulDiv(
+            M1_PRICE_SHARES,
+            uint256(m.totalSupplyAssets) + VIRTUAL_ASSETS,
+            uint256(m.totalSupplyShares) + VIRTUAL_SHARES
+        );
+    }
+
+    /// @dev Trailing wsMUSD and M1 supply APYs against the latest retained checkpoint at or before `APY_WINDOW` ago
+    /// (the oldest one while history is shorter), and the window they cover. `m` is M1 accrued to now.
+    function _trailingApys(Market memory m) internal view returns (uint256 wsApy, uint256 m1Apy, uint256 window) {
+        uint256 count = checkpointCount;
+        uint256 n = Math.min(count, CHECKPOINT_CAPACITY);
+        if (n == 0) return (0, 0, 0);
+        uint256 first = count - n;
+        uint256 target = block.timestamp > APY_WINDOW ? block.timestamp - APY_WINDOW : 0;
+
+        uint256 lo = 0;
+        uint256 hi = n;
+        while (hi - lo > 1) {
+            uint256 mid = (lo + hi) / 2;
+            if (_checkpoints[(first + mid) % CHECKPOINT_CAPACITY].timestamp <= target) lo = mid;
+            else hi = mid;
+        }
+        Checkpoint memory c = _checkpoints[(first + lo) % CHECKPOINT_CAPACITY];
+
+        window = block.timestamp - c.timestamp;
+        if (window == 0) return (0, 0, 0);
+        wsApy = _annualized(c.sharePrice, IERC4626(WSMUSD).convertToAssets(1e18), window);
+        m1Apy = _annualized(c.m1SharePrice, _m1SharePrice(m), window);
+    }
+
+    /// @dev Simple annualized growth from `then` to `now_` over `window` seconds (WAD); 0 if it did not grow.
+    function _annualized(uint256 then, uint256 now_, uint256 window) internal pure returns (uint256) {
+        if (then == 0 || now_ <= then) return 0;
+        return Math.mulDiv(now_ - then, WAD * YEAR, then * window);
+    }
+
+    /// @dev vMUSD's M1 position plus the lowest external M1 liquidity (`liquidity - vaultMarketAssets`) of now and of
+    /// every checkpoint in the last `LIQUIDITY_WINDOW`, floored at 0. Never above `liquidity`.
+    function _conservativeLiquidity(uint256 liquidity, uint256 vaultMarketAssets) internal view returns (uint256) {
+        int256 external_ = SafeCast.toInt256(liquidity) - SafeCast.toInt256(vaultMarketAssets);
+        uint256 count = checkpointCount;
+        uint256 n = Math.min(count, CHECKPOINT_CAPACITY);
+        for (uint256 i = 1; i <= n; ++i) {
+            Checkpoint storage c = _checkpoints[(count - i) % CHECKPOINT_CAPACITY];
+            if (uint256(c.timestamp) + LIQUIDITY_WINDOW < block.timestamp) break;
+            if (c.m1ExternalLiquidity < external_) external_ = c.m1ExternalLiquidity;
+        }
+        int256 total = SafeCast.toInt256(vaultMarketAssets) + external_;
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return total > 0 ? uint256(total) : 0;
+    }
+
+    /// @dev End of the cooldown that follows a rate-driven move (0 before the first one).
+    function _cooldownEnd() internal view returns (uint256) {
+        uint256 last = lastRebalance;
+        return last == 0 ? 0 : last + COOLDOWN;
+    }
+
     // ---------------------------------------------------------------------------------------------------------------
     // Caps and liquidity
     // ---------------------------------------------------------------------------------------------------------------
@@ -438,9 +536,11 @@ contract BaserateAllocator is IBaserateAllocator, ReentrancyGuardTransient {
         emit IdleAllocated(idleAssets);
     }
 
-    /// @dev Deallocates from M1 only what vault idle plus the liquidity adapter cannot pay of `assets`.
-    function _pullFromMarket(uint256 assets) internal {
-        uint256 liquid = IERC20(MUSD).balanceOf(VAULT) + _liquidityAvailable();
+    /// @dev Deallocates from M1 what vault idle (plus, unless `marketFirst`, the liquidity adapter) cannot pay of
+    /// `assets`, within vMUSD's M1 position and M1's liquidity.
+    function _pullFromMarket(uint256 assets, bool marketFirst) internal {
+        uint256 liquid = IERC20(MUSD).balanceOf(VAULT);
+        if (!marketFirst) liquid += _liquidityAvailable();
         if (assets <= liquid) return;
         MarketParams memory params = marketParams();
         (uint256 supply,, uint256 borrow,) = IMorpho(MORPHO).expectedMarketBalances(params);
@@ -456,16 +556,29 @@ contract BaserateAllocator is IBaserateAllocator, ReentrancyGuardTransient {
     // Checkpoints
     // ---------------------------------------------------------------------------------------------------------------
 
-    function _checkpoint() internal returns (bool) {
+    /// @dev Records wsMUSD's share price, M1's supply-share price and M1's external liquidity, at most hourly. When M1
+    /// was touched earlier in this block (`touched`) its totals may be transient, so the external liquidity recorded
+    /// is never above the previous checkpoint's.
+    function _checkpoint(bool touched) internal returns (bool) {
         uint256 count = checkpointCount;
+        MarketParams memory params = marketParams();
+        Market memory m = _expectedMarket(params);
+        int256 external_ = SafeCast.toInt256(m.totalSupplyAssets) - SafeCast.toInt256(m.totalBorrowAssets)
+            - SafeCast.toInt256(IMorphoMarketV1AdapterV2Lite(MARKET_ADAPTER).expectedSupplyAssets(MARKET_ID));
         if (count != 0) {
-            uint256 last = _checkpoints[(count - 1) % CHECKPOINT_CAPACITY].timestamp;
-            if (block.timestamp < last + CHECKPOINT_INTERVAL) return false;
+            Checkpoint storage last = _checkpoints[(count - 1) % CHECKPOINT_CAPACITY];
+            if (block.timestamp < last.timestamp + CHECKPOINT_INTERVAL) return false;
+            if (touched && last.m1ExternalLiquidity < external_) external_ = last.m1ExternalLiquidity;
         }
         uint256 price = IERC4626(WSMUSD).convertToAssets(1e18);
         // forge-lint: disable-next-line(unsafe-typecast)
         uint64 ts = uint64(block.timestamp);
-        _checkpoints[count % CHECKPOINT_CAPACITY] = Checkpoint({timestamp: ts, sharePrice: price.toUint192()});
+        _checkpoints[count % CHECKPOINT_CAPACITY] = Checkpoint({
+            timestamp: ts,
+            sharePrice: price.toUint192(),
+            m1SharePrice: _m1SharePrice(m).toUint128(),
+            m1ExternalLiquidity: SafeCast.toInt128(external_)
+        });
         checkpointCount = count + 1;
         emit CheckpointRecorded(count, ts, price);
         return true;

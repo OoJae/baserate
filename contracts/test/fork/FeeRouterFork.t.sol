@@ -187,6 +187,56 @@ abstract contract FeeRouterForkBase is MezoFork {
         assertEq(abi.encode(preview), abi.encode(done));
     }
 
+    /// @dev The real donation (through sMUSD's proxy) uses a small fraction of the router's fixed stipend.
+    function test_fork_smusdDonationFitsStipend() public {
+        address donor = makeAddr("donor");
+        deal(address(musd), donor, 1000e18);
+        vm.startPrank(donor);
+        musd.approve(address(smusd), 1000e18);
+        uint256 before = gasleft();
+        smusd.receiveProtocolYield(1000e18);
+        uint256 used = before - gasleft();
+        vm.stopPrank();
+        assertLt(used, router.SMUSD_GAS() / 4, "stipend margin");
+    }
+
+    /// @dev Audit D-2 on the live contracts: an sMUSD upgrade that restricts `receiveProtocolYield` no longer freezes
+    /// the treasury and bribe legs; the sMUSD leg is carried and approval is revoked.
+    function test_fork_smusdRestrictionDoesNotFreezeFees() public {
+        vm.mockCallRevert(
+            address(smusd), abi.encodeWithSelector(IMUSDSavingsRate.receiveProtocolYield.selector), bytes("only PCV")
+        );
+        _fund(1000e18);
+        IFeeRouter.Plan memory plan = router.distribute();
+        assertEq(musd.balanceOf(treasury), 200e18, "treasury paid");
+        uint256 bribed;
+        for (uint256 i; i < pairs.length; ++i) {
+            bribed += plan.bribeAmounts[i];
+        }
+        assertEq(bribed, 400e18, "bribes posted");
+        assertEq(plan.smusdCarried, 400e18);
+        assertEq(musd.balanceOf(address(router)), 400e18);
+        assertEq(musd.allowance(address(router), address(smusd)), 0);
+    }
+
+    /// @dev Audit D-3 on the live contracts: in the last hour of the epoch nothing is credited to the closing epoch;
+    /// the carry lands in the next one.
+    function test_fork_lastHourBribesAreCarried() public {
+        uint256 epochEnd = _epoch() + 7 days;
+        vm.warp(epochEnd - 1);
+        _fund(1000e18);
+        uint256 before0 = _epochBribe(pairs[0].bribe);
+        IFeeRouter.Plan memory plan = router.distribute();
+        assertEq(plan.bribesCarried, 400e18);
+        assertEq(_epochBribe(pairs[0].bribe), before0, "closing epoch untouched");
+        assertEq(musd.balanceOf(treasury), 200e18);
+
+        vm.warp(epochEnd + 2 hours);
+        plan = router.distribute();
+        assertEq(plan.bribeAmounts[0], 400e18 / pairs.length, "carry posted next epoch");
+        assertEq(musd.balanceOf(address(router)), 0);
+    }
+
     function test_fork_constructorRejectsWrongBribe() public {
         IFeeRouter.BribeTarget[] memory bad = new IFeeRouter.BribeTarget[](1);
         bad[0] = IFeeRouter.BribeTarget({gauge: net.gauge0, bribe: makeAddr("fakeBribe")});

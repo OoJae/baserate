@@ -6,7 +6,8 @@ import {Id, MarketParams} from "morpho-blue/interfaces/IMorpho.sol";
 /// @notice A per-owner EIP-1167 clone that holds one M1 position (bcBTC collateral, MUSD debt) on Morpho Blue.
 /// @dev The owner is the clone's immutable argument; there is no initializer. Every state-changing entry point is
 /// callable only by the owner or the factory (the factory only ever acts on `accountOf(msg.sender)`), except
-/// `borrowByModule` (enabled, factory-approved modules) and `receive`.
+/// `borrowByModule` (enabled, factory-approved modules) and `receive`. No entry point accepts the clone itself as a
+/// receiver, so the clone ends every call holding 0 MUSD and 0 bcBTC; tokens sent to it directly can be swept.
 interface IBorrowAccount {
     /// @notice Emitted by `openAndBorrow`.
     event Opened(address indexed owner, uint256 collateralAdded, uint256 musdOut);
@@ -24,12 +25,14 @@ interface IBorrowAccount {
     event ModuleSet(address indexed module, bool enabled);
     /// @notice Emitted by `rescueNative`.
     event NativeRescued(address indexed to, uint256 amount);
+    /// @notice Emitted by `sweep`.
+    event Swept(address indexed token, address indexed to, uint256 amount);
 
     /// @notice The caller is neither the owner nor the factory (or not the owner for owner-only calls).
     error Unauthorized();
     /// @notice The post-action LTV exceeds the applicable limit.
     error LtvTooHigh(uint256 ltvBps, uint256 limitBps);
-    /// @notice The position's collateral would exceed its profile's cap.
+    /// @notice A borrow on a position whose collateral is above its profile's cap.
     error PositionCapExceeded(uint256 collateral, uint256 positionCap);
     /// @notice M1 `totalBorrowAssets` would exceed the global borrow cap.
     error GlobalCapExceeded(uint256 totalBorrowAssets, uint256 globalBorrowCap);
@@ -45,6 +48,8 @@ interface IBorrowAccount {
     error ZeroAmount();
     /// @notice A zero recipient.
     error ZeroAddress();
+    /// @notice The clone itself was given as a recipient.
+    error InvalidReceiver(address receiver);
     /// @notice `repay` with no outstanding debt.
     error NoDebt();
     /// @notice The exit found neither debt nor collateral.
@@ -79,19 +84,23 @@ interface IBorrowAccount {
     function debt() external view returns (uint256);
 
     /// @notice Wraps `msg.value`, supplies it and, if `musdOut > 0`, borrows to `receiver`. Blocked while paused.
+    /// The position cap applies only when borrowing.
     /// @param musdOut MUSD sent to `receiver`; the debt also includes the origination fee.
     /// @param maxLtvBps Post-borrow LTV must be <= min(maxLtvBps, profile ceiling).
-    /// @param receiver Recipient of the borrowed MUSD.
+    /// @param receiver Recipient of the borrowed MUSD (not this clone).
     function openAndBorrow(uint256 musdOut, uint256 maxLtvBps, address receiver) external payable;
 
-    /// @notice Borrows `musdOut` MUSD to `receiver` against existing collateral.
+    /// @notice Borrows `musdOut` MUSD to `receiver` against existing collateral. Refused while the collateral is above
+    /// the profile's position cap.
     function borrow(uint256 musdOut, uint256 maxLtvBps, address receiver) external;
 
-    /// @notice Wraps `msg.value` and supplies it as collateral. Never paused; the position cap applies.
+    /// @notice Wraps `msg.value` and supplies it as collateral. Never paused and never limited by the position cap,
+    /// so a position can always be defended with more BTC.
     function addCollateral() external payable;
 
-    /// @notice Supplies the clone's own idle native BTC (for example a CollSurplusPool claim) up to the room left
-    /// under the position cap, then optionally borrows.
+    /// @notice Supplies the clone's own idle native BTC (for example a CollSurplusPool claim), then optionally
+    /// borrows. Without a borrow all idle BTC is supplied, whatever the position cap. With a borrow only the room left
+    /// under the position cap is supplied, so the borrow can pass its cap check.
     /// @return supplied The BTC supplied; any excess stays idle and can be rescued by the owner.
     function supplyIdle(uint256 musdOut, uint256 maxLtvBps, address receiver) external returns (uint256 supplied);
 
@@ -116,7 +125,8 @@ interface IBorrowAccount {
     ) external;
 
     /// @notice Withdraws `amount` collateral and unwraps it to `btcTo`. With debt outstanding, the post-withdraw LTV
-    /// must be <= the profile ceiling (one oracle read); without debt there is no oracle call.
+    /// must be <= the profile ceiling (one oracle read); for a CANARY account whose owner is no longer a canary
+    /// operator, <= the lower of the CANARY and STANDARD ceilings. Without debt there is no oracle call.
     function withdrawCollateral(uint256 amount, address btcTo) external;
 
     /// @notice Wave 2 credit-line hook: an enabled, factory-approved module borrows on the owner's behalf under the
@@ -128,4 +138,9 @@ interface IBorrowAccount {
 
     /// @notice Sends the clone's idle native BTC to `to` (owner only).
     function rescueNative(address to) external;
+
+    /// @notice Sends the clone's whole balance of `token` (for example MUSD transferred to it directly) to `to`
+    /// (owner only). bcBTC cannot leave this way: its transfer gate only lets a clone send it to Morpho.
+    /// @return amount The amount swept.
+    function sweep(address token, address to) external returns (uint256 amount);
 }

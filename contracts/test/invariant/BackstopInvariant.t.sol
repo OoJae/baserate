@@ -12,15 +12,17 @@ import {MockMUSD} from "../utils/MockMUSD.sol";
 import {SMUSDMock} from "../utils/SMUSDMock.sol";
 import {BackstopBase} from "../unit/BackstopBase.t.sol";
 
-/// @notice Drives the Backstop through deposits, mints, queued exits, liquidation buys, auction sales, BTC price
-/// moves, MUSD donations, sMUSD yield and time. Before/after properties are recorded as ghost flags because handler
-/// reverts are discarded (fail_on_revert = false).
+/// @notice Drives the Backstop through deposits, mints, queued exits (full, partial when cash is short, and owner claims
+/// valuing BTC at 0 with the oracle up or down), liquidation buys (dust included), auction sales, BTC price moves,
+/// MUSD donations, sMUSD yield and time. Before/after properties are recorded as ghost flags because handler reverts
+/// are discarded (fail_on_revert = false).
 /// Share-price rules checked on every action (pps = convertToAssets(1e18), tolerance `_tol(p0)`: 2 wei plus one share-wei of
 /// value, the most ERC-4626 rounding can move it while the dead seed keeps supply >= 1e18):
 /// - no action raises the share price instantly (gains only vest with time);
 /// - deposits, mints, exit requests and claims, auction sales, donations and yield never lower it (only the PnL
 ///   events, liquidation buys and BTC price drops, may);
-/// - a claim pays at most min(NAV of its shares at request, NAV of its shares at claim).
+/// - a claim pays at most min(NAV of its shares at request, NAV of its shares at claim), pro rata to the shares it
+///   burns when it is partial, and what stays queued keeps at most its request NAV per share.
 contract BackstopHandler is CommonBase, StdCheats, StdUtils {
     uint256 internal constant TOL = 2;
     uint256 internal constant PRICE0 = 80_000e36;
@@ -39,6 +41,8 @@ contract BackstopHandler is CommonBase, StdCheats, StdUtils {
     bool public claimAboveNav;
     bool public previewMismatch;
     uint256 public claims;
+    uint256 public partialClaims;
+    uint256 public zeroInventoryClaims;
     uint256 public buys;
     uint256 public sales;
 
@@ -111,28 +115,32 @@ contract BackstopHandler is CommonBase, StdCheats, StdUtils {
         _checkNeutral(p0);
     }
 
+    /// @dev Sells what is needed through the auction first, so the claim is usually paid in full.
     function claimRedeem(uint256 idSeed) external {
         calls["claim"]++;
         if (openIds.length == 0) return;
         uint256 idx = idSeed % openIds.length;
-        uint256 id = openIds[idx];
-        IBackstop.RedeemRequest memory r = backstop.redeemRequest(id);
-        if (block.timestamp < r.claimableAt) vm.warp(r.claimableAt);
-        // Cash may be short while BTC is held: sell what is needed through the auction first.
+        IBackstop.RedeemRequest memory r = _maturedRequest(idx);
         uint256 valueNow = backstop.convertToAssets(r.shares);
         uint256 owed = valueNow < r.assets ? valueNow : r.assets;
         if (backstop.cash() < owed && backstop.inventory() != 0) _auction(backstop.inventory());
-        valueNow = backstop.convertToAssets(r.shares);
-        uint256 p0 = _pps();
-        uint256 before = musd.balanceOf(r.receiver);
-        try backstop.claimRedeem(id) returns (uint256 paid) {
-            claims++;
-            if (paid > r.assets || paid > valueNow) claimAboveNav = true;
-            if (musd.balanceOf(r.receiver) - before != paid) claimAboveNav = true;
-            openIds[idx] = openIds[openIds.length - 1];
-            openIds.pop();
-            _checkNeutral(p0);
-        } catch {}
+        _claim(idx, r, false, false);
+    }
+
+    /// @dev Claims without selling first: partial whenever cash is short.
+    function claimPartial(uint256 idSeed) external {
+        calls["claimPartial"]++;
+        if (openIds.length == 0) return;
+        uint256 idx = idSeed % openIds.length;
+        _claim(idx, _maturedRequest(idx), false, false);
+    }
+
+    /// @dev The owner values the inventory at 0 for its claim, with the oracle up or down.
+    function claimWithoutOracle(uint256 idSeed, bool oracleDown) external {
+        calls["claimZero"]++;
+        if (openIds.length == 0) return;
+        uint256 idx = idSeed % openIds.length;
+        _claim(idx, _maturedRequest(idx), true, oracleDown);
     }
 
     function takeAuction(uint256 btcSeed, uint256 waitSeed) external {
@@ -140,7 +148,10 @@ contract BackstopHandler is CommonBase, StdCheats, StdUtils {
         uint256 inv = backstop.inventory();
         if (inv == 0) return;
         vm.warp(block.timestamp + bound(waitSeed, 0, 8 hours));
-        _auction(bound(btcSeed, 1, inv));
+        uint256 btc = bound(btcSeed, 1, inv);
+        // Sales may not leave dust: take it all instead.
+        if (inv - btc < backstop.DUST_INVENTORY()) btc = inv;
+        _auction(btc);
     }
 
     function donate(uint256 amount) external {
@@ -179,6 +190,19 @@ contract BackstopHandler is CommonBase, StdCheats, StdUtils {
         if (_pps() > p0 + _tol(p0)) instantGain = true;
     }
 
+    /// @dev A tiny liquidation: below `DUST_INVENTORY` it is written off (or, on top of dust, marked again).
+    function buyDust(uint256 btcSeed) external {
+        calls["buyDust"]++;
+        uint256 btc = bound(btcSeed, 1, backstop.DUST_INVENTORY());
+        if (backstop.quoteBuy(btc) == 0) return;
+        vm.deal(liquidator, liquidator.balance + btc);
+        uint256 p0 = _pps();
+        vm.prank(liquidator);
+        backstop.buyCollateral{value: btc}(0);
+        buys++;
+        if (_pps() > p0 + _tol(p0)) instantGain = true;
+    }
+
     function movePrice(uint256 bpsSeed, bool up) external {
         calls["price"]++;
         uint256 bps = bound(bpsSeed, 0, 1500);
@@ -197,6 +221,62 @@ contract BackstopHandler is CommonBase, StdCheats, StdUtils {
     }
 
     // ---------------------------------------------------------------- internal
+
+    /// @dev The open request at `idx`, warped to maturity.
+    function _maturedRequest(uint256 idx) internal returns (IBackstop.RedeemRequest memory r) {
+        r = backstop.redeemRequest(openIds[idx]);
+        if (block.timestamp < r.claimableAt) vm.warp(r.claimableAt);
+    }
+
+    /// @dev Claims the request at `idx` and checks the payout against min(request NAV, NAV now), pro rata to the
+    /// burned shares; drops it from the open set only once it is closed. Values and share prices are read with the
+    /// oracle up; `oracleDown` takes it down for the claim call only.
+    function _claim(uint256 idx, IBackstop.RedeemRequest memory r, bool zeroInventory, bool oracleDown) internal {
+        uint256 id = openIds[idx];
+        // What `claimRedeem` would value the shares at now.
+        uint256 valueNow = backstop.convertToAssets(r.shares);
+        uint256 owed = valueNow < r.assets ? valueNow : r.assets;
+        uint256 p0 = _pps();
+        uint256 before = musd.balanceOf(r.receiver);
+        if (oracleDown) oracle.setReverting(true);
+        (bool ok, uint256 paid) = _callClaim(id, r.owner, zeroInventory);
+        if (oracleDown) oracle.setReverting(false);
+        if (!ok) return;
+        if (zeroInventory) zeroInventoryClaims++;
+        claims++;
+        if (musd.balanceOf(r.receiver) - before != paid) claimAboveNav = true;
+        if (paid > owed + 1) claimAboveNav = true;
+
+        IBackstop.RedeemRequest memory left = backstop.redeemRequest(id);
+        if (left.shares == 0) {
+            openIds[idx] = openIds[openIds.length - 1];
+            openIds.pop();
+        } else {
+            partialClaims++;
+            uint256 burned = r.shares - left.shares;
+            // Paid at most the burned shares' part of what was owed; the rest keeps at most its request NAV.
+            if (paid > owed * burned / r.shares + 1) claimAboveNav = true;
+            if (uint256(left.assets) * r.shares > uint256(r.assets) * left.shares) claimAboveNav = true;
+            if (left.claimableAt != r.claimableAt || left.owner != r.owner) claimAboveNav = true;
+        }
+        _checkNeutral(p0);
+    }
+
+    function _callClaim(uint256 id, address owner, bool zeroInventory) internal returns (bool ok, uint256 paid) {
+        if (zeroInventory) {
+            vm.prank(owner);
+            try backstop.claimRedeemWithoutOracle(id) returns (uint256 out) {
+                return (true, out);
+            } catch {
+                return (false, 0);
+            }
+        }
+        try backstop.claimRedeem(id) returns (uint256 out) {
+            return (true, out);
+        } catch {
+            return (false, 0);
+        }
+    }
 
     function _auction(uint256 btc) internal {
         address taker = actors[0];
@@ -292,6 +372,17 @@ contract BackstopInvariantTest is BackstopBase {
 
     function invariant_handlerReachesPaths() public view {
         // Sanity: not a vacuous run (asserted loosely; some sequences are short).
-        assertLe(handler.claims(), handler.calls("claim"));
+        assertLe(handler.claims(), handler.calls("claim") + handler.calls("claimPartial") + handler.calls("claimZero"));
+        assertLe(handler.partialClaims(), handler.claims());
+        assertLe(handler.zeroInventoryClaims(), handler.claims());
+    }
+
+    /// @notice Coverage report for `forge test -vv`: how often partial and zero-inventory claims happened.
+    function afterInvariant() public {
+        emit log_named_uint("claims", handler.claims());
+        emit log_named_uint("partial claims", handler.partialClaims());
+        emit log_named_uint("zero-inventory claims", handler.zeroInventoryClaims());
+        emit log_named_uint("buys", handler.buys());
+        emit log_named_uint("sales", handler.sales());
     }
 }

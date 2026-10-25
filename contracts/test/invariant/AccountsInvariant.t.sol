@@ -46,7 +46,9 @@ contract AccountsHandler is CommonBase, StdCheats, StdUtils {
     // Ghosts: set when a successful action leaves the system outside its bounds.
     bool public ltvViolated;
     bool public globalCapViolated;
+    bool public positionCapViolated;
     bool public exitFailed;
+    bool public topUpFailed;
     uint256 public successfulBorrows;
     uint256 public successfulExits;
     uint256 public liquidations;
@@ -91,11 +93,11 @@ contract AccountsHandler is CommonBase, StdCheats, StdUtils {
         vm.prank(actor);
         if (profile == Profile.CANARY) {
             try factory.openCanary{value: coll}(musdOut, BPS) returns (address a) {
-                _afterRiskAction(a, musdOut != 0);
+                _afterRiskAction(a, musdOut != 0, musdOut != 0);
             } catch {}
         } else {
             try factory.openAndBorrow{value: coll}(musdOut, BPS) returns (address a) {
-                _afterRiskAction(a, musdOut != 0);
+                _afterRiskAction(a, musdOut != 0, musdOut != 0);
             } catch {}
         }
     }
@@ -111,7 +113,7 @@ contract AccountsHandler is CommonBase, StdCheats, StdUtils {
         if (musdOut == 0) return;
         vm.prank(actor);
         try IBorrowAccount(acct).borrow(musdOut, BPS, actor) {
-            _afterRiskAction(acct, true);
+            _afterRiskAction(acct, true, true);
         } catch {}
     }
 
@@ -121,7 +123,20 @@ contract AccountsHandler is CommonBase, StdCheats, StdUtils {
         uint256 amount = bound(amountSeed, 1, 0.005e18);
         vm.deal(actor, actor.balance + amount);
         vm.prank(actor);
-        try IBorrowAccount(acct).addCollateral{value: amount}() {} catch {}
+        // Top-ups are never capped, paused or priced (A-1/D-1): they must always succeed.
+        try IBorrowAccount(acct).addCollateral{value: amount}() {}
+        catch {
+            topUpFailed = true;
+        }
+    }
+
+    /// @dev The sentinel cuts a profile's position cap (instant), leaving existing positions above it.
+    function cutPositionCap(uint256 actorSeed, uint256 capSeed) external {
+        Profile profile = _actor(actorSeed) == canaryOp ? Profile.CANARY : Profile.STANDARD;
+        (uint128 cap, uint16 ceiling) = factory.limits(profile);
+        if (cap == 0) return;
+        vm.prank(sentinel);
+        factory.setLimits(profile, uint128(bound(capSeed, cap / 2, cap)), ceiling);
     }
 
     function repay(uint256 actorSeed, uint256 amountSeed) external {
@@ -145,7 +160,7 @@ contract AccountsHandler is CommonBase, StdCheats, StdUtils {
         uint256 amount = bound(amountSeed, 1, coll);
         vm.prank(actor);
         try IBorrowAccount(acct).withdrawCollateral(amount, actor) {
-            _afterRiskAction(acct, false);
+            _afterRiskAction(acct, false, true);
         } catch {}
     }
 
@@ -224,10 +239,12 @@ contract AccountsHandler is CommonBase, StdCheats, StdUtils {
 
     // ---------------------------------------------------------------- internal
 
-    function _afterRiskAction(address acct, bool borrowed) internal {
+    /// @dev `raisesLtv`: the action borrowed or withdrew. Only those are bound by the ceiling; a pure top-up may leave
+    /// a position above it (after a price drop) because it can only lower LTV, and top-ups are never blocked (A-1).
+    function _afterRiskAction(address acct, bool borrowed, bool raisesLtv) internal {
         _track(acct);
         Position memory p = morpho.position(id, acct);
-        if (p.borrowShares != 0) {
+        if (raisesLtv && p.borrowShares != 0) {
             uint256 debt_ = morpho.expectedBorrowAssets(params, acct);
             (, uint16 ceiling) = factory.limits(factory.profileOf(acct));
             if (debt_ * BPS > _value(p.collateral) * ceiling) ltvViolated = true;
@@ -235,6 +252,8 @@ contract AccountsHandler is CommonBase, StdCheats, StdUtils {
         if (borrowed) {
             ++successfulBorrows;
             if (morpho.market(id).totalBorrowAssets > factory.globalBorrowCap()) globalCapViolated = true;
+            (uint128 cap,) = factory.limits(factory.profileOf(acct));
+            if (p.collateral > cap) positionCapViolated = true;
         }
     }
 
@@ -265,8 +284,7 @@ abstract contract AccountsInvariantTests is BorrowAccountForkBase {
     AccountsHandler internal handler;
 
     function _setUpHandler() internal {
-        vm.prank(governor);
-        factory.setCanaryOperator(canaryOp, true);
+        _submitAndExecute(abi.encodeCall(IBorrowAccountFactory.setCanaryOperator, (canaryOp, true)));
         address[] memory users = new address[](3);
         users[0] = alice;
         users[1] = bob;
@@ -324,13 +342,15 @@ abstract contract AccountsInvariantTests is BorrowAccountForkBase {
         assertEq(IERC20(address(receipt)).totalSupply(), inMorpho, "bcBTC outside Morpho");
     }
 
-    /// @dev Invariant 11: position collateral never exceeds the profile cap.
+    /// @dev Invariant 11: no borrow succeeds on a position whose collateral is above the profile cap. Collateral
+    /// itself may exceed the cap (top-ups are never capped, and the sentinel may cut the cap under a position).
     function invariant_positionCaps() public view {
-        for (uint256 i; i < handler.accountsLength(); ++i) {
-            address acct = handler.accounts(i);
-            (uint128 cap,) = factory.limits(factory.profileOf(acct));
-            assertLe(morpho.position(marketId, acct).collateral, cap, "position cap");
-        }
+        assertFalse(handler.positionCapViolated(), "borrow above the position cap");
+    }
+
+    /// @dev Invariant 14: collateral top-ups always succeed, even above a cut position cap or with the oracle down.
+    function invariant_topUpsNeverBlocked() public view {
+        assertFalse(handler.topUpFailed(), "addCollateral failed");
     }
 
     /// @dev Invariant 9: post-action LTV <= ceiling.

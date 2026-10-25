@@ -7,13 +7,15 @@ import {IMUSDSavingsRate} from "./external/IMUSDSavingsRate.sol";
 
 /// @notice Wrapped Savings MUSD: an immutable ERC-4626 over Mezo's claim-based sMUSD (MUSDSavingsRate).
 /// @dev The asset is MUSD; the vault holds sMUSD 1:1 and harvests its separately-accrued yield with `claimYield()`.
-/// Yield vests linearly over `VESTING`; `totalAssets()` is exactly the value a `sync()` in the same block would
-/// produce, so ERC-4626 previews never over-promise and a same-block sandwich captures nothing.
+/// Harvested yield and every surplus vest linearly over `VESTING` from the sync that absorbs them; unclaimed yield
+/// counts nothing. `totalAssets()` is exactly the value a `sync()` in the same block produces (whether or not the claim
+/// succeeds), so ERC-4626 previews never over-promise, the share price never decreases, and nothing that lands in a
+/// block (donations, sMUSD protocol yield) moves the share price in that block.
 interface IWsMUSD is IERC4626 {
-    /// @notice Emitted when a sync harvests sMUSD yield or absorbs a surplus (donations, auto-claims).
-    /// @param harvested sMUSD yield claimed in this sync.
-    /// @param instant Part of `harvested` credited immediately (pro rata to the time since the last harvest).
-    /// @param surplus Unaccounted balance absorbed into the vesting schedule with no instant part.
+    /// @notice Emitted when a sync adds harvested sMUSD yield or a surplus (donations, auto-claims) to the vesting.
+    /// @param harvested sMUSD yield claimed in this sync and added to the vesting.
+    /// @param instant Always 0: nothing is credited immediately (kept for ABI compatibility).
+    /// @param surplus Other unaccounted balance added to the vesting.
     /// @param stored Fully vested assets after the sync.
     /// @param unvested Assets still vesting after the sync.
     /// @param periodEnd Timestamp at which `unvested` is fully vested.
@@ -55,7 +57,8 @@ interface IWsMUSD is IERC4626 {
     /// @notice Harvests pending sMUSD yield, absorbs any surplus and re-deposits idle MUSD. Permissionless.
     function sync() external returns (uint256 harvested);
 
-    /// @notice Burns `shares` from `owner` and pays `receiver` in sMUSD 1:1, plus MUSD for any sMUSD shortfall.
+    /// @notice Burns `shares` from `owner` and pays `receiver` `previewRedeem(shares)` in sMUSD 1:1, plus MUSD for any
+    /// sMUSD shortfall.
     /// @dev Escape hatch that makes no sMUSD deposit, withdraw or claim calls.
     function redeemInKind(uint256 shares, address receiver, address owner)
         external
@@ -70,7 +73,8 @@ interface IWsMUSD is IERC4626 {
     /// @notice Raw vesting accounting: fully vested assets, assets vesting from `lastSync` to `periodEnd`.
     function vestingState() external view returns (uint256 stored, uint256 unvested, uint64 lastSync, uint64 periodEnd);
 
-    /// @notice Timestamp of the last full sync; the instant part of harvested yield accrues from here.
+    /// @notice Timestamp of the last sync whose sMUSD `claimYield` did not revert; it stands still while claims fail.
+    /// Informational: it plays no part in the accounting.
     function lastHarvest() external view returns (uint64);
 
     /// @notice Maximum `totalAssets()` the vault accepts through deposit and mint.

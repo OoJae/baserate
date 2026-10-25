@@ -7,6 +7,7 @@ import {BorrowAccount} from "../../src/account/BorrowAccount.sol";
 import {BorrowAccountFactory} from "../../src/account/BorrowAccountFactory.sol";
 import {IBorrowAccount} from "../../src/interfaces/IBorrowAccount.sol";
 import {IBorrowAccountFactory, Profile} from "../../src/interfaces/IBorrowAccountFactory.sol";
+import {MockERC20} from "../utils/MockERC20.sol";
 
 /// @notice BorrowAccount unit tests that need no Morpho: ownership, access control, modules, native BTC handling.
 /// @dev Every gated entry point rejects the caller before touching Morpho, so code-less placeholders suffice here;
@@ -65,6 +66,8 @@ contract BorrowAccountTest is Test {
         impl.borrow(1, 1, alice);
         vm.expectRevert(IBorrowAccount.Unauthorized.selector);
         impl.rescueNative(alice);
+        vm.expectRevert(IBorrowAccount.Unauthorized.selector);
+        impl.sweep(address(1), alice);
         vm.stopPrank();
     }
 
@@ -91,6 +94,8 @@ contract BorrowAccountTest is Test {
         acct.setModule(module, false);
         vm.expectRevert(IBorrowAccount.Unauthorized.selector);
         acct.rescueNative(bob);
+        vm.expectRevert(IBorrowAccount.Unauthorized.selector);
+        acct.sweep(address(1), bob);
         vm.stopPrank();
     }
 
@@ -100,6 +105,8 @@ contract BorrowAccountTest is Test {
         acct.setModule(module, false);
         vm.expectRevert(IBorrowAccount.Unauthorized.selector);
         acct.rescueNative(address(factory));
+        vm.expectRevert(IBorrowAccount.Unauthorized.selector);
+        acct.sweep(address(1), address(factory));
         vm.stopPrank();
     }
 
@@ -115,7 +122,59 @@ contract BorrowAccountTest is Test {
         acct.repay(0);
         vm.expectRevert(IBorrowAccount.ZeroAmount.selector);
         acct.withdrawCollateral(0, alice);
+        // No idle BTC and no borrow: nothing to do.
+        vm.expectRevert(IBorrowAccount.ZeroAmount.selector);
+        acct.supplyIdle(0, 0, alice);
         vm.stopPrank();
+    }
+
+    /// @dev A-4: no entry point accepts the clone itself as a receiver, so borrowed MUSD can never end a call inside
+    /// it. Every check here runs before any Morpho call (`supplyIdle` is covered on the real stack in CoreAudit).
+    function test_selfReceiverRejectedEverywhere() public {
+        address self = address(acct);
+        bytes memory err = abi.encodeWithSelector(IBorrowAccount.InvalidReceiver.selector, self);
+        vm.startPrank(alice);
+        vm.expectRevert(err);
+        acct.borrow(1e18, 6000, self);
+        vm.expectRevert(err);
+        acct.withdrawCollateral(1, self);
+        vm.expectRevert(err);
+        acct.rescueNative(self);
+        vm.expectRevert(err);
+        acct.sweep(address(1), self);
+        vm.stopPrank();
+
+        vm.prank(address(factory));
+        vm.expectRevert(err);
+        acct.openAndBorrow(1e18, 6000, self);
+
+        _approveModule(module);
+        vm.prank(alice);
+        acct.setModule(module, true);
+        vm.prank(module);
+        vm.expectRevert(err);
+        acct.borrowByModule(1e18, 6000, self);
+    }
+
+    /// @dev A-4: tokens transferred to the clone directly (MUSD included) can be swept out by the owner.
+    function test_sweep_movesWholeBalanceToOwnerChoice() public {
+        MockERC20 token = new MockERC20("Mezo USD", "MUSD");
+        token.mint(address(acct), 7e18);
+
+        vm.prank(alice);
+        vm.expectRevert(IBorrowAccount.ZeroAddress.selector);
+        acct.sweep(address(token), address(0));
+
+        vm.expectEmit(true, true, false, true, address(acct));
+        emit IBorrowAccount.Swept(address(token), bob, 7e18);
+        vm.prank(alice);
+        assertEq(acct.sweep(address(token), bob), 7e18);
+        assertEq(token.balanceOf(bob), 7e18);
+        assertEq(token.balanceOf(address(acct)), 0);
+
+        vm.prank(alice);
+        vm.expectRevert(IBorrowAccount.ZeroAmount.selector);
+        acct.sweep(address(token), bob);
     }
 
     function test_borrowByModule_requiresEnabledAndApprovedModule() public {

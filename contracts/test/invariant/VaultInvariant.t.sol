@@ -19,8 +19,8 @@ import {MockERC20} from "../utils/MockERC20.sol";
 import {MockMUSD} from "../utils/MockMUSD.sol";
 import {IRealAssets, VaultBase} from "../unit/VaultBase.t.sol";
 
-/// @notice Drives lenders, M1 borrowers, time, wsMUSD yield, force deallocations, curator cap cuts and permissionless
-/// rebalances against vMUSD, recording allocator rule violations as ghost flags.
+/// @notice Drives lenders, M1 borrowers, time, wsMUSD yield, force deallocations, curator cap cuts, permissionless
+/// rebalances and an atomic transient-supply attacker against vMUSD, recording allocator rule violations as ghost flags.
 contract VaultHandler is CommonBase, StdCheats, StdUtils {
     using MorphoBalancesLib for IMorpho;
 
@@ -40,10 +40,12 @@ contract VaultHandler is CommonBase, StdCheats, StdUtils {
     address[] internal lenders;
     address internal borrower = makeAddr("inv.borrower");
     address internal stranger = makeAddr("inv.stranger");
+    address internal attacker = makeAddr("inv.attacker");
 
     bool public capViolated;
     bool public bufferBroken;
     bool public bufferNeglected;
+    bool public manipulatedMove;
     uint256 public rebalances;
     uint256 public moves;
 
@@ -172,6 +174,30 @@ contract VaultHandler is CommonBase, StdCheats, StdUtils {
         vault.decreaseAbsoluteCap(marketIdData, newCap);
     }
 
+    // ---------------------------------------------------------------- attacker
+
+    /// @dev Atomic manipulation (B-1): supply MUSD to M1, call `rebalance()`, withdraw it, in one call. No rate-driven
+    /// move may come out of a transient M1 state, and the buffer must still hold once the supply has left.
+    function transientSupplyRebalance(uint256 amount) external {
+        amount = bound(amount, 1e18, 100_000e18);
+        musd.mint(attacker, amount);
+        vm.startPrank(attacker);
+        musd.approve(address(morpho), amount);
+        (, uint256 shares) = morpho.supply(params, amount, 0, attacker, "");
+        uint256 vaultM1Before = mm.expectedSupplyAssets(allocator.MARKET_ID());
+        try allocator.rebalance() returns (IBaserateAllocator.Action action, uint256) {
+            rebalances++;
+            if (action == IBaserateAllocator.Action.TO_MARKET || action == IBaserateAllocator.Action.TO_LIQUIDITY) {
+                manipulatedMove = true;
+            }
+        } catch (bytes memory reason) {
+            if (bytes4(reason) != IBaserateAllocator.CooldownActive.selector) capViolated = true;
+        }
+        morpho.withdraw(params, 0, shares, attacker, attacker);
+        vm.stopPrank();
+        if (mm.expectedSupplyAssets(allocator.MARKET_ID()) + 1 < vaultM1Before) manipulatedMove = true;
+    }
+
     // ---------------------------------------------------------------- allocator
 
     function rebalance() external {
@@ -238,6 +264,10 @@ contract VaultInvariantTest is VaultBase {
 
     function invariant_allocatorNeverExceedsCaps() public view {
         assertFalse(handler.capViolated(), "allocator grew an allocation past a cap, or reverted unexpectedly");
+    }
+
+    function invariant_noRateMoveOnTransientM1State() public view {
+        assertFalse(handler.manipulatedMove(), "a transient M1 supply drove a rate move or pulled vMUSD out of M1");
     }
 
     function invariant_bufferKeptWhenPossible() public view {

@@ -8,8 +8,9 @@ import {ILiquidationVenues, Venue} from "./ILiquidationVenues.sol";
 /// @notice Baserate liquidation backstop (bMUSD): an ERC-4626 over MUSD that buys M1's seized BTC from the
 /// FlashLiquidator at the oracle price less half the liquidation incentive, and sells it back to MUSD through a
 /// permissionless Dutch auction and bounded keeper sales on Tigris.
-/// @dev Exits go through a 7-day queue paid at min(NAV at request, NAV at claim); instant ERC-4626 withdraw and redeem
-/// are disabled (`maxWithdraw` and `maxRedeem` are 0).
+/// @dev Exits go through a 7-day queue paid at min(NAV at request, NAV at claim), in part when cash is short; instant
+/// ERC-4626 withdraw and redeem are disabled (`maxWithdraw` and `maxRedeem` are 0). Deposits and mints are priced at
+/// book + unvested gains (gross), not at `totalAssets`, so a new share pays for its part of the gains still vesting.
 interface IBackstop is IERC4626, ILiquidationVenues {
     /// @notice Constructor parameters (roles are explicit: deployment may go through a CREATE2 deployer).
     /// @param musd MUSD, the ERC-4626 asset.
@@ -32,11 +33,11 @@ interface IBackstop is IERC4626, ILiquidationVenues {
         VenueConfig venues;
     }
 
-    /// @notice A queued exit.
+    /// @notice A queued exit (after a partial claim: what is left of it).
     /// @param owner Whose shares were escrowed.
     /// @param receiver Who receives the MUSD.
-    /// @param shares Escrowed shares, burned at claim.
-    /// @param assets NAV of `shares` at request; the claim pays at most this.
+    /// @param shares Escrowed shares not yet paid, burned as they are paid.
+    /// @param assets NAV of `shares` at request; claims pay at most this.
     /// @param claimableAt Earliest claim time.
     struct RedeemRequest {
         address owner;
@@ -63,8 +64,11 @@ interface IBackstop is IERC4626, ILiquidationVenues {
         uint256 assets,
         uint64 claimableAt
     );
-    /// @notice Emitted when an exit is paid.
+    /// @notice Emitted on every claim payment: `shares` burned, `assets` paid (a partial claim emits it too, followed
+    /// by `RedeemPartiallyClaimed`).
     event RedeemClaimed(uint256 indexed id, address indexed receiver, uint256 shares, uint256 assets);
+    /// @notice Emitted after a partial claim: what stays queued under `id`, claimable again at any time.
+    event RedeemPartiallyClaimed(uint256 indexed id, uint256 sharesLeft, uint256 assetsLeft);
     /// @notice Emitted when someone buys inventory from the Dutch auction.
     event AuctionTaken(address indexed taker, address indexed to, uint256 btcOut, uint256 musdIn, uint256 factorWad);
     /// @notice Emitted when inventory is sold on a DEX venue.
@@ -102,6 +106,10 @@ interface IBackstop is IERC4626, ILiquidationVenues {
     error OracleUnavailable();
     /// @notice Sending native BTC failed.
     error NativeSendFailed(address to, uint256 amount);
+    /// @notice Only the request's owner may value the inventory at 0 for its claim.
+    error NotRequestOwner(address caller);
+    /// @notice A sale would leave less than `DUST_INVENTORY` of BTC (take it all instead).
+    error DustRemainder(uint256 remaining);
 
     /// @notice Buys seized BTC (`msg.value`) and pays `btc x price x (1 - DISCOUNT)` MUSD to the caller.
     /// @dev FlashLiquidator only; paid from free cash, never from MUSD reserved for queued exits.
@@ -114,13 +122,27 @@ interface IBackstop is IERC4626, ILiquidationVenues {
     function requestRedeem(uint256 shares, address receiver, address owner) external returns (uint256 id);
 
     /// @notice Pays a matured request at min(NAV at request, NAV now) and burns its shares. Anyone may call.
+    /// @dev When cash cannot cover it, pays all the cash, burns the matching fraction of the shares (rounded up) and
+    /// keeps the rest queued at the same request NAV per share; reverts `InsufficientCash` only with no cash at all.
+    /// Reads the oracle while the inventory is at least `DUST_INVENTORY`.
+    /// @return assets MUSD paid by this call.
     function claimRedeem(uint256 id) external returns (uint256 assets);
 
+    /// @notice Like `claimRedeem`, but values the BTC inventory at 0 for this claim only, so an exit can complete
+    /// during an oracle outage. Owner only: it pays min(NAV at request, min(book, cash) per share), never more than
+    /// `claimRedeem` would, and always in full from cash.
+    /// @dev Tries the oracle: if it answers (or only dust is held) the usual checkpoints run around the claim; if it is
+    /// down, vested gains move into the book and no gain or loss is recognised for anyone else.
+    /// @return assets MUSD paid by this call.
+    function claimRedeemWithoutOracle(uint256 id) external returns (uint256 assets);
+
     /// @notice Buys `btcOut` of inventory at the current Dutch-auction price, paying MUSD; BTC goes to `to`.
+    /// @dev Must take all the inventory or leave at least `DUST_INVENTORY`.
     function takeAuction(uint256 btcOut, uint256 maxMusdIn, address to) external returns (uint256 musdIn);
 
     /// @notice Sells up to `MAX_KEEPER_SALE` of inventory on a DEX venue, at no less than the current auction price.
     /// @dev Permissionless: the floor makes any caller's sale at least as good for depositors as an auction fill.
+    /// Must sell all the inventory or leave at least `DUST_INVENTORY`.
     function sellInventory(uint256 btcIn, Venue venue, uint256 minOut) external returns (uint256 musdOut);
 
     /// @notice Recognises vested gains and any losses now. Permissionless.
@@ -141,7 +163,8 @@ interface IBackstop is IERC4626, ILiquidationVenues {
     /// @notice Cash not reserved for queued exits, available to buy collateral.
     function availableCash() external view returns (uint256);
 
-    /// @notice Realisable value: cash plus inventory marked at the oracle price x 0.95 (0 if the oracle is down).
+    /// @notice Realisable value: cash plus inventory marked at the oracle price x 0.95 (0 if the oracle is down or
+    /// the inventory is below `DUST_INVENTORY`). Deposits and mints are priced at this value.
     function grossAssets() external view returns (uint256);
 
     /// @notice Accounting state: recognised book, unvested gains, last checkpoint and vesting end.
@@ -197,4 +220,7 @@ interface IBackstop is IERC4626, ILiquidationVenues {
 
     /// @notice Auction price factor at the end of `AUCTION_DURATION`, in WAD (0.95).
     function AUCTION_FLOOR() external view returns (uint256);
+
+    /// @notice Inventory below this (BTC wei; 0.00001 BTC, about 1 MUSD) counts as 0 in NAV, so it needs no oracle.
+    function DUST_INVENTORY() external view returns (uint256);
 }

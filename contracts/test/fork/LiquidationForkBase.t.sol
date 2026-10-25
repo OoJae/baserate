@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity 0.8.28;
 
+import {StdStorage, stdStorage} from "forge-std/StdStorage.sol";
 import {VmSafe} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -26,6 +27,7 @@ import {MezoFork} from "../utils/MezoFork.sol";
 abstract contract LiquidationForkBase is MezoFork {
     using MarketParamsLib for MarketParams;
     using MorphoBalancesLib for IMorpho;
+    using stdStorage for StdStorage;
 
     struct Outcome {
         uint256 seized;
@@ -89,8 +91,12 @@ abstract contract LiquidationForkBase is MezoFork {
                 canary: IBorrowAccountFactory.Limits({positionCap: canaryCap, ceilingBps: canaryCeiling})
             })
         );
-        vm.prank(governor);
-        factory.setCanaryOperator(canaryOp, true);
+        // Granting the canary-operator role is a 48 h timelocked raise. These suites only need the role, so it is
+        // written directly rather than moving the fork's clock 48 h (which would stale the pinned Pyth prices).
+        stdstore.target(address(factory))
+            .sig(IBorrowAccountFactory.isCanaryOperator.selector)
+            .with_key(canaryOp)
+            .checked_write(true);
 
         morpho = IMorpho(net.morpho);
         musd = IERC20(net.musd);

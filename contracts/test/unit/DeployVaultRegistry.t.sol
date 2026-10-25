@@ -39,14 +39,34 @@ contract DeployVaultRegistryTest is Test, DeployVault {
         assertTrue(vm.keyExistsJson(merged, ".vMusdRolesNote"));
         assertTrue(vm.keyExistsJson(merged, ".vMusdDeployBlock"));
 
-        // Every existing key survives with its value.
+        // Every existing key the script does not own survives with its value (a registry from an earlier vault deploy
+        // already carries the vault keys, which a redeploy overwrites on purpose).
         string[] memory keys = vm.parseJsonKeys(existing, "$");
         for (uint256 i; i < keys.length; ++i) {
+            if (_ownedByVaultDeploy(keys[i])) continue;
             string memory path = string.concat(".", keys[i]);
             assertTrue(vm.keyExistsJson(merged, path), keys[i]);
             assertEq(vm.parseJson(merged, path), vm.parseJson(existing, path), keys[i]);
         }
         assertEq(vm.parseJsonUint(merged, ".lltv"), 0.77e18, "large integers stay exact");
         assertEq(vm.parseJsonBytes32(merged, ".marketId"), vm.parseJsonBytes32(existing, ".marketId"));
+    }
+
+    function _ownedByVaultDeploy(string memory key) private pure returns (bool) {
+        string[9] memory owned = [
+            "vMusd",
+            "wsMusdAdapter",
+            "m1Adapter",
+            "allocator",
+            "vaultV2Factory",
+            "vMusdCap",
+            "vMusdM1Cap",
+            "vMusdRolesNote",
+            "vMusdDeployBlock"
+        ];
+        for (uint256 i; i < owned.length; ++i) {
+            if (keccak256(bytes(owned[i])) == keccak256(bytes(key))) return true;
+        }
+        return false;
     }
 }

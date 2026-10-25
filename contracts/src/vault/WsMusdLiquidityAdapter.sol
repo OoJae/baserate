@@ -17,13 +17,20 @@ import {IWsMusdLiquidityAdapter} from "../interfaces/IWsMusdLiquidityAdapter.sol
 /// @notice vMUSD's liquidity adapter: every vMUSD deposit is allocated here and parked in wsMUSD (savings yield,
 /// fully liquid); withdrawals are served from here before anything touches the M1 market.
 /// @dev Derived from morpho-org/vault-v2 `MorphoVaultV1Adapter` at tag 2026-08-13 (GPL-2.0-or-later, Copyright (c)
-/// 2025 Morpho Association), with three changes:
+/// 2025 Morpho Association), with four changes:
 /// - `allocate` deposits `min(idle + assets, wsMUSD.maxDeposit(this))` inside try/catch and keeps the rest as
 ///   accounted idle MUSD. A full wsMUSD cap, or a wsMUSD/sMUSD deposit that reverts, therefore never blocks a vMUSD
 ///   deposit (the "vMUSD deposit DoS" in docs/design/red-team.md). Idle MUSD is redeposited on later allocations.
 /// - `deallocate` pays from idle MUSD first and withdraws only the remainder from wsMUSD.
 /// - `realAssets = wsMUSD.previewRedeem(shares) + idle`. Idle is tracked internally, so stray MUSD donated to the
 ///   adapter is not counted and can be skimmed; wsMUSD shares can never be skimmed.
+/// - A timelocked rescue for a wsMUSD exit that no longer works (sMUSD's withdraw reverting): the vault's curator
+///   submits it, the curator or a sentinel can revoke it, and after `RESCUE_TIMELOCK` the curator or a sentinel runs
+///   it. It first tries to redeem the whole wsMUSD position into idle MUSD, with a guaranteed `RESCUE_PROBE_GAS`
+///   stipend; if that works nothing leaves the adapter. Only if it reverts are the wsMUSD shares sent in kind to the
+///   vault's owner for manual unwinding (wsMUSD `redeemInKind` to sMUSD needs no sMUSD withdraw), and the adapter
+///   stops depositing into wsMUSD. The vault then books the shares' value as a loss until the owner returns it, so
+///   the rescue can never take value a working wsMUSD would pay out to vMUSD holders.
 /// Vault V2 adapter rules: only the parent vault can allocate/deallocate; markets are entered and exited only there;
 /// the single id `keccak256(abi.encode("this", address(this)))` is returned on both; the vault holds an unlimited
 /// MUSD approval so it can pull deallocated assets; the adapter never calls back into the vault's state-changing
@@ -45,7 +52,18 @@ contract WsMusdLiquidityAdapter is IWsMusdLiquidityAdapter, ReentrancyGuardTrans
     bytes32 public immutable adapterId;
 
     /// @inheritdoc IWsMusdLiquidityAdapter
+    uint256 public constant RESCUE_TIMELOCK = 72 hours;
+    /// @inheritdoc IWsMusdLiquidityAdapter
+    uint256 public constant RESCUE_PROBE_GAS = 3_000_000;
+    /// @dev Gas kept back for the rescue's own work after the probe.
+    uint256 internal constant RESCUE_GAS_MARGIN = 100_000;
+
+    /// @inheritdoc IWsMusdLiquidityAdapter
     address public skimRecipient;
+    /// @inheritdoc IWsMusdLiquidityAdapter
+    uint64 public rescueExecutableAt;
+    /// @inheritdoc IWsMusdLiquidityAdapter
+    bool public rescued;
     /// @inheritdoc IWsMusdLiquidityAdapter
     uint256 public idle;
 
@@ -88,6 +106,56 @@ contract WsMusdLiquidityAdapter is IWsMusdLiquidityAdapter, ReentrancyGuardTrans
     }
 
     // ---------------------------------------------------------------------------------------------------------------
+    // Rescue (timelocked, curator and sentinels of the parent vault)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// @inheritdoc IWsMusdLiquidityAdapter
+    function submitRescue() external nonReentrant {
+        if (msg.sender != IVaultV2(parentVault).curator()) revert NotAuthorized();
+        if (rescueExecutableAt != 0) revert RescuePending();
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint64 executableAt = uint64(block.timestamp + RESCUE_TIMELOCK);
+        rescueExecutableAt = executableAt;
+        emit RescueSubmitted(executableAt);
+    }
+
+    /// @inheritdoc IWsMusdLiquidityAdapter
+    function revokeRescue() external nonReentrant {
+        _onlyCuratorOrSentinel();
+        if (rescueExecutableAt == 0) revert NoPendingRescue();
+        delete rescueExecutableAt;
+        emit RescueRevoked(msg.sender);
+    }
+
+    /// @inheritdoc IWsMusdLiquidityAdapter
+    function rescue() external nonReentrant returns (uint256 shares, bool unwound) {
+        _onlyCuratorOrSentinel();
+        uint64 executableAt = rescueExecutableAt;
+        if (executableAt == 0) revert NoPendingRescue();
+        if (block.timestamp < executableAt) revert RescueTimelocked(executableAt);
+        delete rescueExecutableAt;
+
+        shares = IERC20(wsMusd).balanceOf(address(this));
+        // The probe must get its full stipend, so a failure can never be a caller starving it of gas.
+        if (gasleft() < RESCUE_PROBE_GAS * 64 / 63 + RESCUE_GAS_MARGIN) revert InsufficientGas();
+        // `idle` is written after the call; the lock blocks re-entry and wsMUSD has no callbacks.
+        // forge-lint: disable-next-line(reentrancy-no-eth)
+        try IERC4626(wsMusd).redeem{gas: RESCUE_PROBE_GAS}(shares, address(this), address(this)) returns (
+            uint256 assets
+        ) {
+            // wsMUSD still pays: the position is now idle MUSD, held for the vault as before.
+            idle += assets;
+            unwound = true;
+            emit RescueUnwound(shares, assets);
+        } catch {
+            rescued = true;
+            address recipient = IVaultV2(parentVault).owner();
+            IERC20(wsMusd).safeTransfer(recipient, shares);
+            emit RescuedInKind(recipient, shares);
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
     // Vault V2 adapter
     // ---------------------------------------------------------------------------------------------------------------
 
@@ -103,7 +171,8 @@ contract WsMusdLiquidityAdapter is IWsMusdLiquidityAdapter, ReentrancyGuardTrans
         if (msg.sender != parentVault) revert NotAuthorized();
 
         uint256 idleAssets = idle + assets;
-        uint256 room = IERC4626(wsMusd).maxDeposit(address(this));
+        // After an in-kind rescue wsMUSD is known not to pay out: keep everything idle.
+        uint256 room = rescued ? 0 : IERC4626(wsMusd).maxDeposit(address(this));
         uint256 toDeposit = idleAssets < room ? idleAssets : room;
         uint256 deposited = 0;
         if (toDeposit != 0) {
@@ -171,6 +240,11 @@ contract WsMusdLiquidityAdapter is IWsMusdLiquidityAdapter, ReentrancyGuardTrans
     /// @inheritdoc IWsMusdLiquidityAdapter
     function availableLiquidity() external view returns (uint256) {
         return idle + IERC4626(wsMusd).maxWithdraw(address(this));
+    }
+
+    function _onlyCuratorOrSentinel() internal view {
+        IVaultV2 vault = IVaultV2(parentVault);
+        if (msg.sender != vault.curator() && !vault.isSentinel(msg.sender)) revert NotAuthorized();
     }
 
     /// @dev New position value minus the vault's recorded allocation.

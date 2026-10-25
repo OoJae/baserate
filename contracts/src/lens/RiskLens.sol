@@ -12,6 +12,7 @@ import {LIQUIDATION_CURSOR, MAX_LIQUIDATION_INCENTIVE_FACTOR} from "morpho-blue/
 import {MathLib, WAD} from "morpho-blue/libraries/MathLib.sol";
 import {MorphoBalancesLib} from "morpho-blue/libraries/periphery/MorphoBalancesLib.sol";
 
+import {IBackstop} from "../interfaces/IBackstop.sol";
 import {IBorrowAccountFactory, Profile} from "../interfaces/IBorrowAccountFactory.sol";
 import {IRiskLens} from "../interfaces/IRiskLens.sol";
 import {IMusdTroveManager, ISortedTroves} from "../interfaces/external/IMusdTroves.sol";
@@ -25,7 +26,9 @@ import {TickMath} from "./TickMath.sol";
 /// TWAP, BTC -> MUSD liquidation depth per size on Slipstream (QuoterV2) and the basic vAMM (Router), and the MUSD
 /// trove redemption queue that Baserate borrowers are not exposed to.
 /// @dev No storage and no admin. Every source runs in isolation (try/catch around a self-call or a low-level call),
-/// so one failing source only sets its `SRC_*` bit in `Snapshot.failed`.
+/// so one failing source only sets its `SRC_*` bit in `Snapshot.failed`. Optional reads of a backstop (`availableCash`,
+/// `inventory`, `totalAssets`) are low-level STATICCALLs that need 32 bytes of return data, so an EOA or a contract
+/// without those functions falls back to raw balances instead of reverting.
 ///
 /// Precompile budget (Mezo allows 20 precompile executions per transaction, reads included): `status()` makes one
 /// Skip call; each CL quote makes one BTC-precompile read (`CLPool.swap` reads `BTC.balanceOf(pool)` before the
@@ -83,6 +86,11 @@ contract RiskLens is IRiskLens {
     address public constant BTC = 0x7b7C000000000000000000000000000000000000;
     /// @notice MUSD's Recovery Mode threshold (CCR 150%).
     uint256 public constant CCR = 1.5e18;
+    /// @notice MUSD's minimum collateral ratio (MCR 110%): `redeemCollateral` skips every trove below it.
+    uint256 public constant MCR = 1.1e18;
+    /// @notice Largest Skip answer that can be priced: `BtcMusdOracle.MAX_SKIP_ANSWER` (above it the oracle rejects
+    /// the answer and `skipPrice * 1e18` could overflow).
+    uint256 public constant MAX_SKIP_PRICE = type(uint256).max / 1e36;
 
     address public immutable FACTORY;
     address public immutable MORPHO;
@@ -232,19 +240,17 @@ contract RiskLens is IRiskLens {
     function backstopState(address backstop) public view returns (BackstopState memory b) {
         b.backstop = backstop;
         b.musd = IERC20(MUSD).balanceOf(backstop);
-        b.nativeBtc = backstop.balance;
         if (WS_MUSD != address(0)) {
             b.wsMusdShares = IERC20(WS_MUSD).balanceOf(backstop);
             if (b.wsMusdShares != 0) b.wsMusdAssets = IERC4626(WS_MUSD).previewRedeem(b.wsMusdShares);
         }
-        b.freeMusd = b.musd + b.wsMusdAssets;
-        // An EOA would make the decode revert outside the try, so only contracts are asked.
-        if (backstop.code.length != 0) {
-            try IERC4626(backstop).totalAssets() returns (uint256 assets) {
-                b.vaultRead = true;
-                b.vaultTotalAssets = assets;
-            } catch {}
-        }
+        // A Baserate Backstop reports the MUSD it can actually deploy (cash minus MUSD reserved for queued exits) and
+        // the BTC it holds for sale (BTC donated to it is not inventory). Anything else falls back to raw balances.
+        (bool cashRead, uint256 available) = _readWord(backstop, abi.encodeCall(IBackstop.availableCash, ()));
+        b.freeMusd = cashRead ? available : b.musd + b.wsMusdAssets;
+        (bool inventoryRead, uint256 inventory) = _readWord(backstop, abi.encodeCall(IBackstop.inventory, ()));
+        b.nativeBtc = inventoryRead ? inventory : backstop.balance;
+        (b.vaultRead, b.vaultTotalAssets) = _readWord(backstop, abi.encodeCall(IERC4626.totalAssets, ()));
     }
 
     /// @inheritdoc IRiskLens
@@ -301,7 +307,9 @@ contract RiskLens is IRiskLens {
             if (price != 0) e.icr = manager.getCurrentICR(borrower, price);
             (e.coll, e.principal, e.interest,,,) = manager.getEntireDebtAndColl(borrower);
             e.debtAhead = debtAhead;
-            debtAhead += e.principal + e.interest;
+            // MUSD's `redeemCollateral` checks every trove's ICR and skips those below MCR: such a trove is not
+            // redeemed and shields no one behind it. Without a price nothing can be excluded.
+            if (price == 0 || e.icr >= MCR) debtAhead += e.principal + e.interest;
             ++filled;
             borrower = sorted.getPrev(borrower);
         }
@@ -443,8 +451,8 @@ contract RiskLens is IRiskLens {
             s.skipped |= SRC_TROVES;
             return;
         }
-        // MUSD prices troves with Skip's BTC/USD; a missing Skip answer leaves ICR and TCR at 0 (flagged).
-        uint256 price = s.oracle.skipPrice;
+        // MUSD prices troves with Skip's BTC/USD; a missing or oversized Skip answer leaves ICR and TCR at 0 (flagged).
+        uint256 price = s.oracle.skipPrice > MAX_SKIP_PRICE ? 0 : s.oracle.skipPrice;
         if (price == 0) s.failed |= SRC_TROVES;
         try this.troveQueue(count, price) returns (TroveQueue memory t) {
             s.troves = t;
@@ -464,9 +472,11 @@ contract RiskLens is IRiskLens {
         return Math.min(MAX_LIQUIDATION_INCENTIVE_FACTOR, WAD.wDivDown(WAD - LIQUIDATION_CURSOR.wMulDown(WAD - lltv)));
     }
 
-    /// @dev MUSD per BTC at Morpho's 1e36 scale: the oracle price when valid, else Skip with MUSD at 1.00, else 0.
+    /// @dev MUSD per BTC at Morpho's 1e36 scale: the oracle price when valid, else Skip with MUSD at 1.00, else 0
+    /// (also for a Skip answer above `MAX_SKIP_PRICE`, which the oracle rejects and which would overflow here).
     function _referencePrice(IBtcMusdOracle.Status memory st) internal pure returns (uint256) {
         if (st.ok) return st.price;
+        if (st.skipPrice > MAX_SKIP_PRICE) return 0;
         return st.skipPrice * 1e18;
     }
 
@@ -521,6 +531,17 @@ contract RiskLens is IRiskLens {
         function(address, uint256, bytes memory) internal returns (bool, uint256, uint256, uint256) raw = _rawCall;
         assembly ("memory-safe") {
             viewCall := raw
+        }
+    }
+
+    /// @dev STATICCALL that copies at most one word back. `ok` needs success and at least 32 bytes of return data
+    /// (an EOA, a missing function or short data reads as unavailable); `word` is 0 unless `ok`.
+    function _readWord(address target, bytes memory data) internal view returns (bool ok, uint256 word) {
+        assembly ("memory-safe") {
+            mstore(0x00, 0)
+            let success := staticcall(gas(), target, add(data, 0x20), mload(data), 0x00, 0x20)
+            ok := and(success, gt(returndatasize(), 0x1f))
+            word := mul(mload(0x00), ok)
         }
     }
 

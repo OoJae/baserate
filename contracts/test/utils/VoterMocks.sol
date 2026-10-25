@@ -47,7 +47,9 @@ contract MockPoolsVoter {
 
 /// @notice Mirrors Mezo's BribeVotingReward `notifyRewardAmount` (verified source, solc 0.8.24): `nonReentrant`,
 /// whitelist check only for new reward tokens, `ZeroAmount` on 0, `safeTransferFrom` of exactly `amount`, and
-/// crediting `tokenRewardsPerEpoch[token][epochStart(now)]`. Fault modes simulate a broken or hostile bribe.
+/// crediting `tokenRewardsPerEpoch[token][epochStart(now)]`. `totalSupply` is the vote weight in the contract
+/// (Reward's public `totalSupply`); it starts non-zero so bribes post by default. Fault modes simulate a broken or
+/// hostile bribe.
 contract MockBribe {
     using SafeERC20 for IERC20;
 
@@ -67,10 +69,12 @@ contract MockBribe {
     mapping(address token => mapping(uint256 epochStart => uint256)) public tokenRewardsPerEpoch;
     Mode public mode;
     address public reenterTarget;
+    uint256 public totalSupply;
     bool internal _entered;
 
     constructor(address voter_, address[] memory rewards) {
         voter = voter_;
+        totalSupply = 1000e18;
         for (uint256 i; i < rewards.length; ++i) {
             isReward[rewards[i]] = true;
         }
@@ -82,6 +86,11 @@ contract MockBribe {
 
     function setReenterTarget(address target) external {
         reenterTarget = target;
+    }
+
+    /// @notice Sets the vote weight (0 = nobody votes for this gauge).
+    function setTotalSupply(uint256 supply) external {
+        totalSupply = supply;
     }
 
     function notifyRewardAmount(address token, uint256 amount) external {

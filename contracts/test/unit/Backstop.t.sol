@@ -5,13 +5,16 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 
+import {IOracle} from "morpho-blue/interfaces/IOracle.sol";
+
 import {IBackstop} from "../../src/interfaces/IBackstop.sol";
 import {ILiquidationVenues, Venue} from "../../src/interfaces/ILiquidationVenues.sol";
 import {Backstop} from "../../src/liquidation/Backstop.sol";
 import {BackstopBase} from "./BackstopBase.t.sol";
 
-/// @notice Backstop unit tests on a local stack: pricing, NAV marking, premium vesting, the 7-day exit queue at the
-/// lower NAV, the Dutch auction, the JIT-deposit attack, oracle outages and the sentinel's pause.
+/// @notice Backstop unit tests on a local stack: pricing, NAV marking, premium vesting, gross-priced deposits, the
+/// 7-day exit queue at the lower NAV (partial claims, zero-inventory claims), dust inventory, the Dutch auction, the
+/// JIT-deposit attack, oracle outages and the sentinel's pause.
 contract BackstopTest is BackstopBase {
     uint256 internal constant DISCOUNT_086 = 21_920_668_058_455_114; // (1/0.958 - 1) / 2, rounded down like Morpho
 
@@ -449,6 +452,243 @@ contract BackstopTest is BackstopBase {
         uint256 id = _request(alice, shares);
         skip(7 days);
         assertEq(backstop.claimRedeem(id), 1000e18);
+    }
+
+    // ---------------------------------------------------------------- deposits at book + unvested
+
+    function test_deposit_pricedAtBookPlusUnvested() public {
+        _deposit(alice, 10_000e18);
+        musd.mint(address(backstop), 1000e18);
+        backstop.sync(); // 1,000 MUSD vesting over a book of 10,001
+        (uint256 book0, uint256 unvested0,, uint64 end0) = backstop.vestingState();
+        uint256 supply0 = backstop.totalSupply();
+        uint256 pps0 = _pps();
+
+        uint256 expected = 5000e18 * (supply0 + 1) / (book0 + unvested0 + 1);
+        assertEq(backstop.previewDeposit(5000e18), expected, "preview at gross");
+        assertLt(expected, backstop.convertToShares(5000e18), "fewer shares than at the recognised NAV");
+        uint256 shares = _deposit(bob, 5000e18);
+        assertEq(shares, expected, "minted at gross");
+
+        (uint256 book1, uint256 unvested1,, uint64 end1) = backstop.vestingState();
+        assertEq(book1 + unvested1, book0 + unvested0 + 5000e18, "the whole deposit is accounted");
+        assertApproxEqAbs(unvested1 - unvested0, 5000e18 * unvested0 / (book0 + unvested0), 1, "pro-rata split");
+        assertEq(end1, end0, "vesting end kept");
+        assertApproxEqAbs(_pps(), pps0, 1, "recognised share price unchanged");
+        skip(7 days);
+        assertApproxEqAbs(backstop.convertToAssets(shares), 5000e18, 2, "worth what it paid once vested");
+    }
+
+    function test_mint_pricedAtBookPlusUnvested() public {
+        _deposit(alice, 10_000e18);
+        musd.mint(address(backstop), 1000e18);
+        backstop.sync();
+        uint256 cost = backstop.previewMint(1000e18);
+        assertGt(cost, backstop.convertToAssets(1000e18), "costs more than the recognised NAV");
+        musd.mint(bob, cost);
+        vm.startPrank(bob);
+        musd.approve(address(backstop), cost);
+        assertEq(backstop.mint(1000e18, bob), cost, "preview = execution");
+        vm.expectRevert(IBackstop.ZeroAmount.selector);
+        backstop.mint(0, bob);
+        vm.stopPrank();
+    }
+
+    function test_deposit_zeroSharesReverts() public {
+        _deposit(alice, 10_000e18);
+        musd.mint(address(backstop), 10_000e18);
+        backstop.sync(); // gross 20,001 over 10,001 shares: 1 wei buys no share
+        assertEq(backstop.previewDeposit(1), 0);
+        musd.mint(bob, 1);
+        vm.startPrank(bob);
+        musd.approve(address(backstop), 1);
+        vm.expectRevert(IBackstop.ZeroAmount.selector);
+        backstop.deposit(1, bob);
+        vm.stopPrank();
+    }
+
+    /// @dev With BTC held, a deposit reads the oracle once (checkpoint), not twice (no second NAV read for the price).
+    function test_deposit_readsOracleOnceWhileHolding() public {
+        _deposit(alice, 10_000e18);
+        _buy(0.01e18);
+        musd.mint(bob, 100e18);
+        vm.startPrank(bob);
+        musd.approve(address(backstop), 100e18);
+        vm.expectCall(address(oracle), abi.encodeCall(IOracle.price, ()), 1);
+        backstop.deposit(100e18, bob);
+        vm.stopPrank();
+    }
+
+    // ---------------------------------------------------------------- partial claims
+
+    /// @dev Builds a matured request for all of alice's shares while most of the NAV is BTC.
+    function _maturedRequestShortOfCash() internal returns (uint256 id, IBackstop.RedeemRequest memory r) {
+        uint256 shares = _deposit(alice, 10_000e18);
+        _buy(0.12e18);
+        id = _request(alice, shares);
+        r = backstop.redeemRequest(id);
+        skip(7 days);
+    }
+
+    function test_claimRedeem_partialPaysAllCashAndKeepsTheRestQueued() public {
+        (uint256 id, IBackstop.RedeemRequest memory r) = _maturedRequestShortOfCash();
+        uint256 cash = backstop.cash();
+        uint256 burned = uint256(r.shares) * cash / r.assets + 1; // rounded up
+        uint256 leftShares = r.shares - burned;
+        uint256 leftAssets = uint256(r.assets) * leftShares / r.shares;
+        uint256 pps = _pps();
+
+        vm.expectEmit(address(backstop));
+        emit IBackstop.RedeemClaimed(id, alice, burned, cash);
+        vm.expectEmit(address(backstop));
+        emit IBackstop.RedeemPartiallyClaimed(id, leftShares, leftAssets);
+        vm.prank(bob); // anyone may trigger it
+        assertEq(backstop.claimRedeem(id), cash, "all the cash");
+
+        IBackstop.RedeemRequest memory left = backstop.redeemRequest(id);
+        assertEq(left.shares, leftShares);
+        assertEq(left.assets, leftAssets);
+        assertEq(left.owner, alice);
+        assertEq(backstop.reservedAssets(), leftAssets);
+        assertEq(backstop.cash(), 0, "drained");
+        assertApproxEqAbs(_pps(), pps, 1, "a partial claim does not move the share price");
+
+        // No cash at all: the claim reverts instead of burning shares for nothing.
+        vm.expectRevert(abi.encodeWithSelector(IBackstop.InsufficientCash.selector, leftAssets, 0));
+        backstop.claimRedeem(id);
+    }
+
+    /// @dev Requests mature in order (constant delay), so the earliest one can take the cash first.
+    function test_claimRedeem_earlierRequestPaidFirst() public {
+        uint256 aliceShares = _deposit(alice, 10_000e18);
+        uint256 bobShares = _deposit(bob, 10_000e18);
+        _buy(0.2e18);
+        uint256 first = _request(alice, aliceShares);
+        skip(1 days);
+        uint256 second = _request(bob, bobShares);
+        skip(6 days);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IBackstop.NotClaimable.selector, second, uint64(block.timestamp + 1 days))
+        );
+        backstop.claimRedeem(second);
+        uint256 cash = backstop.cash();
+        assertEq(backstop.claimRedeem(first), cash, "the matured request takes what there is");
+        assertGt(backstop.redeemRequest(first).shares, 0, "part of it still queued");
+
+        // The auction refills cash: both are paid in full by the time the second matures.
+        _take(backstop.inventory());
+        skip(1 days);
+        backstop.claimRedeem(first);
+        backstop.claimRedeem(second);
+        assertEq(backstop.redeemRequest(first).shares, 0);
+        assertEq(backstop.redeemRequest(second).shares, 0);
+        assertEq(backstop.reservedAssets(), 0);
+        assertEq(backstop.balanceOf(address(backstop)), 0);
+    }
+
+    /// @dev Once NAV falls to the cash (BTC worthless) the claim is covered again: paid in full at the lower NAV.
+    function test_claimRedeem_paidInFullOnceNavFallsToCash() public {
+        (uint256 id, IBackstop.RedeemRequest memory r) = _maturedRequestShortOfCash();
+        _setPrice(1);
+        backstop.sync();
+        uint256 valueNow = backstop.convertToAssets(r.shares);
+        assertLt(valueNow, r.assets, "NAV fell");
+        assertLe(valueNow, backstop.cash(), "covered by cash");
+        assertEq(backstop.claimRedeem(id), valueNow, "min(request NAV, NAV now)");
+        assertEq(backstop.redeemRequest(id).shares, 0, "closed");
+    }
+
+    // ---------------------------------------------------------------- zero-inventory claims
+
+    function test_claimWithoutOracle_ownerOnlyAndMatured() public {
+        uint256 shares = _deposit(alice, 1000e18);
+        uint256 id = _request(alice, shares);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(IBackstop.NotClaimable.selector, id, uint64(block.timestamp + 7 days)));
+        backstop.claimRedeemWithoutOracle(id);
+        skip(7 days);
+        vm.expectRevert(abi.encodeWithSelector(IBackstop.NotRequestOwner.selector, address(this)));
+        backstop.claimRedeemWithoutOracle(id);
+        vm.expectRevert(abi.encodeWithSelector(IBackstop.UnknownRequest.selector, id + 1));
+        backstop.claimRedeemWithoutOracle(id + 1);
+        // No inventory: identical to a normal claim.
+        vm.prank(alice);
+        assertEq(backstop.claimRedeemWithoutOracle(id), 1000e18);
+    }
+
+    /// @dev With the oracle up the usual checkpoint still runs first, and the claim is valued with BTC at 0.
+    function test_claimWithoutOracle_oracleUpValuesInventoryAtZero() public {
+        uint256 aliceShares = _deposit(alice, 10_000e18);
+        uint256 bobShares = _deposit(bob, 10_000e18);
+        _buy(0.12e18);
+        uint256 id = _request(alice, aliceShares);
+        skip(7 days);
+        _setPrice(PRICE * 90 / 100); // a pending loss the claim must recognise first
+        uint256 bobValue = backstop.convertToAssets(bobShares);
+        uint256 normal = backstop.convertToAssets(aliceShares);
+
+        uint256 cash = backstop.cash();
+        vm.prank(alice);
+        uint256 paid = backstop.claimRedeemWithoutOracle(id);
+        assertEq(paid, aliceShares * (cash + 1) / (backstop.totalSupply() + aliceShares + 1), "cash per share");
+        assertLt(paid, normal, "below what claimRedeem would pay");
+        assertApproxEqAbs(backstop.convertToAssets(bobShares), bobValue, 2, "no instant move for the others");
+        skip(7 days);
+        assertGt(backstop.convertToAssets(bobShares), bobValue, "the forfeit vests to them");
+    }
+
+    // ---------------------------------------------------------------- dust inventory
+
+    function test_dust_isWrittenOffAndNeedsNoOracle() public {
+        _deposit(alice, 10_000e18);
+        uint256 dust = backstop.DUST_INVENTORY() - 1;
+        uint256 nav = backstop.totalAssets();
+        uint256 paid = _buy(dust);
+        assertEq(backstop.inventory(), dust);
+        assertApproxEqAbs(backstop.totalAssets(), nav - paid, 2, "dust counts as 0 (the cost is a loss)");
+        assertEq(backstop.grossAssets(), backstop.cash(), "gross is cash");
+
+        oracle.setReverting(true);
+        assertEq(backstop.quoteAuction(dust), 0, "the dust itself waits for the oracle");
+        // Deposits, requests, syncs and claims never touch the oracle below DUST_INVENTORY.
+        vm.expectCall(address(oracle), abi.encodeCall(IOracle.price, ()), 0);
+        uint256 shares = _deposit(bob, 100e18);
+        uint256 id = _request(bob, shares);
+        backstop.sync();
+        skip(7 days);
+        backstop.claimRedeem(id);
+    }
+
+    function test_dust_becomesInventoryAgainWhenMoreArrives() public {
+        _deposit(alice, 10_000e18);
+        uint256 dust = backstop.DUST_INVENTORY() - 1;
+        _buy(dust);
+        uint256 nav = backstop.totalAssets();
+        uint256 paid = _buy(0.01e18);
+        // Once above the threshold the dust is marked again, together with the new BTC.
+        uint256 markAll = (0.01e18 + dust) * PRICE / 1e36 * 95 / 100;
+        assertApproxEqAbs(backstop.totalAssets(), nav - paid + markAll, 3, "dust marked again");
+        assertEq(backstop.grossAssets(), backstop.cash() + markAll, "gross counts it");
+    }
+
+    function test_dust_salesCannotLeaveDust() public {
+        _deposit(alice, 10_000e18);
+        _buy(0.01e18);
+        uint256 dust = backstop.DUST_INVENTORY();
+        musd.mint(taker, 1000e18);
+        vm.startPrank(taker);
+        musd.approve(address(backstop), type(uint256).max);
+        vm.expectRevert(abi.encodeWithSelector(IBackstop.DustRemainder.selector, dust - 1));
+        backstop.takeAuction(0.01e18 - dust + 1, type(uint256).max, taker);
+        vm.stopPrank();
+        vm.expectRevert(abi.encodeWithSelector(IBackstop.DustRemainder.selector, 1));
+        backstop.sellInventory(0.01e18 - 1, Venue.VAMM, 0);
+        // Leaving exactly DUST_INVENTORY, or nothing, is fine.
+        _take(0.01e18 - dust);
+        assertEq(backstop.inventory(), dust);
+        _take(dust);
+        assertEq(backstop.inventory(), 0);
     }
 
     // ---------------------------------------------------------------- fuzz

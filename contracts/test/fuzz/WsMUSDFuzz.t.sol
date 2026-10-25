@@ -7,7 +7,7 @@ import {IWsMUSD} from "../../src/interfaces/IWsMUSD.sol";
 import {WsMUSDBase} from "../unit/WsMUSDBase.t.sol";
 
 /// @notice Fuzzes wsMUSD rounding across deposit/mint/withdraw/redeem/in-kind and the vesting schedule, from
-/// arbitrary states mixing vesting harvests, pending yield with an instant part, and unabsorbed donations.
+/// arbitrary states mixing vesting harvests, unclaimed sMUSD yield, unabsorbed donations and failing claims.
 contract WsMUSDFuzzTest is WsMUSDBase {
     struct Scenario {
         uint256 principal;
@@ -30,6 +30,8 @@ contract WsMUSDFuzzTest is WsMUSDBase {
         if (y2 != 0) _yieldForVault(y2);
         uint256 donation = bound(s.donation, 0, 5000e18);
         if (donation != 0) musd.mint(address(ws), donation);
+        // One scenario in four runs with sMUSD's claimYield reverting (caught by wsMUSD).
+        if (s.donation % 4 == 0) smusd.setDisabled(false, false, true);
     }
 
     function _price() internal view returns (uint256 ta, uint256 ts) {
@@ -142,7 +144,7 @@ contract WsMUSDFuzzTest is WsMUSDBase {
         _scenario(s);
         lump = bound(lump, 1e18, 10_000_000e18);
         if (backRun) _protocolYield(lump);
-        // Its instant part may lift totalAssets toward the cap, so size the deposit afterwards.
+        // Size the deposit after the back-run lump (it must not move totalAssets, but keep the cap check honest).
         uint256 room = ws.maxDeposit(attacker);
         vm.assume(room >= 1e18);
         assets = bound(assets, 1e18, room);
@@ -168,18 +170,35 @@ contract WsMUSDFuzzTest is WsMUSDBase {
         assertEq(ws.totalAssets(), base + Math.mulDiv(harvested, Math.min(dt, 3 days), 3 days));
     }
 
-    function testFuzz_instantPart_followsTimeSinceLastHarvest(uint256 yieldTarget, uint256 elapsed) public {
+    function testFuzz_unclaimedYield_countsNothingUntilHarvested(uint256 yieldTarget, uint256 elapsed) public {
         _deposit(alice, 10_000e18);
         elapsed = bound(elapsed, 0, 10 days);
         skip(elapsed);
         _yieldForVault(bound(yieldTarget, 1e16, 5000e18));
         uint256 pending = ws.pendingYield();
-        uint256 instant = Math.mulDiv(pending, Math.min(elapsed, 3 days), 3 days);
-        assertEq(ws.totalAssets(), 10_001e18 + instant);
+        assertEq(ws.totalAssets(), 10_001e18, "however long since the last harvest");
 
         ws.sync();
-        assertEq(ws.totalAssets(), 10_001e18 + instant);
-        assertEq(_unvested(), pending - instant);
+        assertEq(ws.totalAssets(), 10_001e18);
+        assertEq(_unvested(), pending);
+    }
+
+    function testFuzz_claimFailure_neverLowersPriceOrBreaksPreviews(Scenario memory s, uint256 dt, uint256 shares)
+        public
+    {
+        _scenario(s);
+        skip(bound(dt, 0, 4 days));
+        smusd.setDisabled(false, false, true);
+        shares = bound(shares, 0, ws.maxRedeem(alice));
+        uint256 expected = ws.previewRedeem(shares);
+        (uint256 ta0, uint256 ts0) = _price();
+        vm.prank(alice);
+        assertEq(ws.redeem(shares, alice, alice), expected);
+        (uint256 ta1, uint256 ts1) = _price();
+        _assertPriceNotDown(ta0, ts0, ta1, ts1);
+        ws.sync();
+        assertEq(ws.totalAssets(), ta1, "sync with a failing claim realizes the preview");
+        assertGe(_held(), _accounted());
     }
 
     function testFuzz_sync_realizesExactlyThePreview(Scenario memory s, uint256 dt) public {

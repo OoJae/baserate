@@ -18,7 +18,9 @@ import {ITigrisRouter} from "../interfaces/external/ITigrisRouter.sol";
 /// Callers must measure proceeds by MUSD balance delta and enforce their own floor: the routers are called with a
 /// zero minimum so that a shortfall surfaces as the caller's custom error, inside the same transaction.
 /// BTC precompile calls per sale (each counts towards Mezo's 20-per-transaction limit, see docs/design §0.5):
-/// - CL200: `approve` 1, pool `balance0()` before and after the callback 2, router `transferFrom` 1 = 4;
+/// - CL200: `approve` 1, pool `balance0()` before and after the callback 2, router `transferFrom` 1 = 4, plus 1
+///   `approve(0)` only when the balance fell by less than was approved (a partial fill, or the router paying from or
+///   refunding its own native BTC), so no allowance outlives the sale;
 /// - vAMM: `approve` 1, router `transferFrom` 1, pool `balanceOf` before and after taking the fee 2, the fee
 ///   `transfer` to PoolFees 1 = 5.
 /// Quotes: CL200 via QuoterV2 costs 1 BTC read (the pool's `balance0()`); vAMM via `Router.getAmountsOut` costs 0.
@@ -64,6 +66,7 @@ abstract contract TigrisVenues is ILiquidationVenues {
     function _sellOnDex(Venue venue, uint256 btcIn) internal {
         if (!_dexAvailable(venue)) revert VenueUnavailable(venue);
         if (venue == Venue.CL200) {
+            uint256 nativeBefore = address(this).balance;
             IERC20(BTC).forceApprove(CL_ROUTER, btcIn);
             ICLSwapRouter(CL_ROUTER)
                 .exactInputSingle(
@@ -78,6 +81,9 @@ abstract contract TigrisVenues is ILiquidationVenues {
                         sqrtPriceLimitX96: 0
                     })
                 );
+            // A partial fill (or the router paying from its own BTC) may leave part of the approval unused: clear it
+            // whenever the balance fell by less than `btcIn`. Balance reads are not precompile calls.
+            if (address(this).balance + btcIn > nativeBefore) IERC20(BTC).forceApprove(CL_ROUTER, 0);
         } else {
             IERC20(BTC).forceApprove(ROUTER, btcIn);
             ITigrisRouter(ROUTER).swapExactTokensForTokens(btcIn, 0, _vammRoute(), address(this), block.timestamp);

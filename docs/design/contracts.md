@@ -17,18 +17,18 @@
    - The precompile itself reverts on a nil or non-positive price.
    - The 60 s staleness check is meaningful.
 5. **Precompile limit measured at exactly 20.** An eth_call loop over Skip reads succeeded at N = 20 and reverted at N = 21 on both networks. Reads count.
-6. **The mint pause must not block `addCollateral`.** Blocking it would prevent users rescuing positions. The sentinel pauses new positions, borrows and credit draws. Top-ups, repay, withdraw, unwrap and liquidation stay open.
+6. **The mint pause must not block `addCollateral`.** Blocking it would prevent users rescuing positions. Pausing stops new borrowing (including `openAndBorrow`/`openCanary`) and credit draws; collateral-only deposits and all exits stay open. For the same reason the position cap never applies to top-ups: it only stops new borrowing on a position above it.
 7. **wsMUSD vesting must be previewable.** `totalAssets()` must equal the post-`sync()` value, otherwise ERC-4626 previews over-promise. Rules:
-   - Harvested sMUSD yield vests over 3 days, with an instant part = h × min(now − lastSync, 3d) / 3d.
-   - A same-block sandwich therefore gets 0.
-   - Donations and surplus vest with 0 instant part.
+   - Unclaimed sMUSD yield counts 0. A sync claims it and it vests over 3 days with no instant part. (An earlier instant part, h × min(now − lastHarvest, 3d) / 3d, over-promised whenever `claimYield` reverted or paid short, and let same-block protocol yield move the price: audit B-3 and I-1.)
+   - A same-block sandwich therefore gets 0, and nothing that lands in a block moves the price in it.
+   - Donations and surplus vest the same way.
 8. **Vault V2 relative caps.** The default `relativeCap` is 0, which blocks every allocation. Each id needs `increaseRelativeCap(idData, 1e18)` as well as an absolute cap > 0. `enter()` allocates to the liquidity adapter without try/catch (confirmed in the deployed source).
 9. **Pinned versions:**
    - Mezo's VaultV2 matches vault-v2 tag `2026-07-08`/`2026-08-13` (comment-only diff).
    - MorphoMarketV1AdapterV2 is identical to tag `2026-08-13`; its constructor is `(parentVault, morpho, adaptiveCurveIrm)`.
    - Mezo's Morpho is the morpho-blue code under its GPL header. Tag v1.0.0 carries a BUSL header, so pin `main@9cf6d5b`.
 10. **CREATE2 deployer gotcha.** Under the Arachnid CREATE2 deployer `0x4e59…956C` (present on both networks), constructors see `msg.sender` = the deployer contract. Pass governor, admin and seeder explicitly; never use `msg.sender` as admin.
-11. **Restrict canary creation.** Use one factory with two profiles (STANDARD, CANARY) instead of a separate CanaryFactory, and restrict CANARY creation to `canaryOperator`. Open canaries at LLTV − 0.25 pt would let anyone plant bad-debt seeds in a market lenders fund.
+11. **Restrict canary creation.** Use one factory with two profiles (STANDARD, CANARY) instead of a separate CanaryFactory, and restrict CANARY creation to `canaryOperator`. Open canaries at LLTV − 0.25 pt would let anyone plant bad-debt seeds in a market lenders fund. Granting the role is a 48 h timelocked raise; a revoked operator's CANARY account cannot borrow and withdraws against the STANDARD ceiling.
 12. **Fee recipient must be settable.** The FeeRouter only exists in Wave 2, so `feeRecipient` is changeable through a 48 h timelock. The fee rate stays a constant 10 bps.
 13. **Oracle discount disclosure.** The MUSD-leg clamp to [1.00, 1.02] undervalues collateral by about 1.1% at today's 0.989. Borrowers are liquidated slightly earlier than at the true BTC/MUSD price. This is conservative, but disclose it.
 14. **Deploy-gas limit.** The block gas limit is 10M on both networks. Each deploy transaction (the factory with embedded brBTC and implementation) must stay under about 8M. Use `--gas-estimate-multiplier 110`.
@@ -170,23 +170,20 @@ Global rules:
 ### 3.2 WsMUSD (immutable ERC-4626 over sMUSD; asset MUSD; 18 decimals; offset 0)
 - **Immutables:** `SMUSD`, `CAP_ADMIN` (the governor Safe, passed explicitly).
 - **Constants:** `VESTING = 3 days`, `MIN_HARVEST = 1e15`, `CAP_TIMELOCK = 72 hours`.
-- **Storage:** `depositCap`, `pendingCap`, `pendingCapAt`, `_stored`, `_unvested`, `uint64 _lastSync`, `uint64 _periodEnd`.
+- **Storage:** `depositCap`, `pendingCap`, `pendingCapAt`, `_stored`, `_unvested`, `uint64 _lastSync`, `uint64 _periodEnd`, `uint64 _lastHarvest` (informational: the last sync whose claim did not revert).
 - **Functions** (each ERC-4626 entry point runs `nonReentrant`, then `_sync()`, then OZ logic):
   - `deposit`, `mint`, `withdraw`, `redeem`;
   - `depositWithPermit(assets, receiver, deadline, v, r, s)`: permit in try/catch, then proceed if the allowance suffices;
   - `sync() returns (uint256 harvested)`, permissionless;
-  - `redeemInKind(shares, receiver, owner) returns (uint256 smusdOut, uint256 musdOut)`: realizes vesting only and makes no sMUSD deposit, withdraw or claim calls. Pays sMUSD 1:1, plus MUSD for any shortfall;
+  - `redeemInKind(shares, receiver, owner) returns (uint256 smusdOut, uint256 musdOut)`: realizes vesting only and makes no sMUSD deposit, withdraw or claim calls. Pays `previewRedeem(shares)` in sMUSD 1:1, plus MUSD for any shortfall;
   - `pendingYield() view` = `claimableYield(this) + balanceOf(this) * (yieldIndex − supplyYieldIndex(this)) / 1e18`, exactly sMUSD's `_updateYieldFor`;
   - `vestingState() view`;
   - `submitCapRaise(uint256 newCap)` (`CAP_ADMIN`, newCap > cap), `acceptCapRaise()` (anyone after 72 h), `revokeCapRaise()` (`CAP_ADMIN`). There is no lowering and no pause.
-- **`_previewSync()`, shared by `totalAssets()` and `_sync()`:**
-  1. vested = `_unvested × (min(now, periodEnd) − lastSync) / (periodEnd − lastSync)`.
-  2. If `pendingYield ≥ MIN_HARVEST`: h = pending, instant = h × min(now − lastSync, VESTING) / VESTING.
-  3. `totalAssets = _stored + vested + instant`.
+- **`totalAssets()`** = `_stored + vested`, with vested = `_unvested × (min(now, periodEnd) − lastSync) / (periodEnd − lastSync)`. Unclaimed sMUSD yield counts 0.
 - **`_sync()` mutations:**
-  1. Run the preview steps.
-  2. `try SMUSD.claimYield()`.
-  3. Compute surplus = (sMUSD balance + MUSD balance) − (`_stored` + `_unvested`) − h. Absorb it into `_unvested` with 0 instant part if ≥ `MIN_HARVEST`. This covers donations, withdraw auto-claims and PCV distributions.
+  1. Move vested into `_stored`.
+  2. If `pendingYield ≥ MIN_HARVEST`: `try SMUSD.claimYield()`. `lastHarvest` advances unless the claim reverts.
+  3. Compute added = (sMUSD balance + MUSD balance) − (`_stored` + `_unvested`): the harvest plus any surplus (donations, withdraw auto-claims, PCV distributions). Absorb it into `_unvested` if ≥ `MIN_HARVEST`. Whatever the claim did, `totalAssets()` is unchanged in this block.
   4. Re-deposit idle MUSD ≥ `MIN_HARVEST` with `try SMUSD.deposit`.
   5. Set `periodEnd = now + VESTING` only when a new amount was added.
   6. Set `lastSync = now`.
@@ -194,7 +191,7 @@ Global rules:
 - **`_transferOut`:** pay from idle MUSD first. Otherwise `SMUSD.withdraw(assets − idle)` (skip zero amounts; any auto-claimed extra becomes surplus), then `_stored −= assets`.
 - `maxDeposit` = `cap − totalAssets` (floored at 0). `maxMint` follows from it.
 - **Seed:** the deploy script deposits 1 MUSD to `0x…dEaD` in the same broadcast. The inflation attack is already moot, because internal accounting means donations never move the price instantly.
-- **Events:** `Synced(harvested, instant, surplus, stored, unvested, periodEnd)`, `RedeemedInKind`, `CapRaiseSubmitted`, `CapRaised`, `CapRaiseRevoked`.
+- **Events:** `Synced(harvested, instant, surplus, stored, unvested, periodEnd)` (`instant` is always 0, kept for ABI compatibility), `RedeemedInKind`, `CapRaiseSubmitted`, `CapRaised`, `CapRaiseRevoked`.
 - **External calls:**
   - sMUSD (testnet `0x6f46…8e16`, mainnet `0xb4D4…51CC`): `deposit`, `withdraw`, `claimYield`, `claimableYield`, `yieldIndex`, `supplyYieldIndex`, `balanceOf`, `transfer`;
   - MUSD (testnet `0x1189…c503`, mainnet `0xdD46…F186`): `transferFrom`, `approve`, `permit`.
@@ -243,27 +240,28 @@ Global rules:
 | Function | Behaviour |
 |---|---|
 | `openAndBorrow(uint256 musdOut, uint256 maxLtvBps, address receiver) payable` | If value > 0: `wrap{value}`, `approve(MORPHO)`, `supplyCollateral(P, v, this, "")`. If musdOut > 0, run the borrow path |
-| borrow path (internal) | `require(!borrowPaused)`. fee = ceil(musdOut × 10 / 1e4) if feeRecipient ≠ 0. `MORPHO.borrow(P, musdOut + fee, 0, this, this)`, then transfer musdOut to receiver and fee to feeRecipient. Checks below |
+| borrow path (internal) | `require(!borrowPaused)`; receiver ≠ 0 and ≠ the clone (`InvalidReceiver`). fee = ceil(musdOut × 10 / 1e4) if feeRecipient ≠ 0. `MORPHO.borrow(P, musdOut + fee, 0, this, this)`, then transfer musdOut to receiver and fee to feeRecipient. Checks below |
 | `borrow(musdOut, maxLtvBps, receiver)` | Borrow path only |
-| `addCollateral() payable` | Wrap and supply. Not pausable. Position cap applies |
-| `supplyIdle(musdOut, maxLtvBps, receiver)` | Wraps the clone's own native balance (come-back path), supplies it, borrows optionally |
+| `addCollateral() payable` | Wrap and supply. Not pausable, never capped |
+| `supplyIdle(musdOut, maxLtvBps, receiver)` | Wraps the clone's own native balance (come-back path), supplies it, borrows optionally. Without a borrow it supplies everything; with a borrow only the room under the position cap, leaving the rest idle and rescuable |
 | `repay(uint256 assets)` | Pulls MUSD from the owner. If assets ≥ debt, repays by shares. 0 precompile calls |
 | `repayAndWithdraw(address btcTo)` and `repayAndWithdrawWithPermit(maxRepay, deadline, v, r, s, btcTo)` | `MORPHO.accrueInterest(P)`; debt = `borrowShares.toAssetsUp(tBA, tBS)` (SharesMathLib); pull exactly the debt from the owner; `repay(P, 0, shares, this, "")`; `withdrawCollateral(P, coll, this, this)`; `brBTC.unwrap(coll, btcTo)`. **No oracle call**, so it works while Skip is down |
-| `withdrawCollateral(uint256 amt, address btcTo)` | If debt > 0, applies the LTV ceiling check |
+| `withdrawCollateral(uint256 amt, address btcTo)` | If debt > 0, applies the LTV ceiling check (for a CANARY account whose owner lost the operator role, the lower of the CANARY and STANDARD ceilings, via `riskParams`). `btcTo` ≠ the clone |
 | `borrowByModule(uint256 musdOut, uint256 maxLtvBps, address receiver)` | Wave 2 hook. Requires `moduleEnabled[msg.sender] && factory.isApprovedModule(msg.sender) && !creditPaused && !borrowPaused`. Same checks |
 | `setModule(address, bool)` | `onlyOwner`. Enabling requires factory approval |
 | `rescueNative(address to)` | `onlyOwner`. Sends idle native BTC |
+| `sweep(address token, address to) returns (uint256)` | `onlyOwner`. Sends the clone's whole balance of `token` (MUSD sent to it directly, for example). bcBTC cannot leave this way: its gate only allows clone → Morpho |
 | `receive() payable` | Accepts BTC from brBTC unwraps and CollSurplusPool |
 
 **Borrow-path checks** (two Skip calls in total, ours plus Morpho's):
 - `debt × 1e4 ≤ (coll × ORACLE.price() / 1e36) × min(maxLtvBps, ceilingBps[profile])`;
-- position collateral ≤ `positionCap[profile]`;
+- position collateral ≤ `positionCap[profile]` (checked on the borrow path only; supplies are never capped);
 - after the borrow, `market.totalBorrowAssets ≤ globalBorrowCap`;
-- the clone ends every call with 0 MUSD and 0 brBTC.
+- the clone ends every call with 0 MUSD and 0 brBTC (no receiver may be the clone itself).
 
-**BorrowAccount events:** `Opened`, `Borrowed(owner, musdOut, fee, debt, ltvBps)`, `Repaid`, `Exited(repaid, btcOut)`, `CollateralAdded`, `CollateralWithdrawn`, `ModuleSet`.
+**BorrowAccount events:** `Opened`, `Borrowed(owner, musdOut, fee, debt, ltvBps)`, `Repaid`, `Exited(repaid, btcOut)`, `CollateralAdded`, `CollateralWithdrawn`, `ModuleSet`, `NativeRescued`, `Swept`.
 
-**BorrowAccount errors:** `Unauthorized`, `LtvTooHigh(uint256 ltvBps, uint256 limitBps)`, `PositionCapExceeded`, `GlobalCapExceeded`, `BorrowPaused`, `ModuleNotApproved`.
+**BorrowAccount errors:** `Unauthorized`, `LtvTooHigh(uint256 ltvBps, uint256 limitBps)`, `PositionCapExceeded`, `GlobalCapExceeded`, `BorrowPaused`, `ModuleNotApproved`, `InvalidReceiver`.
 
 **Exact Morpho ABI used:**
 - `supplyCollateral(MarketParams, uint256, address, bytes)`;
@@ -279,27 +277,28 @@ Global rules:
   - Deploys `BRBTC = new BrBTC(morpho)` and `IMPLEMENTATION = new BorrowAccount(...)`.
   - Does not create the market; the script does.
 - **Immutables:** the above, plus `MARKET_ID`.
-- **Constants:** `ORIGINATION_FEE_BPS = 10`, `TIMELOCK = 48 hours`, `MAX_CEILING_BPS = lltvBps − 25`.
+- **Constants:** `ORIGINATION_FEE_BPS = 10`, `TIMELOCK = 48 hours`, `EXECUTION_WINDOW = 14 days`, `MAX_CEILING_BPS = lltvBps − 25`.
 - **Storage:**
   - roles: `governor`, `pendingGovernor`, `sentinel`;
   - risk: `globalBorrowCap`, `limits[Profile]{uint128 positionCap; uint16 ceilingBps}`, `borrowPaused`, `creditPaused`;
   - `feeRecipient`;
   - registries: `isApprovedModule`, `isCanaryOperator`, `isAccount`, `profileOf`;
-  - `mapping(bytes => uint256) executableAt` (Vault V2-style timelock).
+  - the timelock queue (Vault V2-style, keyed by exact calldata): entries are stored under the current epoch of the parameter they change (the selector, plus the first argument for `setLimits`, `setModuleApproval`, `setCanaryOperator` and `setFeeRecipient`), and every instant decrease bumps that epoch, so a cut invalidates all raises of the same parameter queued before it. `executableAt(bytes)` is 0 unless the entry is live.
 - **User functions:**
   - `openAndBorrow(musdOut, maxLtvBps) payable returns (address account)`;
   - `openCanary(musdOut, maxLtvBps) payable`: `isCanaryOperator` only;
   - `createAccount(address owner) returns (address)`: permissionless, STANDARD profile;
   - `accountOf(owner, profile) view returns (address, bool deployed)`;
-  - `riskParams(address account) view`: one call returning limits, cap, pause flags and fee recipient;
+  - `riskParams(address account) view`: one call returning limits, cap, pause flags and fee recipient (for a CANARY account whose owner lost the operator role, the lower of the two ceilings);
   - `comeBack(bytes claimSig, uint256 deadline, uint256 musdOut, uint256 maxLtvBps) returns (address account, uint256 claimed)`. Calls `BOS.claimCollateralWithSignature(msg.sender, account, sig, deadline)`, measures the balance delta, deploys the clone if needed, then calls `supplyIdle`. It is in Wave 1 code and fork-tested in Wave 2; BOS may be 0, which disables it.
 - **Governance functions:**
-  - `submit(bytes)` (governor), `revoke(bytes)` (governor or sentinel);
-  - `setGlobalBorrowCap` and `setLimits`: decreases are instant (governor or sentinel); increases execute after 48 h (anyone may call); the ceiling must stay ≤ `MAX_CEILING_BPS`;
+  - `submit(bytes)` (governor), `revoke(bytes)` (governor or sentinel); a queued call is executable from 48 h after submission until `EXECUTION_WINDOW` after that;
+  - `setGlobalBorrowCap` and `setLimits`: decreases are instant (governor or sentinel) and invalidate queued raises of the same parameter (`PendingInvalidated`); increases execute after 48 h (anyone may call); the ceiling must stay ≤ `MAX_CEILING_BPS`;
   - `setFeeRecipient` (timelocked);
   - `setModuleApproval` (add timelocked; remove instant);
+  - `setCanaryOperator` (add timelocked; remove instant, governor or sentinel);
   - `setPaused(borrow, credit)`: pausing by governor or sentinel; unpausing by governor only;
-  - `setCanaryOperator`, `setSentinel`, two-step governor transfer.
+  - `setSentinel`, two-step governor transfer.
 
 ### 3.5 M1 market
 
@@ -348,13 +347,17 @@ Fees stay 0, as in the USDC vault.
 - `allocate` deposits `min(assets, wsMUSD.maxDeposit(this))` and leaves the rest idle in the adapter.
 - `deallocate` uses idle first.
 - `realAssets` = `previewRedeem(shares)` + idle; change = new − old allocation.
+- `availableLiquidity` = idle + `wsMUSD.maxWithdraw(this)`. It is optimistic: a view cannot see an sMUSD withdraw that reverts, so the allocator's exits do not rely on it.
+- Rescue (audit B-2): the vault's curator calls `submitRescue()`; after `RESCUE_TIMELOCK` (72 h, revocable by the curator or a sentinel) the curator or a sentinel calls `rescue()`. It first tries `wsMUSD.redeem(all shares)` into idle MUSD with a guaranteed 3M-gas stipend; if that works nothing leaves the adapter. Only if it reverts do the wsMUSD shares go in kind to the vault's owner for manual unwinding (`redeemInKind` to sMUSD), and the adapter keeps later allocations idle. The vault books the shares' value as a loss until the owner returns it, so the sentinel should also cut the adapter's cap to 0.
 - Reentrancy rules: follow vault-v2's adapter docs (commits from 2026-10-12 to 10-15).
 
 **BaserateAllocator** (permissionless; holds the allocator role):
-- `rebalance()` keeps M1 idle ≥ max(2k MUSD, 15% of M1 supply).
-- Moves the excess only while M1 supply APY > wsMUSD 7-day APY (ring buffer of `convertToAssets(1e18)` checkpoints).
-- M1 supply APY = `IRM.borrowRateView × utilization × (1 − fee)`.
-- At most 1k MUSD per call, with a 1 h cooldown.
+- `rebalance()` keeps M1 idle ≥ max(2k MUSD, 15% of M1 supply). Buffer top-ups ignore the cooldown and do not start it.
+- Moves the excess only when two views agree (audit B-1). The direction comes from 7-day trailing realized APYs: M1's supply-share price against wsMUSD's `convertToAssets(1e18)`, both in the hourly checkpoint ring buffer, over the same window. The size is bisected on the spot model, M1 supply APY = `IRM.borrowRateView × utilization × (1 − fee)`, so the post-move rate still beats (or trails) wsMUSD's.
+- No rate-driven move when M1 was touched earlier in the block (Morpho `lastUpdate == now`): its totals may be a transient supply, repay or borrow.
+- `TO_LIQUIDITY` is sized on a conservative liquidity: vMUSD's M1 position plus the lowest external M1 liquidity (supply − borrow − vMUSD) of now and of the last day's checkpoints. A checkpoint taken in a block where M1 was already touched never records more than the previous one.
+- At most 1k MUSD per call, with a 1 h cooldown between rate-driven moves.
+- `withdraw`/`redeem` for vMUSD holders: idle and wsMUSD first, only the shortfall from M1. If the wsMUSD leg reverts, retry M1-first, so the M1-backed share always exits without the force-deallocate penalty.
 
 **FlashLiquidator:**
 - `liquidate(borrower, seizedAssets, venue, minProfit)` calls `Morpho.liquidate(M1, b, seized, 0, data)`.
@@ -363,26 +366,30 @@ Fees stay 0, as in the USDC vault.
   - CL200 via `exactInputSingle(tickSpacing 200)` after `BTC.approve(router)`;
   - the vAMM via `Router.swapExactTokensForTokens(…, [Route(BTC, MUSD, false, factory)])`.
 - Requires `out ≥ btc × skip × (1 − MAX_IMPACT)`, approves Morpho, and pays profit to the caller. Needs `receive()`.
+- Forwards to the caller only the native BTC its own liquidation left behind (balance change over the call, e.g. a router refund or a CL partial fill). If the caller cannot take native BTC, the liquidation still succeeds and the BTC stays for the permissionless `sweepNative(to)`, so donated BTC can never block a liquidation.
 - Budget: about 8 precompile calls (Morpho's oracle call 1, our Skip read 1, BTC approve, transferFrom and two pool `balanceOf`).
 
 **Backstop (bMUSD, ERC-4626; idle MUSD held in wsMUSD):**
 - `buyCollateral(minOut) payable` pays `btc × skip × (1 − incentive/2)`.
-- NAV marks BTC inventory at Skip × 0.95 and excludes unvested premium.
-- `requestRedeem(shares)` / `claimRedeem(id)` after 7 days pay at min(NAV at request, NAV at claim).
+- NAV marks BTC inventory at Skip × 0.95 and excludes unvested premium. Inventory below `DUST_INVENTORY` (1e13 wei, about 1 MUSD) counts as 0, so dust never puts the oracle on the exit path; sales must take all the inventory or leave at least that much.
+- Deposits and mints are priced at book + unvested (gross), not at NAV: each deposit joins the book and the unvested premium pro rata, so a late depositor pays for the premium still vesting and shares the next loss pro rata.
+- `requestRedeem(shares)` / `claimRedeem(id)` after 7 days pay at min(NAV at request, NAV at claim). When cash is short, a claim pays all the cash, burns the matching fraction of the shares and keeps the rest queued. During an oracle outage the owner may `claimRedeemWithoutOracle(id)`, which values the inventory at 0 for that claim only.
 - Premium vests over 7 days; losses are recognised instantly.
 - Inventory is sold through a Dutch auction (Skip × 1.00 decaying to × 0.95 over 6 h) and bounded keeper sales.
 - The sentinel can pause deposits only.
 
 **FeeRouter (immutable 40/40/20):**
-- `distribute()` sends 40% to `sMUSD.receiveProtocolYield(x)`, skipping amounts below `supply/1e18 + 1`.
-- 40% goes to `BribeVotingReward.notifyRewardAmount(MUSD, x)` on the CL200 and vAMM bribes when `PoolsVoter.isAlive(gauge)`; otherwise to sMUSD.
-- 20% goes to the treasury.
+- `distribute()` splits new fees (the balance minus recorded carries) and sends 40% to `sMUSD.receiveProtocolYield(x)`. Amounts below sMUSD's `AmountTooSmall` floor (`ceil(supply/1e18)`) are carried to the next call.
+- sMUSD is never trusted to succeed. Its reads are low-level calls that need 32 bytes back, and the donation runs with a 1M-gas stipend (a real one costs about 63k). It counts only if exactly `x` was pulled. On failure the approval is revoked and `x` is carried, while the treasury and bribe shares are still paid. Once a failure streak spans two epoch flips (7 to 14 days), the sMUSD share and its carry go to the treasury; one successful donation ends the streak.
+- 40% goes to `BribeVotingReward.notifyRewardAmount(MUSD, x)` on the CL200 and vAMM bribes when `PoolsVoter.isAlive(gauge)`; otherwise to sMUSD. A non-bool or empty `isAlive` answer counts as dead.
+- In the last hour of an epoch (`timestamp % 7 days > 7 days − 1 h`, when the Voter only accepts whitelisted veNFTs), every live gauge's share is carried. A gauge whose bribe has `totalSupply() == 0` votes also has its share carried. A carry is added to the same gauge's next bribe and is never split again. If the gauge is killed in the meantime, the carry goes to sMUSD.
+- 20% of new fees goes to the treasury.
 - **Verify:** testnet gauge `0x72D8…Cd2c` and bribe `0x75b6…0ee1` (alive, MUSD whitelisted on PoolsVoter `0x263F…`).
 
 **RiskLens (views):**
-- `oracle.status`, M1 state, caps, backstop solvency.
-- Depth: QuoterV2 `0x4e56…` on mainnet; `Router.getAmountsOut` on testnet, where QuoterV2 is absent.
-- CL10 `observe` TWAP; `SortedTroves.getLast/getPrev` and `TroveManager.getCurrentICR`.
+- `oracle.status`, M1 state, caps, backstop solvency. Free MUSD is the backstop's `availableCash()`, so MUSD reserved for queued exits is excluded, and BTC held is its `inventory()`, so donated BTC is excluded. Both fall back to raw balances for an address without those views.
+- Depth: QuoterV2 `0x4e56…` on mainnet; `Router.getAmountsOut` on testnet, where QuoterV2 is absent. A Skip answer above the oracle's `MAX_SKIP_ANSWER` gives no reference price, and the snapshot does not revert.
+- CL10 `observe` TWAP; `SortedTroves.getLast/getPrev` and `TroveManager.getCurrentICR`. A trove with ICR below MCR (110%) is skipped by redemptions. It is still listed, but its debt does not count towards later troves' `debtAhead`.
 
 **CreditLineModule:**
 - Terms: `{maxOutstanding, periodLimit, period, maxLtvBps, expiry, recipient}`.
@@ -420,19 +427,19 @@ Native value transfers are EVM statedb operations, not precompile calls [I]. A l
 1. wsMUSD: sMUSD balance + MUSD balance ≥ `totalAssets()`.
 2. wsMUSD share price is non-decreasing.
 3. wsMUSD previews equal executed amounts.
-4. A donation in the same block does not change wsMUSD `totalAssets`.
+4. A donation in the same block, including sMUSD protocol yield, does not change wsMUSD `totalAssets`.
 5. `brBTC.balance ≥ totalSupply`.
 6. `brBTC.balanceOf(MORPHO)` = Σ M1 collateral.
 7. Every M1 collateral holder `isAccount`.
 8. Clones hold 0 MUSD and 0 brBTC after every call.
 9. Post-action LTV ≤ ceiling.
 10. After any borrow, `totalBorrowAssets` ≤ the global cap.
-11. Position collateral ≤ cap after every supply.
+11. No borrow succeeds while position collateral > cap; collateral top-ups always succeed.
 12. Non-owners cannot change a position.
 13. With the oracle reverting, `repayAndWithdraw` still succeeds.
 14. (W2) Credit outstanding ≤ allowance, and revoked spenders cannot draw.
 15. (W2) Backstop share value changes only on realized PnL.
-16. (W2) Allocator moves stay within caps.
+16. (W2) Allocator moves stay within caps, never pull M1 below the buffer, and never come from M1 state touched earlier in the block.
 
 **Fuzz targets:**
 - oracle math: expo range, clamps, the deviation boundary;
@@ -449,9 +456,9 @@ Native value transfers are EVM statedb operations, not precompile calls [I]. A l
 
 **Roles:**
 - Governor = Safe 2-of-3, used for timelocked raises.
-- Sentinel = Safe: pause new borrows and credit, cut caps, remove modules, revoke pending raises, and (Vault V2) deallocate or decrease caps. It can never block repay, withdraw, unwrap, redeem, liquidation or the backstop queue.
+- Sentinel = Safe: pause new borrows and credit, cut caps (which also cancels raises of the same parameter queued earlier), remove modules and canary operators, revoke pending raises, and (Vault V2) deallocate or decrease caps. It can never block repay, top-ups, the full exit, unwrap, redeem, liquidation or the backstop queue; partial withdrawals stay open within the LTV ceiling.
 - On testnet the governor may be the deployer EOA during Wave 1, labelled as such.
-- Timelocks: 48 h for factory, Vault V2 and module approvals; 72 h for wsMUSD cap raises. Decreases are instant.
+- Timelocks: 48 h for factory (including canary-operator grants), Vault V2 and module approvals; 72 h for wsMUSD cap raises. Decreases are instant.
 
 **Reentrancy:**
 - Transient guards on all entry points; CEI in `unwrap`.
@@ -471,9 +478,9 @@ Native value transfers are EVM statedb operations, not precompile calls [I]. A l
 | Caps sized to depth | factory caps, keeper cap script, sentinel cuts |
 | vMUSD deposit DoS | wsMUSD has no pause and a raise-only 250k cap; the adapter deposits `min(maxDeposit)`; id caps follow vault semantics; `maxRate` set in configuration step 4 |
 | Fees | performance fee 0 |
-| Backstop economics | 7-day queue at min(NAV), vested premium, 0.95 mark, FlashLiquidator as the primary path |
+| Backstop economics | 7-day queue at min(NAV) with partial claims, vested premium (new deposits buy their share of it at full value), 0.95 mark, FlashLiquidator as the primary path |
 | Signed claims | `comeBack` pays only the caller's own clone, with borrower = `msg.sender` |
-| sMUSD upgrade risk | `redeemInKind` makes no sMUSD state calls; keeper watches `Upgraded` and `StrategyUpdated`, then the sentinel cuts caps |
+| sMUSD upgrade risk | `redeemInKind` makes no sMUSD state calls; the allocator's exit retries M1-first when wsMUSD cannot pay; the adapter's timelocked rescue moves vMUSD's wsMUSD shares in kind to the vault owner only if wsMUSD's redeem fails; keeper watches `Upgraded` and `StrategyUpdated`, then the sentinel cuts caps |
 | Oracle liveness | 60 s Skip bound, band only while Pyth ≤ 3,900 s, invariant 13 |
 | Yield sniping | the vesting rule in §0.7 |
 | ERC-2771 | absent; MezoForwarder is ECDSA-only, so contracts cannot be spoofed |
@@ -535,8 +542,8 @@ and again with `--verifier sourcify`.
 **Wave 2 order:**
 - **Nov 2:** testnet submits timelocked operations: `setFeeRecipient` → FeeRouter, `setModuleApproval(CreditLineModule)`, limit raises.
 - **Nov 6–8, mainnet (31612):**
-  1. Oracle, wsMUSD, FeeRouter.
-  2. Factory with `feeRecipient` = FeeRouter in the constructor (no timelock needed), then M1 at 0.86 / IRM `0x3760…`.
+  1. FeeRouter (`DeployPeriphery.s.sol` with `TREASURY`; with no factory in the registry it deploys only the router).
+  2. Oracle, wsMUSD, factory and M1 at 0.86 / IRM `0x3760…` with `Deploy.s.sol`. On 31612 it requires `GOVERNOR` (the Safe), `SENTINEL` and `FEE_RECIPIENT` (the FeeRouter, passed to the constructor so no timelock is needed), and none of them may be the deployer. `DeployPeriphery.s.sol` with `FEE_ROUTER` then adds the RiskLens and checks `factory.feeRecipient() == feeRouter`. Both scripts write the registry only on `--broadcast` and merge into it.
   3. vMUSD configuration (§4).
   4. Allocator, Backstop, FlashLiquidator, RiskLens, CreditLineModule.
   5. Submit the module approval.

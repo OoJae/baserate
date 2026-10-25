@@ -74,7 +74,27 @@ export function describeCustomError(
       return {
         title: 'Position cap reached',
         message:
-          'This would take the position above the per-position collateral cap. Use less BTC.',
+          'Borrowing needs the position to stay within the per-position collateral cap. Borrow against less BTC. Adding collateral without borrowing is always allowed.',
+      }
+    case 'InvalidReceiver':
+      return {
+        title: 'Invalid receiver',
+        message: 'Funds cannot be sent to the borrow account itself. Choose your wallet instead.',
+      }
+    case 'NotCanaryOperator':
+      return {
+        title: 'Not a canary operator',
+        message: 'Only canary operators can borrow on canary accounts.',
+      }
+    case 'DustRemainder':
+      return {
+        title: 'Would leave dust',
+        message: 'Take the whole backstop inventory, or leave a larger amount behind.',
+      }
+    case 'NotRequestOwner':
+      return {
+        title: 'Not your exit request',
+        message: 'Only the owner of this exit request can claim it without the oracle.',
       }
     case 'GlobalCapExceeded':
       return {

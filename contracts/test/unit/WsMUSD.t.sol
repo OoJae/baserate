@@ -96,7 +96,10 @@ contract WsMUSDTest is WsMUSDBase {
         _deposit(alice, 1000e18);
         _yieldForVault(30e18);
         uint256 pending = ws.pendingYield();
-        skip(3 days); // the whole harvest window has elapsed: pending yield now counts in full
+        skip(3 days);
+        assertEq(ws.totalAssets(), 1001e18, "unclaimed yield counts nothing, however long it waits");
+        ws.sync();
+        skip(3 days); // the harvest vests in full
 
         assertEq(ws.totalAssets(), 1001e18 + pending);
         vm.prank(alice);
@@ -247,37 +250,38 @@ contract WsMUSDTest is WsMUSDBase {
         assertEq(ws.totalAssets(), ta0 + pending);
     }
 
-    function test_instantPart_isProRataToTimeSinceLastHarvest() public {
+    function test_unclaimedYield_countsNothingUntilHarvested_thenVests() public {
         _deposit(alice, 1000e18);
         skip(1 days);
         _yieldForVault(30e18);
         uint256 pending = ws.pendingYield();
-        uint256 ta = ws.totalAssets();
-        assertEq(ta, 1001e18 + pending / 3);
+        assertGt(pending, 29e18);
+        assertEq(ws.totalAssets(), 1001e18, "no instant credit for unclaimed yield");
 
         ws.sync();
-        assertEq(ws.totalAssets(), ta, "sync realizes exactly the preview");
-        assertEq(_stored(), ta);
-        assertEq(_unvested(), pending - pending / 3);
+        assertEq(ws.totalAssets(), 1001e18, "sync realizes exactly the preview");
+        assertEq(_stored(), 1001e18);
+        assertEq(_unvested(), pending);
         assertEq(ws.lastHarvest(), block.timestamp);
 
-        skip(3 days);
+        skip(1 days);
+        assertEq(ws.totalAssets(), 1001e18 + pending / 3);
+        skip(2 days);
         assertEq(ws.totalAssets(), 1001e18 + pending);
     }
 
-    function test_instantPart_isFullAfterAWholeVestingWindow() public {
+    function test_unclaimedYield_longAfterLastHarvest_stillVestsFromHarvest() public {
         _deposit(alice, 1000e18);
         skip(5 days);
         _yieldForVault(30e18);
         uint256 pending = ws.pendingYield();
-        assertEq(ws.totalAssets(), 1001e18 + pending);
+        assertEq(ws.totalAssets(), 1001e18, "however old the last harvest, nothing counts instantly");
 
-        (,,, uint64 periodEndBefore) = ws.vestingState();
         ws.sync();
         (uint256 stored, uint256 unvested,, uint64 periodEnd) = ws.vestingState();
-        assertEq(stored, 1001e18 + pending);
-        assertEq(unvested, 0);
-        assertEq(periodEnd, periodEndBefore, "nothing new to vest: period unchanged");
+        assertEq(stored, 1001e18);
+        assertEq(unvested, pending);
+        assertEq(periodEnd, block.timestamp + 3 days, "a new 3-day period");
     }
 
     function test_sync_newYieldRestartsPeriodForRemainder() public {
@@ -287,15 +291,15 @@ contract WsMUSDTest is WsMUSDBase {
         ws.sync();
         skip(1 days);
         uint256 taMid = ws.totalAssets();
+        assertEq(taMid, 1001e18 + first / 3);
 
         _yieldForVault(15e18);
         uint256 second = ws.pendingYield();
-        uint256 instant = second / 3; // one day since the last harvest
-        assertEq(ws.totalAssets(), taMid + instant);
+        assertEq(ws.totalAssets(), taMid, "unclaimed: 0");
         ws.sync();
-        assertEq(ws.totalAssets(), taMid + instant);
+        assertEq(ws.totalAssets(), taMid);
         (, uint256 unvested,, uint64 periodEnd) = ws.vestingState();
-        assertEq(unvested, (first - first / 3) + (second - instant));
+        assertEq(unvested, (first - first / 3) + second);
         assertEq(periodEnd, block.timestamp + 3 days);
         skip(3 days);
         assertEq(ws.totalAssets(), 1001e18 + first + second);
@@ -307,12 +311,9 @@ contract WsMUSDTest is WsMUSDBase {
         _yieldForVault(30e18);
         musd.mint(address(ws), 10e18); // direct donation
         uint256 pending = ws.pendingYield();
-        uint256 instant = pending / 3;
 
         vm.expectEmit(address(ws));
-        emit IWsMUSD.Synced(
-            pending, instant, 10e18, 1001e18 + instant, pending - instant + 10e18, uint64(block.timestamp + 3 days)
-        );
+        emit IWsMUSD.Synced(pending, 0, 10e18, 1001e18, pending + 10e18, uint64(block.timestamp + 3 days));
         vm.prank(makeAddr("anyone"));
         assertEq(ws.sync(), pending);
     }
@@ -553,24 +554,27 @@ contract WsMUSDTest is WsMUSDBase {
         uint256 expected = ws.previewRedeem(1000e18);
         vm.prank(alice);
         (uint256 smusdOut, uint256 musdOut) = ws.redeemInKind(1000e18, alice, alice);
-        assertEq(smusdOut + musdOut, expected, "no instant part pending: in-kind == redeem value");
+        assertEq(smusdOut + musdOut, expected, "in-kind == redeem value");
         assertEq(smusd.balanceOf(alice), smusdOut);
     }
 
-    function test_redeemInKind_forgoesUnclaimedInstantYieldAndNeverLowersPrice() public {
+    function test_redeemInKind_paysRedeemValueAndNeverLowersPrice() public {
         _deposit(alice, 1000e18);
         _deposit(bob, 1000e18);
-        skip(1 days);
-        _yieldForVault(30e18); // pending, with an instant part, not yet claimed
-        uint256 instant = ws.pendingYield() / 3;
+        _yieldForVault(30e18);
+        ws.sync();
+        skip(1 days); // mid-vesting
+        _yieldForVault(10e18); // unclaimed: counted by nobody
         uint256 taBefore = ws.totalAssets();
         uint256 supplyBefore = ws.totalSupply();
         uint256 redeemValue = ws.previewRedeem(1000e18);
+        (uint256 sPreview,) = ws.previewRedeemInKind(1000e18);
+        assertEq(sPreview, redeemValue);
 
         vm.prank(alice);
-        (uint256 smusdOut,) = ws.redeemInKind(1000e18, alice, alice);
-        assertLt(smusdOut, redeemValue, "in-kind forgoes its share of unclaimed yield");
-        assertApproxEqAbs(redeemValue - smusdOut, instant * 1000e18 / supplyBefore, 1);
+        (uint256 smusdOut, uint256 musdOut) = ws.redeemInKind(1000e18, alice, alice);
+        assertEq(smusdOut, redeemValue, "in kind pays exactly the redeem value");
+        assertEq(musdOut, 0);
 
         uint256 taAfter = ws.totalAssets();
         uint256 supplyAfter = ws.totalSupply();
@@ -685,6 +689,7 @@ contract WsMUSDTest is WsMUSDBase {
     function test_maxDeposit_isZeroOnceYieldPushesAssetsAboveCap() public {
         _deposit(alice, CAP - SEED);
         _yieldForVault(100e18);
+        ws.sync();
         skip(4 days);
         assertGt(ws.totalAssets(), CAP);
         assertEq(ws.maxDeposit(alice), 0);
@@ -736,6 +741,71 @@ contract WsMUSDTest is WsMUSDBase {
         assertGt(musd.balanceOf(address(ws)), 0);
         ws.sync();
         assertGt(_unvested(), 0);
+    }
+
+    function test_claimYieldRevert_keepsPriceAndPreviews_andLastHarvest() public {
+        _deposit(alice, 10_000e18);
+        _yieldForVault(30e18);
+        ws.sync();
+        skip(1 days);
+        _yieldForVault(20e18);
+        uint64 harvestedAt = ws.lastHarvest();
+        skip(1 days);
+        smusd.setDisabled(false, false, true); // claimYield reverts
+
+        uint256 ta = ws.totalAssets();
+        uint256 price = ws.convertToAssets(1e18);
+        uint256 pending = ws.pendingYield();
+        assertEq(ws.sync(), 0, "nothing harvested");
+        assertEq(ws.totalAssets(), ta, "sync realizes exactly the preview");
+        assertEq(ws.convertToAssets(1e18), price, "price unchanged");
+        assertEq(ws.pendingYield(), pending, "yield left in sMUSD");
+        assertEq(ws.lastHarvest(), harvestedAt, "a failed claim does not count as a harvest");
+
+        uint256 snap = vm.snapshotState();
+        uint256 expected = ws.previewRedeem(1000e18);
+        vm.prank(alice);
+        assertEq(ws.redeem(1000e18, alice, alice), expected, "redeem pays the preview");
+        vm.revertToState(snap);
+        uint256 maxW = ws.maxWithdraw(alice);
+        vm.prank(alice);
+        ws.withdraw(maxW, alice, alice);
+        vm.revertToState(snap);
+
+        // Claims work again: the yield is harvested and vests, it never steps the price up.
+        smusd.setDisabled(false, false, false);
+        uint256 ta2 = ws.totalAssets();
+        assertEq(ws.sync(), pending);
+        assertEq(ws.totalAssets(), ta2);
+        assertEq(ws.lastHarvest(), block.timestamp);
+    }
+
+    function test_claimYieldPayingNothing_keepsPriceAndPreviews() public {
+        _deposit(alice, 10_000e18);
+        skip(2 days);
+        _yieldForVault(30e18);
+        skip(1 days);
+        // A claim that "succeeds" but pays nothing (an sMUSD whose accounting diverged from the mirror).
+        vm.mockCall(address(smusd), abi.encodeWithSelector(SMUSDMock.claimYield.selector), abi.encode(uint256(0)));
+        uint256 ta = ws.totalAssets();
+        uint256 expected = ws.previewRedeem(1000e18);
+        vm.prank(alice);
+        assertEq(ws.redeem(1000e18, alice, alice), expected);
+        assertEq(ws.totalAssets(), ta - expected, "only the redemption left");
+    }
+
+    function test_sameBlockProtocolYield_neverMovesTotalAssets() public {
+        _deposit(alice, 10_000e18);
+        skip(10 days); // no harvest for longer than the vesting window
+        uint256 ta = ws.totalAssets();
+        uint256 price = ws.convertToAssets(1e18);
+        _yieldForVault(500e18);
+        assertEq(ws.totalAssets(), ta);
+        assertEq(ws.convertToAssets(1e18), price);
+        ws.sync();
+        assertEq(ws.totalAssets(), ta, "harvested, vesting from now");
+        skip(3 days);
+        assertGt(ws.totalAssets(), ta + 499e18);
     }
 
     function test_deposit_revertsWhenSMUSDDepositReverts() public {

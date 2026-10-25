@@ -10,7 +10,7 @@ import {WsMUSDBase} from "../unit/WsMUSDBase.t.sol";
 
 /// @notice Drives wsMUSD through every user path plus the sMUSD-side events that move its backing: protocol yield,
 /// PCV distributions inside sMUSD deposit/withdraw (with auto-claim), direct MUSD and sMUSD donations, outside sMUSD
-/// holders entering and leaving, and time. Properties that need a before/after view are recorded as ghost flags,
+/// holders entering and leaving, sMUSD's claimYield failing and recovering, and time. Properties that need a before/after view are recorded as ghost flags,
 /// because handler reverts are discarded (fail_on_revert = false).
 contract WsMUSDHandler is Test {
     WsMUSD internal immutable ws;
@@ -147,11 +147,16 @@ contract WsMUSDHandler is Test {
         if (supply == 0) return;
         amount = bound(amount, supply / 1e18 + 1, 200_000e18);
         uint256 ta = ws.totalAssets();
-        bool sameBlockAsHarvest = ws.lastHarvest() == block.timestamp;
         musd.mint(address(this), amount);
         musd.approve(address(smusd), amount);
         smusd.receiveProtocolYield(amount);
-        if (sameBlockAsHarvest && ws.totalAssets() != ta) sameBlockYieldMovedAssets = true;
+        // Whatever the time since the last harvest: unclaimed yield only reaches holders by vesting.
+        if (ws.totalAssets() != ta) sameBlockYieldMovedAssets = true;
+    }
+
+    /// @dev sMUSD's claimYield starts or stops reverting (an upgrade or strategy fault); wsMUSD catches it.
+    function setClaimFault(bool broken) external checked("setClaimFault") {
+        smusd.setDisabled(false, false, broken);
     }
 
     /// @dev Queues MUSD that the PCV pushes into sMUSD on the next sMUSD deposit or withdraw (ours or anyone's).
@@ -243,13 +248,14 @@ contract WsMUSDInvariantTest is WsMUSDBase {
         assertFalse(handler.totalAssetsFellOverTime());
     }
 
-    /// @dev Invariant 3: previews equal executed amounts; a sync realizes exactly the previewed totalAssets.
+    /// @dev Invariant 3: previews equal executed amounts; a sync realizes exactly the previewed totalAssets, whether
+    /// sMUSD's claimYield succeeds or reverts.
     function invariant_previewsMatchExecution() public view {
         assertFalse(handler.previewMismatch());
     }
 
-    /// @dev Invariant 4: a same-block donation (MUSD, sMUSD, or protocol yield right after a harvest) does not
-    /// change totalAssets.
+    /// @dev Invariant 4: a same-block donation (MUSD, sMUSD, or sMUSD protocol yield at any time) does not change
+    /// totalAssets.
     function invariant_sameBlockDonationDoesNotMoveTotalAssets() public view {
         assertFalse(handler.donationMovedAssets());
         assertFalse(handler.sameBlockYieldMovedAssets());

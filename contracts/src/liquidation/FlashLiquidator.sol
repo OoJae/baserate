@@ -35,8 +35,11 @@ import {TigrisVenues} from "./TigrisVenues.sol";
 ///    them at the incentive, else by all collateral (Morpho then socialises the shortfall).
 /// 2. `onMorphoLiquidate` (Morpho only, in-flight only, single use) unwraps the bcBTC, sells it through the venue,
 ///    requires proceeds >= seized x oracle price x (1 - MAX_IMPACT_BPS) and >= the repayment, and approves Morpho.
-/// 3. Back in `liquidate`: the caller's profit must reach `minProfit`; all MUSD and any native BTC left (router
-///    refunds, a CL partial fill) go to the caller, so the contract holds nothing between transactions.
+/// 3. Back in `liquidate`: the caller's profit must reach `minProfit`; all MUSD goes to the caller, and so does the
+///    native BTC this liquidation left behind (a router refund, a CL partial fill), measured as the balance change
+///    over the call. If the caller cannot take native BTC the liquidation still succeeds: the BTC stays here and
+///    anyone may `sweepNative` it later, together with any BTC donated to the contract. BTC that was here before the
+///    call is never forwarded, so a donation cannot make a liquidation revert.
 /// The oracle price is the M1 oracle's: Skip BTC/USD (staleness-checked, Pyth-banded) over the MUSD leg clamped to
 /// [1.00, 1.02], exactly the price Morpho used to size the seizure.
 ///
@@ -46,9 +49,10 @@ import {TigrisVenues} from "./TigrisVenues.sol";
 /// 5 on the vAMM (see TigrisVenues). The backstop venue adds the backstop's own Skip read.
 /// | Venue    | Skip | BTC | Total |
 /// | BACKSTOP |  3   |  0  |   3   |
-/// | CL200    |  2   |  4  |   6   |
+/// | CL200    |  2   |  4  |   6   | (+1 BTC `approve(0)` when the router leaves part of the approval unused)
 /// | VAMM     |  2   |  5  |   7   |
-/// `previewLiquidation` costs 3 (oracle, backstop quote, QuoterV2's pool balance read).
+/// `previewLiquidation` costs 3 (oracle, backstop quote, QuoterV2's pool balance read). Native balance reads (the
+/// forwarded-BTC delta) are not precompile calls.
 contract FlashLiquidator is IFlashLiquidator, TigrisVenues, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
     using MathLib for uint256;
@@ -119,6 +123,17 @@ contract FlashLiquidator is IFlashLiquidator, TigrisVenues, ReentrancyGuardTrans
     /// @notice Receives native BTC from bcBTC unwraps and router refunds.
     receive() external payable {}
 
+    /// @inheritdoc IFlashLiquidator
+    function sweepNative(address to) external nonReentrant returns (uint256 amount) {
+        if (to == address(0)) revert ZeroAddress();
+        amount = address(this).balance;
+        emit NativeSwept(msg.sender, to, amount);
+        if (amount != 0) {
+            (bool ok,) = to.call{value: amount}("");
+            if (!ok) revert NativeSendFailed(to, amount);
+        }
+    }
+
     // ---------------------------------------------------------------- liquidation
 
     /// @inheritdoc IFlashLiquidator
@@ -129,6 +144,7 @@ contract FlashLiquidator is IFlashLiquidator, TigrisVenues, ReentrancyGuardTrans
     {
         if (!_venueAvailable(venue)) revert VenueUnavailable(venue);
         MarketParams memory params = marketParams();
+        uint256 nativeBefore = address(this).balance;
 
         uint256 repaidShares;
         if (seizedAssets == 0) {
@@ -158,12 +174,16 @@ contract FlashLiquidator is IFlashLiquidator, TigrisVenues, ReentrancyGuardTrans
         profit = IERC20(_MUSD).balanceOf(address(this));
         if (profit < minProfit) revert ProfitTooLow(profit, minProfit);
         if (profit != 0) IERC20(_MUSD).safeTransfer(msg.sender, profit);
-        uint256 leftover = address(this).balance;
-        if (leftover != 0) {
-            (bool ok,) = msg.sender.call{value: leftover}("");
-            if (!ok) revert NativeSendFailed(msg.sender, leftover);
-        }
         emit Liquidated(msg.sender, borrower, venue, seized, repaid, proceeds, profit);
+
+        // Only the native BTC this liquidation left behind; a caller that cannot take it does not block the
+        // liquidation (the BTC stays for `sweepNative`).
+        uint256 nativeAfter = address(this).balance;
+        if (nativeAfter > nativeBefore) {
+            uint256 leftover = nativeAfter - nativeBefore;
+            (bool ok,) = msg.sender.call{value: leftover}("");
+            if (!ok) emit NativeKept(msg.sender, leftover);
+        }
     }
 
     /// @notice Morpho liquidation callback: unwraps the seized bcBTC, sells it on the venue and approves the repayment.

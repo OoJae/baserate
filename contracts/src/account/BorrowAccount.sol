@@ -4,7 +4,6 @@ pragma solidity 0.8.28;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 import {IMorpho, Id, Market, MarketParams, Position} from "morpho-blue/interfaces/IMorpho.sol";
@@ -29,7 +28,11 @@ import {ICollateralBTC} from "../interfaces/ICollateralBTC.sol";
 /// - position collateral <= profile position cap;
 /// - post-borrow M1 `totalBorrowAssets` (Morpho accrues first) <= global borrow cap;
 /// - borrows not paused (and, for CANARY accounts, the owner is still a canary operator).
-/// Repay and the full exit make no oracle call. The clone ends every call holding 0 MUSD and 0 bcBTC.
+/// Collateral top-ups never check the position cap: the cap bounds the debt a position can take on, and the borrow
+/// path already refuses new debt while collateral is above it, so a top-up can only lower risk. A withdrawal with
+/// debt outstanding must leave the LTV within the profile ceiling (the STANDARD one, if lower, for a CANARY account
+/// whose owner is no longer an operator). Repay and the full exit make no oracle call. The clone ends every call
+/// holding 0 MUSD and 0 bcBTC, and never accepts itself as a receiver.
 /// Each external dependency is reached through a single internal helper to keep the runtime small: the factory
 /// deploys this implementation inside its own constructor and must fit Mezo's 10M block gas limit.
 contract BorrowAccount is IBorrowAccount, ReentrancyGuardTransient {
@@ -88,9 +91,15 @@ contract BorrowAccount is IBorrowAccount, ReentrancyGuardTransient {
     // ---------------------------------------------------------------- views
 
     /// @inheritdoc IBorrowAccount
-    function owner() public view returns (address) {
+    /// @dev Reads the 20-byte immutable argument that follows the 45-byte ERC-1167 runtime (what
+    /// `Clones.fetchCloneArgs` returns) without allocating memory.
+    function owner() public view returns (address owner_) {
         if (address(this) == _SELF) return address(0);
-        return address(bytes20(Clones.fetchCloneArgs(address(this))));
+        assembly ("memory-safe") {
+            mstore(0, 0)
+            extcodecopy(address(), 12, 45, 20)
+            owner_ := mload(0)
+        }
     }
 
     /// @inheritdoc IBorrowAccount
@@ -131,7 +140,7 @@ contract BorrowAccount is IBorrowAccount, ReentrancyGuardTransient {
         if (msg.value == 0 && musdOut == 0) revert ZeroAmount();
         IBorrowAccountFactory.RiskParams memory rp = _riskParams();
         if (rp.borrowPaused) revert BorrowPaused();
-        if (msg.value != 0) _supply(msg.value, rp.positionCap);
+        if (msg.value != 0) _supply(msg.value);
         if (musdOut != 0) _borrow(musdOut, maxLtvBps, receiver, rp);
         emit Opened(owner(), msg.value, musdOut);
     }
@@ -145,7 +154,7 @@ contract BorrowAccount is IBorrowAccount, ReentrancyGuardTransient {
     /// @inheritdoc IBorrowAccount
     function addCollateral() external payable nonReentrant onlyOwnerOrFactory {
         if (msg.value == 0) revert ZeroAmount();
-        _supply(msg.value, _riskParams().positionCap);
+        _supply(msg.value);
     }
 
     /// @inheritdoc IBorrowAccount
@@ -155,13 +164,19 @@ contract BorrowAccount is IBorrowAccount, ReentrancyGuardTransient {
         onlyOwnerOrFactory
         returns (uint256 supplied)
     {
-        IBorrowAccountFactory.RiskParams memory rp = _riskParams();
-        (uint256 coll,) = _position();
-        uint256 room = rp.positionCap > coll ? rp.positionCap - coll : 0;
-        uint256 idle = address(this).balance;
-        supplied = idle < room ? idle : room;
-        if (supplied == 0 && musdOut == 0) revert ZeroAmount();
-        if (supplied != 0) _supply(supplied, rp.positionCap);
+        supplied = address(this).balance;
+        IBorrowAccountFactory.RiskParams memory rp;
+        if (musdOut != 0) {
+            // Borrowing: supply only the room left under the position cap so the borrow's cap check can pass; the
+            // excess stays idle and rescuable. Without a borrow every idle wei is supplied.
+            rp = _riskParams();
+            (uint256 coll,) = _position();
+            uint256 room = rp.positionCap > coll ? rp.positionCap - coll : 0;
+            if (supplied > room) supplied = room;
+        } else if (supplied == 0) {
+            revert ZeroAmount();
+        }
+        if (supplied != 0) _supply(supplied);
         if (musdOut != 0) _borrow(musdOut, maxLtvBps, receiver, rp);
     }
 
@@ -228,7 +243,7 @@ contract BorrowAccount is IBorrowAccount, ReentrancyGuardTransient {
 
     /// @inheritdoc IBorrowAccount
     function rescueNative(address to) external nonReentrant onlyOwner {
-        if (to == address(0)) revert ZeroAddress();
+        _checkReceiver(to);
         uint256 amount = address(this).balance;
         if (amount == 0) revert ZeroAmount();
         emit NativeRescued(to, amount);
@@ -236,16 +251,26 @@ contract BorrowAccount is IBorrowAccount, ReentrancyGuardTransient {
         if (!ok) revert NativeSendFailed(to, amount);
     }
 
+    /// @inheritdoc IBorrowAccount
+    /// @dev bcBTC needs no exclusion: its transfer gate only lets a clone send it to Morpho, so sweeping it reverts.
+    function sweep(address token, address to) external nonReentrant onlyOwner returns (uint256 amount) {
+        _checkReceiver(to);
+        amount = IERC20(token).balanceOf(address(this));
+        if (amount == 0) revert ZeroAmount();
+        emit Swept(token, to, amount);
+        IERC20(token).safeTransfer(to, amount);
+    }
+
     // ---------------------------------------------------------------- internal
 
-    /// @dev Wraps `amount` native BTC, supplies it to M1 and enforces the position cap.
-    function _supply(uint256 amount, uint256 positionCap) internal {
+    /// @dev Wraps `amount` native BTC and supplies it to M1. No position-cap check: a top-up only lowers risk, and
+    /// the borrow path refuses new debt while collateral is above the cap.
+    function _supply(uint256 amount) internal {
         ICollateralBTC(_COLLATERAL).wrap{value: amount}();
         IERC20(_COLLATERAL).forceApprove(MORPHO, amount);
         IMorpho(MORPHO).supplyCollateral(marketParams(), amount, address(this), "");
 
         (uint256 coll,) = _position();
-        if (coll > positionCap) revert PositionCapExceeded(coll, positionCap);
         emit CollateralAdded(owner(), amount, coll);
     }
 
@@ -255,7 +280,7 @@ contract BorrowAccount is IBorrowAccount, ReentrancyGuardTransient {
         internal
     {
         if (rp.borrowPaused) revert BorrowPaused();
-        if (receiver == address(0)) revert ZeroAddress();
+        _checkReceiver(receiver);
         address owner_ = owner();
         if (rp.profile == Profile.CANARY && !IBorrowAccountFactory(FACTORY).isCanaryOperator(owner_)) {
             revert NotCanaryOperator(owner_);
@@ -304,15 +329,22 @@ contract BorrowAccount is IBorrowAccount, ReentrancyGuardTransient {
     }
 
     /// @dev Withdraws `amount` bcBTC from M1 to this clone and unwraps it to native BTC at `btcTo`. With debt still
-    /// outstanding, the remaining position must respect the profile ceiling (one oracle read) before any BTC leaves;
+    /// outstanding, the remaining position must respect the withdraw ceiling (one oracle read) before any BTC leaves;
     /// with no debt, as in the full exit, there is no oracle call.
     function _withdrawAndUnwrap(MarketParams memory params, uint256 amount, address btcTo) internal {
-        if (btcTo == address(0)) revert ZeroAddress();
+        _checkReceiver(btcTo);
         IMorpho(MORPHO).withdrawCollateral(params, amount, address(this), address(this));
         // Morpho accrued interest inside withdrawCollateral, so the stored totals are current.
         (uint256 coll, uint256 shares, uint256 debt_) = _positionAndDebt();
+        // `riskParams` already holds a CANARY account whose owner lost the operator role to the STANDARD ceiling.
         if (shares != 0) _checkLtv(coll, debt_, _riskParams().ceilingBps);
         ICollateralBTC(_COLLATERAL).unwrap(amount, btcTo);
+    }
+
+    /// @dev Every receiver of MUSD or BTC must be non-zero and not this clone, which could never move MUSD out again.
+    function _checkReceiver(address to) internal view {
+        if (to == address(0)) revert ZeroAddress();
+        if (to == address(this)) revert InvalidReceiver(to);
     }
 
     /// @dev Reverts with `LtvTooHigh` unless `debt_ * 1e4 <= value(coll) * limitBps`; returns the LTV rounded up.

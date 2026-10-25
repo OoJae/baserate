@@ -124,14 +124,14 @@ contract BackstopMainnetForkTest is LiquidationForkBase {
 
     function test_mainnet_backstopPrecompileBudget() public {
         _fillInventory(0.02e18);
-        // With BTC held, a deposit reads Skip twice (checkpoint + ERC-4626 preview); requests and claims once.
+        // With BTC held, a deposit reads Skip once (its checkpoint also prices the shares); requests and claims once.
         deal(net.musd, keeper, 100e18);
         vm.startPrank(keeper);
         musd.approve(address(backstop), 100e18);
         vm.startStateDiffRecording();
         uint256 shares = backstop.deposit(100e18, keeper);
         (uint256 skipCalls, uint256 btcCalls) = _countPrecompiles(vm.stopAndReturnStateDiff());
-        assertEq(skipCalls, 2, "deposit");
+        assertEq(skipCalls, 1, "deposit");
         assertEq(btcCalls, 0);
         vm.startStateDiffRecording();
         backstop.requestRedeem(shares, keeper, keeper);

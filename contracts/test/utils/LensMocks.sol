@@ -232,3 +232,53 @@ contract MockTroves {
         return (t.coll, t.principal, t.interest, 0, 0, 0);
     }
 }
+
+/// @notice The read surface of a Baserate Backstop that RiskLens uses (`availableCash`, `inventory`, `totalAssets`),
+/// with settable answers and fault modes for the lens's fallbacks.
+contract MockBackstopViews {
+    enum Mode {
+        NORMAL,
+        REVERT,
+        SHORT
+    }
+
+    uint256 internal _availableCash;
+    uint256 internal _inventory;
+    uint256 internal _totalAssets;
+    Mode public mode;
+
+    receive() external payable {}
+
+    function set(uint256 availableCash_, uint256 inventory_, uint256 totalAssets_) external {
+        _availableCash = availableCash_;
+        _inventory = inventory_;
+        _totalAssets = totalAssets_;
+    }
+
+    function setMode(Mode m) external {
+        mode = m;
+    }
+
+    function availableCash() external view returns (uint256) {
+        return _answer(_availableCash);
+    }
+
+    function inventory() external view returns (uint256) {
+        return _answer(_inventory);
+    }
+
+    function totalAssets() external view returns (uint256) {
+        return _answer(_totalAssets);
+    }
+
+    function _answer(uint256 value) internal view returns (uint256) {
+        if (mode == Mode.REVERT) revert("down");
+        if (mode == Mode.SHORT) {
+            assembly ("memory-safe") {
+                mstore(0x00, value)
+                return(0x00, 0x10)
+            }
+        }
+        return value;
+    }
+}

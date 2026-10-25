@@ -5,6 +5,7 @@ import {Script, console2} from "forge-std/Script.sol";
 import {VmSafe} from "forge-std/Vm.sol";
 
 import {FeeRouter} from "../src/fees/FeeRouter.sol";
+import {IBorrowAccountFactory} from "../src/interfaces/IBorrowAccountFactory.sol";
 import {IFeeRouter} from "../src/interfaces/IFeeRouter.sol";
 import {IRiskLens} from "../src/interfaces/IRiskLens.sol";
 import {RiskLens} from "../src/lens/RiskLens.sol";
@@ -26,8 +27,10 @@ import {MezoAddresses, MezoNetwork} from "./config/MezoAddresses.sol";
 ///   PoolsVoter 0x4823...1f03; `TREASURY` env var required (the Safe). RiskLens with QuoterV2 0x4E56...dC7 on CL200
 ///   and the CL10 mUSDC/MUSD pool 0xCC37...aC1a for the MUSD TWAP. Per docs/design/contracts.md section 8, deploy the
 ///   FeeRouter before the core stack so the mainnet factory takes it as its constructor `feeRecipient` (no timelock):
-///   with no `factory` in the registry this script deploys only the FeeRouter; run it again after the core deploy
-///   with `FEE_ROUTER=<address>` to add the RiskLens.
+///   with no `factory` in the registry this script deploys only the FeeRouter; then run `Deploy.s.sol` with
+///   `FEE_RECIPIENT=<feeRouter>`, and run this script again with `FEE_ROUTER=<address>` to add the RiskLens. Once a
+///   mainnet factory is in the registry the script requires `factory.feeRecipient() == feeRouter` (it refuses to
+///   deploy a second, unwired FeeRouter or a lens next to a factory that pays someone else).
 /// Optional env: `FEE_ROUTER` / `RISK_LENS` reuse an existing deployment instead of deploying a new one.
 ///
 /// Pointing the existing testnet factory's origination fee at the FeeRouter is a timelocked governance action
@@ -113,6 +116,9 @@ contract DeployPeriphery is Script {
         IFeeRouter.Plan memory plan = router.previewDistribute();
         for (uint256 i; i < plan.gaugeAlive.length; ++i) {
             require(plan.gaugeAlive[i], "gauge not alive");
+        }
+        if (block.chainid == MezoAddresses.MAINNET_CHAIN_ID && factory != address(0)) {
+            require(IBorrowAccountFactory(factory).feeRecipient() == d.feeRouter, "factory fee recipient != FeeRouter");
         }
         console2.log("FeeRouter", d.feeRouter);
         console2.log("  treasury", d.treasury);

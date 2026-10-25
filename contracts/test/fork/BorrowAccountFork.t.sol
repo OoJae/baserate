@@ -139,23 +139,36 @@ abstract contract BorrowAccountForkTests is BorrowAccountForkBase {
         assertLe(acct.debt() * BPS, _value(coll) * lim.standardCeiling);
     }
 
-    function test_open_revertsAbovePositionCap() public {
+    function test_open_borrowRevertsAbovePositionCap() public {
         uint256 coll = uint256(lim.standardCap) + 1;
         vm.deal(alice, coll);
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(IBorrowAccount.PositionCapExceeded.selector, coll, lim.standardCap));
-        factory.openAndBorrow{value: coll}(0, 0);
+        factory.openAndBorrow{value: coll}(1e18, 6000);
+
+        // Collateral alone is never capped.
+        vm.prank(alice);
+        IBorrowAccount acct = IBorrowAccount(factory.openAndBorrow{value: coll}(0, 0));
+        assertEq(acct.collateral(), coll);
     }
 
-    function test_addCollateral_respectsPositionCap() public {
+    /// @dev Top-ups are never capped (A-1/D-1); the cap binds the borrow path only.
+    function test_addCollateral_neverCappedButBorrowIs() public {
         IBorrowAccount acct = _open(alice, uint256(lim.standardCap) - 0.001e18, 0, 0);
         vm.deal(alice, 0.002e18);
         vm.prank(alice);
-        vm.expectPartialRevert(IBorrowAccount.PositionCapExceeded.selector);
         acct.addCollateral{value: 0.002e18}();
+        uint256 over = uint256(lim.standardCap) + 0.001e18;
+        assertEq(acct.collateral(), over);
 
         vm.prank(alice);
-        acct.addCollateral{value: 0.001e18}();
+        vm.expectRevert(abi.encodeWithSelector(IBorrowAccount.PositionCapExceeded.selector, over, lim.standardCap));
+        acct.borrow(10e18, 6000, alice);
+
+        vm.prank(alice);
+        acct.withdrawCollateral(0.001e18, alice);
+        vm.prank(alice);
+        acct.borrow(10e18, 6000, alice);
         assertEq(acct.collateral(), lim.standardCap);
         _assertClean(acct);
     }
@@ -464,8 +477,11 @@ abstract contract BorrowAccountForkTests is BorrowAccountForkBase {
         vm.expectPartialRevert(IBorrowAccount.LtvTooHigh.selector);
         factory.openAndBorrow{value: coll}(musdOut, 10_000);
 
+        // Granting the role is a timelocked raise (D-7).
         vm.prank(governor);
+        vm.expectRevert(IBorrowAccountFactory.DataNotTimelocked.selector);
         factory.setCanaryOperator(canaryOp, true);
+        _submitAndExecute(abi.encodeCall(IBorrowAccountFactory.setCanaryOperator, (canaryOp, true)));
         vm.deal(canaryOp, coll);
         vm.prank(canaryOp);
         address canary = factory.openCanary{value: coll}(musdOut, 10_000);
@@ -480,18 +496,18 @@ abstract contract BorrowAccountForkTests is BorrowAccountForkBase {
     }
 
     function test_canary_positionCapAndOperatorRemoval() public {
-        vm.prank(governor);
-        factory.setCanaryOperator(canaryOp, true);
+        _submitAndExecute(abi.encodeCall(IBorrowAccountFactory.setCanaryOperator, (canaryOp, true)));
         uint256 over = uint256(lim.canaryCap) + 1;
         vm.deal(canaryOp, over);
         vm.prank(canaryOp);
         vm.expectPartialRevert(IBorrowAccount.PositionCapExceeded.selector);
-        factory.openCanary{value: over}(0, 0);
+        factory.openCanary{value: over}(1e18, 10_000);
 
         vm.prank(canaryOp);
         IBorrowAccount canary = IBorrowAccount(factory.openCanary{value: lim.canaryCap}(10e18, 10_000));
 
-        vm.prank(governor);
+        // Removal is instant, for the sentinel as well as the governor.
+        vm.prank(sentinel);
         factory.setCanaryOperator(canaryOp, false);
         vm.prank(canaryOp);
         vm.expectRevert(abi.encodeWithSelector(IBorrowAccount.NotCanaryOperator.selector, canaryOp));
@@ -597,7 +613,8 @@ abstract contract BorrowAccountForkTests is BorrowAccountForkBase {
         _assertClean(IBorrowAccount(account));
     }
 
-    function test_comeBack_aboveCapLeavesRescuableExcess() public {
+    /// @dev With a borrow, only the room under the position cap is supplied so the borrow passes its cap check.
+    function test_comeBack_aboveCapWithBorrowLeavesRescuableExcess() public {
         uint256 surplus = uint256(lim.standardCap) + 0.005e18;
         _seedSurplus(alice, surplus);
         (address predicted,) = factory.accountOf(alice, Profile.STANDARD);
@@ -605,9 +622,10 @@ abstract contract BorrowAccountForkTests is BorrowAccountForkBase {
         bytes memory sig = _claimSig(ALICE_PK, predicted, deadline);
 
         vm.prank(alice);
-        (address account, uint256 claimed) = factory.comeBack(sig, deadline, 0, 0);
+        (address account, uint256 claimed) = factory.comeBack(sig, deadline, 10e18, 6000);
         assertEq(claimed, surplus);
         assertEq(IBorrowAccount(account).collateral(), lim.standardCap, "supplied up to the cap");
+        assertEq(musd.balanceOf(alice), 10e18, "borrowed");
         assertEq(account.balance, 0.005e18, "excess idle");
 
         vm.prank(bob);
@@ -616,6 +634,24 @@ abstract contract BorrowAccountForkTests is BorrowAccountForkBase {
         vm.prank(alice);
         IBorrowAccount(account).rescueNative(alice);
         assertEq(alice.balance, 0.005e18);
+    }
+
+    /// @dev Without a borrow the whole claim is supplied, even into a position already at the cap (A-1): `comeBack`
+    /// no longer reverts `ZeroAmount` there.
+    function test_comeBack_atCapWithoutBorrowSuppliesEverything() public {
+        IBorrowAccount acct = _open(alice, lim.standardCap, 0, 0);
+        uint256 surplus = 0.003e18;
+        _seedSurplus(alice, surplus);
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory sig = _claimSig(ALICE_PK, address(acct), deadline);
+
+        vm.prank(alice);
+        (address account, uint256 claimed) = factory.comeBack(sig, deadline, 0, 0);
+        assertEq(account, address(acct));
+        assertEq(claimed, surplus);
+        assertEq(acct.collateral(), uint256(lim.standardCap) + surplus);
+        assertEq(account.balance, 0, "nothing left idle");
+        _assertClean(acct);
     }
 
     function test_comeBack_frontRunClaimStillLandsInOwnersClone() public {

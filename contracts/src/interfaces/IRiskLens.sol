@@ -92,7 +92,11 @@ interface IRiskLens {
     }
 
     /// @notice Liquidity a backstop can deploy.
-    /// @param freeMusd `musd + wsMusdAssets`: MUSD it could pay for collateral now.
+    /// @param musd MUSD held directly; `wsMusdShares` / `wsMusdAssets` the wsMUSD it holds and their MUSD value.
+    /// @param freeMusd MUSD it could pay for collateral now: the backstop's `availableCash()` when it answers (a
+    /// Baserate Backstop: cash minus the MUSD reserved for queued exits), else `musd + wsMusdAssets`.
+    /// @param nativeBtc BTC held for sale: the backstop's `inventory()` when it answers (BTC donated to it is
+    /// excluded), else its native balance.
     /// @param vaultRead True when `totalAssets()` (ERC-4626) answered.
     struct BackstopState {
         address backstop;
@@ -138,7 +142,9 @@ interface IRiskLens {
     }
 
     /// @notice One trove, walked from the tail of SortedTroves (lowest NICR first = redeemed first).
-    /// @param debtAhead Total debt (principal + interest) of the troves listed before this one.
+    /// @dev A priced entry with `icr < MCR` (110%) is skipped by MUSD redemptions: it is not redeemed and its debt is
+    /// not counted in any later entry's `debtAhead`. Without a price (`icr == 0`) nothing is excluded.
+    /// @param debtAhead Total debt (principal + interest) of the redeemable troves listed before this one.
     struct TroveEntry {
         address borrower;
         uint256 nicr;
@@ -204,7 +210,7 @@ interface IRiskLens {
     /// @notice Factory caps, ceilings, pause flags and roles.
     function factoryState() external view returns (FactoryState memory f);
 
-    /// @notice Free MUSD of `backstop`.
+    /// @notice Free MUSD and BTC inventory of `backstop` (see `BackstopState`).
     function backstopState(address backstop) external view returns (BackstopState memory b);
 
     /// @notice MUSD price from the MUSD price pool: TWAP over `window` seconds and spot.

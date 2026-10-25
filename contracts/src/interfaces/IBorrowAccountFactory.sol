@@ -12,8 +12,10 @@ enum Profile {
 
 /// @notice Deploys and registers per-owner BorrowAccount clones on the M1 market (MUSD loan, bcBTC collateral) and
 /// holds the risk parameters they enforce.
-/// @dev Governance: increases are 48 h timelocked (`submit` then call the setter; anyone may execute), decreases are
-/// instant by the governor or the sentinel, and pausing never blocks top-ups, repay, withdraw, unwrap or liquidation.
+/// @dev Governance: increases (including module approvals and canary-operator grants) are 48 h timelocked (`submit`,
+/// then anyone calls the setter within `EXECUTION_WINDOW`), decreases are instant by the governor or the sentinel and
+/// invalidate every call queued for the same parameter, and pausing never blocks collateral-only top-ups, repay,
+/// withdraw, unwrap or liquidation.
 interface IBorrowAccountFactory {
     /// @notice Per-profile limits.
     /// @param positionCap Maximum collateral per position, in bcBTC wei (18 decimals).
@@ -63,6 +65,9 @@ interface IBorrowAccountFactory {
     event Revoked(address indexed caller, bytes4 indexed selector, bytes data);
     /// @notice Emitted when a queued call is executed.
     event Accepted(bytes4 indexed selector, bytes data);
+    /// @notice Emitted by every instant decrease: calls queued earlier with this `selector` (and, except for
+    /// `setGlobalBorrowCap`, whose `param` is 0, the first argument word `param`) are no longer executable.
+    event PendingInvalidated(bytes4 indexed selector, bytes32 indexed param);
     /// @notice Emitted when the global borrow cap changes.
     event GlobalBorrowCapSet(address indexed caller, uint256 globalBorrowCap);
     /// @notice Emitted when a profile's limits change.
@@ -94,11 +99,12 @@ interface IBorrowAccountFactory {
     error NotCanaryOperator(address caller);
     /// @notice The call is already queued.
     error DataAlreadyPending();
-    /// @notice The call was not queued (or was revoked or already executed).
+    /// @notice The call is not live in the queue: never queued, revoked, executed, expired or invalidated by a later
+    /// decrease of the same parameter.
     error DataNotTimelocked();
     /// @notice The 48 h timelock has not elapsed.
     error TimelockNotExpired(uint256 executableAt);
-    /// @notice `submit` was given a selector that is not timelocked.
+    /// @notice `submit` was given a selector that is not timelocked, or calldata without an argument.
     error InvalidTimelockedCall(bytes4 selector);
     /// @notice `comeBack` is disabled because no BorrowerOperationsSignatures address was configured.
     error ComeBackDisabled();
@@ -184,6 +190,9 @@ interface IBorrowAccountFactory {
     /// @notice Timelock applied to increases (48 h).
     function TIMELOCK() external view returns (uint256);
 
+    /// @notice How long a queued call stays executable once its timelock has passed (14 days).
+    function EXECUTION_WINDOW() external view returns (uint256);
+
     /// @notice Highest ceiling any profile may have: LLTV in bps minus 25.
     function MAX_CEILING_BPS() external view returns (uint256);
 
@@ -208,7 +217,7 @@ interface IBorrowAccountFactory {
     /// @notice Governor-elect awaiting `acceptGovernance`.
     function pendingGovernor() external view returns (address);
 
-    /// @notice Sentinel: may pause, cut caps and limits, remove modules and revoke queued calls.
+    /// @notice Sentinel: may pause, cut caps and limits, remove modules and canary operators, and revoke queued calls.
     function sentinel() external view returns (address);
 
     /// @notice True for modules approved to call `BorrowAccount.borrowByModule`.
@@ -217,10 +226,13 @@ interface IBorrowAccountFactory {
     /// @notice True for addresses allowed to open CANARY accounts.
     function isCanaryOperator(address operator) external view returns (bool);
 
-    /// @notice Timestamp at which queued `data` becomes executable (0 if not queued).
+    /// @notice Timestamp at which queued `data` becomes executable; 0 unless the call is live (queued and not revoked,
+    /// executed, expired or invalidated by a later decrease of the same parameter).
     function executableAt(bytes calldata data) external view returns (uint256);
 
-    /// @notice One-call bundle of the parameters `account` enforces.
+    /// @notice One-call bundle of the parameters `account` enforces. For a CANARY account whose owner is no longer a
+    /// canary operator, `ceilingBps` is the lower of the CANARY and STANDARD ceilings (its borrows are refused anyway,
+    /// so this bounds its withdrawals).
     function riskParams(address account) external view returns (RiskParams memory);
 
     /// @notice BTC claimable by `owner` in MUSD's CollSurplusPool (0 if the pool is not configured).
@@ -228,29 +240,33 @@ interface IBorrowAccountFactory {
 
     // ---------------------------------------------------------------- governance
 
-    /// @notice Queues a timelocked call (governor only). `data` is the full calldata of the setter.
+    /// @notice Queues a timelocked call (governor only). `data` is the full calldata of the setter. It is executable
+    /// from `TIMELOCK` after submission until `EXECUTION_WINDOW` after that, unless revoked or invalidated first.
     function submit(bytes calldata data) external;
 
     /// @notice Drops a queued call (governor or sentinel).
     function revoke(bytes calldata data) external;
 
-    /// @notice Sets the global borrow cap. Decreases: governor or sentinel, instant. Increases: timelocked.
+    /// @notice Sets the global borrow cap. Decreases: governor or sentinel, instant, and invalidate queued cap calls.
+    /// Increases: timelocked.
     function setGlobalBorrowCap(uint256 newCap) external;
 
-    /// @notice Sets a profile's limits. Decreases of both fields: governor or sentinel, instant. Otherwise
-    /// timelocked. The ceiling must stay <= `MAX_CEILING_BPS`.
+    /// @notice Sets a profile's limits. Decreases of both fields: governor or sentinel, instant, and invalidate
+    /// queued `setLimits` calls for that profile. Otherwise timelocked. The ceiling must stay <= `MAX_CEILING_BPS`.
     function setLimits(Profile profile, uint128 positionCap, uint16 ceilingBps) external;
 
     /// @notice Sets the origination-fee recipient. Always timelocked.
     function setFeeRecipient(address newFeeRecipient) external;
 
-    /// @notice Approves (timelocked) or removes (governor or sentinel, instant) a borrow module.
+    /// @notice Approves (timelocked) or removes (governor or sentinel, instant; invalidates queued approvals of that
+    /// module) a borrow module.
     function setModuleApproval(address module, bool approved) external;
 
     /// @notice Sets the pause flags. Pausing: governor or sentinel. Unpausing: governor only.
     function setPaused(bool borrowPaused_, bool creditPaused_) external;
 
-    /// @notice Adds or removes a canary operator (governor only).
+    /// @notice Adds (timelocked) or removes (governor or sentinel, instant; invalidates queued grants to that
+    /// operator) a canary operator.
     function setCanaryOperator(address operator, bool enabled) external;
 
     /// @notice Replaces the sentinel (governor only; 0 removes it).

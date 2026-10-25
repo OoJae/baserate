@@ -3,12 +3,67 @@ pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
 import {FeeRouter} from "../../src/fees/FeeRouter.sol";
 import {IFeeRouter} from "../../src/interfaces/IFeeRouter.sol";
+import {IBribeVotingReward} from "../../src/interfaces/external/IBribeVotingReward.sol";
+import {IMUSDSavingsRate} from "../../src/interfaces/external/IMUSDSavingsRate.sol";
 import {IPoolsVoter} from "../../src/interfaces/external/IPoolsVoter.sol";
 import {MockMUSD} from "../utils/MockMUSD.sol";
 import {SMUSDMock} from "../utils/SMUSDMock.sol";
 import {MockBribe, MockPoolsVoter} from "../utils/VoterMocks.sol";
+
+/// @notice sMUSD stand-in for failure modes the replica cannot produce: an upgrade that pulls less than asked, burns
+/// its gas, re-enters the router or returns a huge payload.
+contract HostileSMUSD {
+    enum Mode {
+        NORMAL,
+        NO_PULL,
+        HALF_PULL,
+        BURN_GAS,
+        REENTER,
+        RETURN_BOMB
+    }
+
+    address public immutable musdToken;
+    Mode public mode;
+    uint256 public totalSupply = 1_000_000e18;
+    uint256 public pendingYield;
+    uint256 public received;
+    address public reenterTarget;
+
+    constructor(address musd) {
+        musdToken = musd;
+    }
+
+    function setMode(Mode m) external {
+        mode = m;
+    }
+
+    function setReenterTarget(address target) external {
+        reenterTarget = target;
+    }
+
+    function receiveProtocolYield(uint256 amount) external {
+        if (mode == Mode.NO_PULL) return;
+        if (mode == Mode.HALF_PULL) amount /= 2;
+        if (mode == Mode.BURN_GAS) {
+            uint256 x = block.timestamp;
+            while (gasleft() > 0) {
+                x = uint256(keccak256(abi.encode(x)));
+            }
+        }
+        if (mode == Mode.REENTER) IFeeRouter(reenterTarget).distribute();
+        IERC20(musdToken).transferFrom(msg.sender, address(this), amount);
+        received += amount;
+        if (mode == Mode.RETURN_BOMB) {
+            assembly ("memory-safe") {
+                return(0, 300000)
+            }
+        }
+    }
+}
 
 /// @notice FeeRouter against local replicas of MUSD, sMUSD (index, `AmountTooSmall`), Mezo's PoolsVoter and
 /// BribeVotingReward (`notifyRewardAmount` semantics from the verified source).
@@ -359,14 +414,16 @@ contract FeeRouterTest is Test {
         router.distribute();
     }
 
-    function test_distribute_smusdFailureRevertsWholeSplit() public {
+    function test_distribute_smusdFailureNoLongerRevertsTheSplit() public {
         vm.mockCallRevert(
             address(smusd), abi.encodeWithSelector(SMUSDMock.receiveProtocolYield.selector), bytes("down")
         );
         _fund(100e18);
-        vm.expectRevert(bytes("down"));
         router.distribute();
-        assertEq(musd.balanceOf(address(router)), 100e18, "nothing moved");
+        assertEq(musd.balanceOf(treasury), 20e18, "treasury paid");
+        assertEq(_epochBribe(bribeA) + _epochBribe(bribeB), 40e18, "bribes posted");
+        assertEq(musd.balanceOf(address(router)), 40e18, "only the sMUSD leg stays");
+        assertEq(router.smusdCarry(), 40e18);
     }
 
     function test_previewMatchesDistribute() public {
@@ -396,6 +453,368 @@ contract FeeRouterTest is Test {
         assertEq(bribeA.tokenRewardsPerEpoch(address(musd), EPOCH_START + 7 days), 20e18);
     }
 
+    // ---------------------------------------------------------------- sMUSD failure modes (audit D-2)
+
+    function _smusdDown() internal {
+        vm.mockCallRevert(
+            address(smusd), abi.encodeWithSelector(SMUSDMock.receiveProtocolYield.selector), bytes("only PCV")
+        );
+    }
+
+    function _routerWith(address smusd_) internal returns (FeeRouter) {
+        return new FeeRouter(address(musd), smusd_, address(voter), treasury, _pairs(2));
+    }
+
+    function test_smusd_revertCarriesShareAndPaysOtherLegs() public {
+        _smusdDown();
+        _fund(1000e18);
+        vm.expectEmit(false, false, false, true, address(router));
+        emit IFeeRouter.SmusdYieldFailed(400e18, NOW);
+        vm.expectEmit(true, true, false, true, address(router));
+        emit IFeeRouter.Distributed(keeper, EPOCH_START, 1000e18, 0, 400e18, 200e18, 400e18);
+        vm.prank(keeper);
+        IFeeRouter.Plan memory plan = router.distribute();
+
+        assertFalse(plan.smusdAccepts);
+        assertEq(plan.toSmusd, 400e18);
+        assertEq(plan.smusdCarried, 400e18);
+        assertEq(plan.smusdToTreasury, 0);
+        assertEq(musd.balanceOf(treasury), 200e18, "treasury paid");
+        assertEq(_epochBribe(bribeA) + _epochBribe(bribeB), 400e18, "bribes posted");
+        assertEq(musd.balanceOf(address(router)), 400e18, "sMUSD leg retained");
+        assertEq(router.smusdCarry(), 400e18);
+        assertEq(router.smusdFailingSince(), NOW, "streak started");
+        assertEq(musd.allowance(address(router), address(smusd)), 0, "approval revoked");
+    }
+
+    function test_smusd_carryIsRetriedAndSuccessEndsTheStreak() public {
+        _smusdDown();
+        _fund(1000e18);
+        router.distribute();
+        vm.clearMockedCalls();
+
+        skip(1 days);
+        _fund(1000e18);
+        uint256 indexBefore = smusd.yieldIndex();
+        IFeeRouter.Plan memory plan = router.distribute();
+        assertTrue(plan.smusdAccepts);
+        assertEq(plan.toSmusd, 800e18, "new 40% plus the carry, not split again");
+        assertEq(plan.toTreasury, 200e18, "treasury takes 20% of new fees only");
+        assertEq(smusd.yieldIndex() - indexBefore, 800e18 * 1e18 / SMUSD_SUPPLY);
+        assertEq(router.smusdCarry(), 0);
+        assertEq(router.smusdFailingSince(), 0, "streak cleared");
+        assertEq(musd.balanceOf(address(router)), 0);
+    }
+
+    function test_smusd_persistentFailureGoesToTreasuryAfterGrace() public {
+        _smusdDown();
+        _fund(1000e18);
+        router.distribute(); // epoch E: carried
+
+        skip(7 days); // epoch E+1: still within grace
+        _fund(1000e18);
+        IFeeRouter.Plan memory plan = router.distribute();
+        assertEq(plan.smusdCarried, 800e18);
+        assertEq(plan.smusdToTreasury, 0);
+        assertEq(musd.balanceOf(treasury), 400e18);
+
+        skip(7 days); // epoch E+2: two flips since the first failure
+        _fund(1000e18);
+        vm.expectEmit(true, false, false, true, address(router));
+        emit IFeeRouter.SmusdShareToTreasury(treasury, 1200e18, NOW);
+        vm.expectEmit(true, true, false, true, address(router));
+        emit IFeeRouter.Distributed(address(this), EPOCH_START + 14 days, 1800e18, 0, 400e18, 1400e18, 0);
+        plan = router.distribute();
+        assertEq(plan.smusdToTreasury, 1200e18, "sMUSD leg and carry to the treasury");
+        assertEq(plan.smusdCarried, 0);
+        assertEq(musd.balanceOf(treasury), 400e18 + 200e18 + 1200e18);
+        assertEq(musd.balanceOf(address(router)), 0, "nothing stuck");
+        assertEq(router.smusdFailingSince(), NOW, "streak continues");
+        assertEq(musd.allowance(address(router), address(smusd)), 0);
+
+        // sMUSD recovers: the next donation succeeds and the streak ends.
+        vm.clearMockedCalls();
+        _fund(1000e18);
+        plan = router.distribute();
+        assertTrue(plan.smusdAccepts);
+        assertEq(router.smusdFailingSince(), 0);
+    }
+
+    function test_smusd_graceCountsEpochFlips() public {
+        // First failure in the last second of epoch E: the treasury fallback starts at E+2, 7 days + 1 s later.
+        vm.warp(EPOCH_START + 7 days - 1);
+        _smusdDown();
+        _fund(1000e18);
+        router.distribute();
+        vm.warp(EPOCH_START + 14 days - 1); // last second of E+1
+        _fund(1000e18);
+        assertEq(router.distribute().smusdToTreasury, 0);
+        vm.warp(EPOCH_START + 14 days); // E+2
+        _fund(1000e18);
+        assertGt(router.distribute().smusdToTreasury, 0);
+    }
+
+    function test_smusd_noPullIsAFailureAndRevokesApproval() public {
+        // An upgrade that returns success without taking the MUSD (e.g. a paused no-op).
+        vm.mockCall(address(smusd), abi.encodeWithSelector(SMUSDMock.receiveProtocolYield.selector), "");
+        _fund(1000e18);
+        IFeeRouter.Plan memory plan = router.distribute();
+        assertFalse(plan.smusdAccepts);
+        assertEq(plan.smusdCarried, 400e18);
+        assertEq(musd.allowance(address(router), address(smusd)), 0, "approval revoked");
+        assertEq(router.smusdFailingSince(), NOW);
+    }
+
+    function test_smusd_partialPullCountsOnlyWhatMoved() public {
+        HostileSMUSD hostile = new HostileSMUSD(address(musd));
+        hostile.setMode(HostileSMUSD.Mode.HALF_PULL);
+        router = _routerWith(address(hostile));
+        _fund(1000e18);
+        vm.expectEmit(true, true, false, true, address(router));
+        emit IFeeRouter.Distributed(address(this), EPOCH_START, 1000e18, 200e18, 400e18, 200e18, 200e18);
+        IFeeRouter.Plan memory plan = router.distribute();
+        assertFalse(plan.smusdAccepts);
+        assertEq(hostile.received(), 200e18);
+        assertEq(plan.smusdCarried, 200e18);
+        assertEq(musd.balanceOf(address(router)), 200e18);
+        assertEq(musd.allowance(address(router), address(hostile)), 0, "leftover approval revoked");
+    }
+
+    function test_smusd_gasBurnerGetsFullStipendThenCarried() public {
+        HostileSMUSD hostile = new HostileSMUSD(address(musd));
+        hostile.setMode(HostileSMUSD.Mode.BURN_GAS);
+        router = _routerWith(address(hostile));
+        _fund(1000e18);
+        IFeeRouter.Plan memory plan = router.distribute{gas: 3_000_000}();
+        assertEq(plan.smusdCarried, 400e18);
+        assertEq(musd.balanceOf(treasury), 200e18);
+    }
+
+    function test_smusd_starvedDonationRevertsInsteadOfFailing() public {
+        _fund(1000e18);
+        // Enough for both notifies, not for the full sMUSD stipend: the split must not change silently.
+        vm.expectRevert(IFeeRouter.InsufficientGas.selector);
+        router.distribute{gas: 1_000_000}();
+        assertEq(musd.balanceOf(address(router)), 1000e18);
+        assertEq(router.smusdFailingSince(), 0);
+    }
+
+    function test_smusd_reentryIsAFailure() public {
+        HostileSMUSD hostile = new HostileSMUSD(address(musd));
+        hostile.setMode(HostileSMUSD.Mode.REENTER);
+        router = _routerWith(address(hostile));
+        hostile.setReenterTarget(address(router));
+        _fund(1000e18);
+        IFeeRouter.Plan memory plan = router.distribute();
+        assertEq(plan.smusdCarried, 400e18, "re-entry rejected by the guard");
+        assertEq(hostile.received(), 0);
+    }
+
+    function test_smusd_returnBombIsNotCopied() public {
+        HostileSMUSD hostile = new HostileSMUSD(address(musd));
+        hostile.setMode(HostileSMUSD.Mode.RETURN_BOMB);
+        router = _routerWith(address(hostile));
+        _fund(1000e18);
+        IFeeRouter.Plan memory plan = router.distribute{gas: 3_000_000}();
+        assertTrue(plan.smusdAccepts);
+        assertEq(hostile.received(), 400e18);
+    }
+
+    function test_smusd_unreadableGettersStillDonate() public {
+        // An upgrade that drops `pendingYield` and makes `totalSupply` revert: the floor is unknown, so the donation
+        // is attempted, and it succeeds.
+        vm.mockCallRevert(address(smusd), abi.encodeCall(IMUSDSavingsRate.pendingYield, ()), "");
+        _fund(1000e18);
+        assertTrue(router.previewDistribute().smusdAccepts);
+        assertTrue(router.distribute().smusdAccepts);
+
+        vm.mockCallRevert(address(smusd), abi.encodeCall(IMUSDSavingsRate.totalSupply, ()), "");
+        _fund(1000e18);
+        assertTrue(router.distribute().smusdAccepts);
+        assertEq(musd.balanceOf(address(router)), 0);
+    }
+
+    function test_smusd_malformedGetterDataDoesNotRevert() public {
+        vm.mockCall(address(smusd), abi.encodeCall(IMUSDSavingsRate.totalSupply, ()), hex"01");
+        vm.mockCall(address(smusd), abi.encodeCall(IMUSDSavingsRate.pendingYield, ()), "");
+        _fund(1000e18);
+        router.previewDistribute();
+        assertTrue(router.distribute().smusdAccepts);
+    }
+
+    function test_smusd_garbagePendingYieldCannotOverflow() public {
+        vm.mockCall(address(smusd), abi.encodeCall(IMUSDSavingsRate.pendingYield, ()), abi.encode(type(uint256).max));
+        _fund(1000e18);
+        assertTrue(router.previewDistribute().smusdAccepts);
+    }
+
+    function test_smusd_dustDoesNotStartAStreak() public {
+        _fund(2_000_000);
+        router.distribute();
+        assertEq(router.smusdCarry(), 800_000);
+        assertEq(router.smusdFailingSince(), 0);
+    }
+
+    // ---------------------------------------------------------------- voter read hardening
+
+    function test_isAlive_emptyReturnDataIsUnreadable() public {
+        vm.mockCall(address(voter), abi.encodeCall(IPoolsVoter.isAlive, (gaugeA)), "");
+        _fund(100e18);
+        vm.expectEmit(true, false, false, true, address(router));
+        emit IFeeRouter.BribeRedirected(gaugeA, 20e18, IFeeRouter.RedirectReason.VoterUnreadable);
+        IFeeRouter.Plan memory plan = router.distribute();
+        assertFalse(plan.gaugeAlive[0]);
+        assertEq(_epochBribe(bribeB), 20e18);
+    }
+
+    function test_isAlive_nonBoolIsUnreadable() public {
+        vm.mockCall(address(voter), abi.encodeCall(IPoolsVoter.isAlive, (gaugeA)), abi.encode(uint256(2)));
+        vm.mockCall(address(voter), abi.encodeCall(IPoolsVoter.isAlive, (gaugeB)), hex"0001");
+        _fund(100e18);
+        IFeeRouter.Plan memory plan = router.previewDistribute();
+        assertFalse(plan.gaugeAlive[0] || plan.gaugeAlive[1]);
+        plan = router.distribute();
+        assertEq(plan.toSmusd, 80e18, "both shares redirected");
+        assertEq(_epochBribe(bribeA) + _epochBribe(bribeB), 0);
+    }
+
+    // ---------------------------------------------------------------- bribe window and vote supply (audit D-3)
+
+    function test_bribeWindowOpen_matchesVoterVoteEnd() public view {
+        assertTrue(router.bribeWindowOpen(EPOCH_START));
+        assertTrue(router.bribeWindowOpen(EPOCH_START + 7 days - 1 hours), "epochVoteEnd itself still votes");
+        assertFalse(router.bribeWindowOpen(EPOCH_START + 7 days - 1 hours + 1));
+        assertFalse(router.bribeWindowOpen(EPOCH_START + 7 days - 1));
+        assertTrue(router.bribeWindowOpen(EPOCH_START + 7 days), "next epoch");
+    }
+
+    function test_bribes_lastHourIsCarriedOtherLegsPaid() public {
+        vm.warp(EPOCH_START + 7 days - 1 hours + 1);
+        _fund(1000e18);
+        uint256 indexBefore = smusd.yieldIndex();
+        vm.expectEmit(true, false, false, true, address(router));
+        emit IFeeRouter.BribeCarried(gaugeA, 200e18, IFeeRouter.CarryReason.VoteWindowClosed);
+        vm.expectEmit(true, false, false, true, address(router));
+        emit IFeeRouter.BribeCarried(gaugeB, 200e18, IFeeRouter.CarryReason.VoteWindowClosed);
+        vm.expectEmit(true, true, false, true, address(router));
+        emit IFeeRouter.Distributed(address(this), EPOCH_START, 1000e18, 400e18, 0, 200e18, 400e18);
+        IFeeRouter.Plan memory plan = router.distribute();
+
+        assertEq(plan.bribesCarried, 400e18);
+        assertEq(plan.bribeAmounts[0] + plan.bribeAmounts[1], 0);
+        assertEq(_epochBribe(bribeA) + _epochBribe(bribeB), 0, "nothing credited to the closing epoch");
+        assertEq(musd.balanceOf(treasury), 200e18);
+        assertEq(smusd.yieldIndex() - indexBefore, 400e18 * 1e18 / SMUSD_SUPPLY);
+        assertEq(router.bribeCarry(0), 200e18);
+        assertEq(router.bribeCarry(1), 200e18);
+        assertEq(router.bribeCarry(2), 0, "unconfigured index");
+        assertEq(musd.allowance(address(router), address(bribeA)), 0);
+    }
+
+    function test_bribes_carryIsPostedToTheSameGaugeNextEpoch() public {
+        vm.warp(EPOCH_START + 7 days - 10 minutes);
+        _fund(1000e18);
+        router.distribute();
+
+        vm.warp(EPOCH_START + 7 days + 2 hours);
+        _fund(100e18);
+        IFeeRouter.Plan memory plan = router.distribute();
+        assertEq(plan.epochStart, EPOCH_START + 7 days);
+        assertEq(plan.bribeAmounts[0], 200e18 + 20e18, "carry plus the new share");
+        assertEq(plan.bribeAmounts[1], 200e18 + 20e18);
+        assertEq(plan.toTreasury, 20e18, "carry is not split again");
+        assertEq(plan.toSmusd, 40e18);
+        assertEq(bribeA.tokenRewardsPerEpoch(address(musd), EPOCH_START + 7 days), 220e18);
+        assertEq(router.bribeCarry(0) + router.bribeCarry(1), 0);
+        assertEq(musd.balanceOf(address(router)), 0);
+    }
+
+    function test_bribes_repeatedLastHourCallsCannotDrainTheCarry() public {
+        vm.warp(EPOCH_START + 7 days - 30 minutes);
+        _fund(1000e18);
+        router.distribute();
+        // Without new fees a second call moves nothing: the carry is not re-split into sMUSD and the treasury.
+        IFeeRouter.Plan memory plan = router.distribute();
+        assertEq(plan.total, 400e18);
+        assertEq(plan.toTreasury, 0);
+        assertEq(plan.toSmusd, 0);
+        assertEq(plan.bribesCarried, 400e18);
+        assertEq(musd.balanceOf(treasury), 200e18);
+        assertEq(musd.balanceOf(address(router)), 400e18);
+    }
+
+    function test_bribes_gaugeWithoutVotesIsCarried() public {
+        bribeA.setTotalSupply(0);
+        _fund(1000e18);
+        vm.expectEmit(true, false, false, true, address(router));
+        emit IFeeRouter.BribeCarried(gaugeA, 200e18, IFeeRouter.CarryReason.NoVotes);
+        IFeeRouter.Plan memory plan = router.distribute();
+        assertEq(plan.bribeAmounts[0], 0);
+        assertEq(plan.bribeAmounts[1], 200e18, "the voted gauge is bribed");
+        assertEq(router.bribeCarry(0), 200e18);
+        assertEq(_epochBribe(bribeA), 0, "no unclaimable bribe");
+
+        // Someone votes: the carried share lands with the next distribution.
+        bribeA.setTotalSupply(1);
+        _fund(100e18);
+        plan = router.distribute();
+        assertEq(plan.bribeAmounts[0], 220e18);
+        assertEq(plan.bribeAmounts[1], 20e18);
+        assertEq(_epochBribe(bribeA), 220e18);
+    }
+
+    function test_bribes_unreadableVoteSupplyStillPosts() public {
+        vm.mockCallRevert(address(bribeA), abi.encodeCall(IBribeVotingReward.totalSupply, ()), "");
+        vm.mockCall(address(bribeB), abi.encodeCall(IBribeVotingReward.totalSupply, ()), "");
+        _fund(100e18);
+        IFeeRouter.Plan memory plan = router.distribute();
+        assertEq(plan.bribeAmounts[0], 20e18);
+        assertEq(plan.bribeAmounts[1], 20e18);
+    }
+
+    function test_bribes_killedGaugeCarryGoesToSmusd() public {
+        bribeA.setTotalSupply(0);
+        _fund(1000e18);
+        router.distribute();
+        assertEq(router.bribeCarry(0), 200e18);
+
+        voter.killGauge(gaugeA);
+        _fund(100e18);
+        vm.expectEmit(true, false, false, true, address(router));
+        emit IFeeRouter.BribeRedirected(gaugeA, 220e18, IFeeRouter.RedirectReason.GaugeDead);
+        IFeeRouter.Plan memory plan = router.distribute();
+        assertEq(plan.toSmusd, 40e18 + 220e18);
+        assertEq(router.bribeCarry(0), 0);
+        assertEq(musd.balanceOf(address(router)), 0);
+    }
+
+    function test_bribes_deadGaugeInLastHourStillRedirects() public {
+        voter.killGauge(gaugeB);
+        vm.warp(EPOCH_START + 7 days - 1);
+        _fund(1000e18);
+        IFeeRouter.Plan memory plan = router.distribute();
+        assertEq(plan.toSmusd, 600e18);
+        assertEq(plan.bribesCarried, 200e18);
+        assertEq(router.bribeCarry(1), 0);
+    }
+
+    function test_previewMatchesDistribute_withCarries() public {
+        bribeB.setTotalSupply(0);
+        vm.warp(EPOCH_START + 7 days - 5 minutes);
+        _fund(2_000_000); // sMUSD leg below the dust floor too
+        IFeeRouter.Plan memory preview = router.previewDistribute();
+        IFeeRouter.Plan memory done = router.distribute();
+        assertEq(abi.encode(preview), abi.encode(done));
+        assertGt(done.bribesCarried, 0);
+        assertGt(done.smusdCarried, 0);
+
+        vm.warp(EPOCH_START + 7 days + 1 hours);
+        _fund(777e18 + 3);
+        preview = router.previewDistribute();
+        done = router.distribute();
+        assertEq(abi.encode(preview), abi.encode(done));
+    }
+
     // ---------------------------------------------------------------- fuzz
 
     function testFuzz_distribute_conservesAndSplits(uint256 total, bool aliveA, bool aliveB) public {
@@ -417,5 +836,55 @@ contract FeeRouterTest is Test {
         if (plan.smusdAccepts) assertEq(left, 0);
         else assertEq(left, plan.toSmusd);
         assertGe(plan.toSmusd, total - total * 2000 / 10_000 - total * 4000 / 10_000, "at least 40%");
+    }
+
+    /// @dev Two distributions under random carry conditions (closing hour, a vote-less bribe, a dead gauge, sMUSD
+    /// down): every wei is accounted for, the router holds exactly its carries, and the treasury receives exactly 20%
+    /// of new fees (a carry is never split again).
+    function testFuzz_distribute_conservesAcrossCarries(
+        uint256 fee1,
+        uint256 fee2,
+        uint256 offset1,
+        uint256 gap,
+        bool votesA,
+        bool aliveB,
+        bool smusdDown
+    ) public {
+        fee1 = bound(fee1, 1, 1e30);
+        fee2 = bound(fee2, 1, 1e30);
+        vm.warp(EPOCH_START + bound(offset1, 0, 7 days - 1));
+        if (!votesA) bribeA.setTotalSupply(0);
+        if (!aliveB) voter.killGauge(gaugeB);
+        if (smusdDown) _smusdDown();
+        uint256 smusdBefore = musd.balanceOf(address(smusd));
+
+        _fund(fee1);
+        _checkPlan(router.distribute());
+        _checkBooks(fee1, smusdBefore);
+        uint256 treasury1 = fee1 * 2000 / 10_000;
+        assertEq(musd.balanceOf(treasury), treasury1, "20% of new fees");
+
+        skip(bound(gap, 0, 6 days)); // stays within the sMUSD grace period
+        _fund(fee2);
+        _checkPlan(router.distribute());
+        _checkBooks(fee1 + fee2, smusdBefore);
+        assertEq(musd.balanceOf(treasury), treasury1 + fee2 * 2000 / 10_000, "carries are not split again");
+    }
+
+    function _checkPlan(IFeeRouter.Plan memory p) internal pure {
+        uint256 posted = p.bribeAmounts[0] + p.bribeAmounts[1];
+        assertEq(p.total, p.toTreasury + posted + p.bribesCarried + p.toSmusd, "plan partitions the balance");
+        assertLe(p.smusdCarried + p.smusdToTreasury, p.toSmusd);
+    }
+
+    function _checkBooks(uint256 paidIn, uint256 smusdBefore) internal view {
+        uint256 bribed = musd.balanceOf(address(bribeA)) + musd.balanceOf(address(bribeB));
+        uint256 donated = musd.balanceOf(address(smusd)) - smusdBefore;
+        uint256 left = musd.balanceOf(address(router));
+        assertEq(bribed + donated + musd.balanceOf(treasury) + left, paidIn, "conservation");
+        assertEq(left, router.bribeCarry(0) + router.bribeCarry(1) + router.smusdCarry(), "router holds its carries");
+        assertEq(musd.allowance(address(router), address(smusd)), 0);
+        assertEq(musd.allowance(address(router), address(bribeA)), 0);
+        assertEq(musd.allowance(address(router), address(bribeB)), 0);
     }
 }

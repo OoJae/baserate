@@ -21,14 +21,19 @@ import {BorrowAccount} from "./BorrowAccount.sol";
 /// because deployment goes through the Arachnid CREATE2 deployer. The constructor deploys the bcBTC receipt and the
 /// BorrowAccount implementation; the M1 market itself is created by the deploy script.
 /// Governance follows the Vault V2 pattern: the governor `submit`s the exact calldata of a raising call, and after
-/// `TIMELOCK` anyone may execute it by calling the setter with that calldata. Decreases are instant for the governor
-/// or the sentinel. Pausing blocks new positions, borrows and module draws only; top-ups, repay, withdraw, unwrap and
-/// liquidation are never pausable.
+/// `TIMELOCK` (and within `EXECUTION_WINDOW`) anyone may execute it by calling the setter with that calldata.
+/// Decreases are instant for the governor or the sentinel, and every decrease of a parameter invalidates all queued
+/// calls for that same parameter (and consumes its own calldata if it was queued), so a raise queued before an
+/// emergency cut can never undo it. Raises are: global cap and limit increases, fee-recipient changes, module
+/// approvals and canary-operator grants. Pausing blocks borrowing (including `openAndBorrow` and `openCanary`) and
+/// module draws only; collateral-only top-ups, repay, withdraw, unwrap and liquidation are never pausable.
 contract BorrowAccountFactory is IBorrowAccountFactory, ReentrancyGuardTransient {
     /// @inheritdoc IBorrowAccountFactory
     uint256 public constant ORIGINATION_FEE_BPS = 10;
     /// @inheritdoc IBorrowAccountFactory
     uint256 public constant TIMELOCK = 48 hours;
+    /// @inheritdoc IBorrowAccountFactory
+    uint256 public constant EXECUTION_WINDOW = 14 days;
 
     /// @inheritdoc IBorrowAccountFactory
     address public immutable MORPHO;
@@ -78,8 +83,12 @@ contract BorrowAccountFactory is IBorrowAccountFactory, ReentrancyGuardTransient
     mapping(address module => bool) public isApprovedModule;
     /// @inheritdoc IBorrowAccountFactory
     mapping(address operator => bool) public isCanaryOperator;
-    /// @inheritdoc IBorrowAccountFactory
-    mapping(bytes data => uint256) public executableAt;
+
+    /// @dev Queue slot (see `_slot`: the calldata hash under its parameter's current epoch) => executable-at time.
+    mapping(bytes32 slot => uint256) internal _queued;
+    /// @dev Parameter key (see `_slot`) => epoch, bumped by every instant decrease of that parameter. Bumping it moves
+    /// every call queued earlier for that parameter to slots that are never read again.
+    mapping(bytes32 paramKey => uint256) internal _epoch;
 
     modifier onlyGovernor() {
         if (msg.sender != governor) revert Unauthorized();
@@ -183,9 +192,15 @@ contract BorrowAccountFactory is IBorrowAccountFactory, ReentrancyGuardTransient
     }
 
     /// @inheritdoc IBorrowAccountFactory
+    /// @dev A CANARY clone whose owner (its immutable argument) is no longer a canary operator gets the lower of the
+    /// two ceilings: its borrows are refused outright, and its withdrawals must not push LTV past the STANDARD ceiling.
     function riskParams(address account) external view returns (RiskParams memory rp) {
         Profile profile = profileOf[account];
         Limits memory l = limits[profile];
+        if (profile == Profile.CANARY && !isCanaryOperator[_cloneOwner(account)]) {
+            uint16 standardBps = limits[Profile.STANDARD].ceilingBps;
+            if (standardBps < l.ceilingBps) l.ceilingBps = standardBps;
+        }
         rp = RiskParams({
             profile: profile,
             positionCap: l.positionCap,
@@ -204,28 +219,35 @@ contract BorrowAccountFactory is IBorrowAccountFactory, ReentrancyGuardTransient
         return ICollSurplusPool(COLL_SURPLUS_POOL).getCollateral(owner);
     }
 
+    /// @inheritdoc IBorrowAccountFactory
+    function executableAt(bytes calldata data) public view returns (uint256 at) {
+        if (data.length < 36) return 0; // never queued: `submit` requires an argument word
+        at = _queued[_slot(data)];
+        if (block.timestamp > at + EXECUTION_WINDOW) at = 0;
+    }
+
     // ---------------------------------------------------------------- governance
 
     /// @inheritdoc IBorrowAccountFactory
     function submit(bytes calldata data) external onlyGovernor nonReentrant {
         bytes4 selector = _timelockedSelector(data);
-        if (executableAt[data] != 0) revert DataAlreadyPending();
+        if (executableAt(data) != 0) revert DataAlreadyPending();
         uint256 at = block.timestamp + TIMELOCK;
-        executableAt[data] = at;
+        _queued[_slot(data)] = at; // overwrites an expired entry for the same calldata
         emit Submitted(selector, data, at);
     }
 
     /// @inheritdoc IBorrowAccountFactory
     function revoke(bytes calldata data) external nonReentrant {
-        if (msg.sender != governor && msg.sender != sentinel) revert Unauthorized();
-        if (executableAt[data] == 0) revert DataNotTimelocked();
-        delete executableAt[data];
+        _onlyGovernorOrSentinel();
+        if (executableAt(data) == 0) revert DataNotTimelocked();
+        delete _queued[_slot(data)];
         emit Revoked(msg.sender, bytes4(data[:4]), data);
     }
 
     /// @inheritdoc IBorrowAccountFactory
     function setGlobalBorrowCap(uint256 newCap) external nonReentrant {
-        if (newCap <= globalBorrowCap) _onlyGovernorOrSentinel();
+        if (newCap <= globalBorrowCap) _decrease();
         else _consumeTimelock();
         globalBorrowCap = newCap;
         emit GlobalBorrowCapSet(msg.sender, newCap);
@@ -234,7 +256,7 @@ contract BorrowAccountFactory is IBorrowAccountFactory, ReentrancyGuardTransient
     /// @inheritdoc IBorrowAccountFactory
     function setLimits(Profile profile, uint128 positionCap, uint16 ceilingBps) external nonReentrant {
         Limits memory current = limits[profile];
-        if (positionCap <= current.positionCap && ceilingBps <= current.ceilingBps) _onlyGovernorOrSentinel();
+        if (positionCap <= current.positionCap && ceilingBps <= current.ceilingBps) _decrease();
         else _consumeTimelock();
         _setLimits(profile, positionCap, ceilingBps, MAX_CEILING_BPS);
     }
@@ -250,7 +272,7 @@ contract BorrowAccountFactory is IBorrowAccountFactory, ReentrancyGuardTransient
     function setModuleApproval(address module, bool approved) external nonReentrant {
         if (module == address(0)) revert ZeroAddress();
         if (approved) _consumeTimelock();
-        else _onlyGovernorOrSentinel();
+        else _decrease();
         isApprovedModule[module] = approved;
         emit ModuleApprovalSet(msg.sender, module, approved);
     }
@@ -268,8 +290,11 @@ contract BorrowAccountFactory is IBorrowAccountFactory, ReentrancyGuardTransient
     }
 
     /// @inheritdoc IBorrowAccountFactory
-    function setCanaryOperator(address operator, bool enabled) external onlyGovernor nonReentrant {
+    function setCanaryOperator(address operator, bool enabled) external nonReentrant {
         if (operator == address(0)) revert ZeroAddress();
+        // A grant lets the operator borrow at the CANARY ceiling, so it is a timelocked raise like any other.
+        if (enabled) _consumeTimelock();
+        else _decrease();
         isCanaryOperator[operator] = enabled;
         emit CanaryOperatorSet(operator, enabled);
     }
@@ -319,24 +344,59 @@ contract BorrowAccountFactory is IBorrowAccountFactory, ReentrancyGuardTransient
         if (msg.sender != governor && msg.sender != sentinel) revert Unauthorized();
     }
 
-    /// @dev Consumes the queued entry for the exact calldata of the current call. Anyone may execute once it is due.
+    /// @dev Consumes the live queued entry for the exact calldata of the current call. Anyone may execute once it is
+    /// due and until `EXECUTION_WINDOW` after that.
     function _consumeTimelock() internal {
-        uint256 at = executableAt[msg.data];
+        uint256 at = executableAt(msg.data);
         if (at == 0) revert DataNotTimelocked();
         if (block.timestamp < at) revert TimelockNotExpired(at);
-        delete executableAt[msg.data];
+        delete _queued[_slot(msg.data)];
         emit Accepted(msg.sig, msg.data);
     }
 
+    /// @dev Instant decrease (governor or sentinel). Bumps the parameter's epoch, so every call queued for it before
+    /// this decrease, including this exact calldata if it was queued as a raise, is no longer executable.
+    function _decrease() internal {
+        _onlyGovernorOrSentinel();
+        (bytes32 key, bytes32 param) = _paramKey(msg.data);
+        ++_epoch[key];
+        emit PendingInvalidated(msg.sig, param);
+    }
+
+    /// @dev The parameter a timelocked call changes: the selector alone for the global cap, the selector and the
+    /// first argument word (profile, module, operator or fee recipient) otherwise. `data` must hold 36 bytes.
+    function _paramKey(bytes calldata data) internal pure returns (bytes32 key, bytes32 param) {
+        bytes4 selector = bytes4(data[:4]);
+        if (selector != IBorrowAccountFactory.setGlobalBorrowCap.selector) param = bytes32(data[4:36]);
+        key = keccak256(abi.encodePacked(selector, param));
+    }
+
+    /// @dev Where `data` is queued: its hash under the current epoch of the parameter it changes.
+    function _slot(bytes calldata data) internal view returns (bytes32) {
+        (bytes32 key,) = _paramKey(data);
+        return keccak256(abi.encode(_epoch[key], keccak256(data)));
+    }
+
+    /// @dev Validates `submit` calldata: a timelocked selector and at least one argument word.
     function _timelockedSelector(bytes calldata data) internal pure returns (bytes4 selector) {
         if (data.length < 4) revert InvalidTimelockedCall(bytes4(0));
         selector = bytes4(data[:4]);
         if (
-            selector != IBorrowAccountFactory.setGlobalBorrowCap.selector
-                && selector != IBorrowAccountFactory.setLimits.selector
-                && selector != IBorrowAccountFactory.setFeeRecipient.selector
-                && selector != IBorrowAccountFactory.setModuleApproval.selector
+            (selector != IBorrowAccountFactory.setGlobalBorrowCap.selector
+                    && selector != IBorrowAccountFactory.setLimits.selector
+                    && selector != IBorrowAccountFactory.setFeeRecipient.selector
+                    && selector != IBorrowAccountFactory.setModuleApproval.selector
+                    && selector != IBorrowAccountFactory.setCanaryOperator.selector) || data.length < 36
         ) revert InvalidTimelockedCall(selector);
+    }
+
+    /// @dev The owner of a registered clone: the 20-byte immutable argument after the 45-byte ERC-1167 runtime.
+    function _cloneOwner(address account) internal view returns (address owner) {
+        assembly ("memory-safe") {
+            mstore(0, 0)
+            extcodecopy(account, 12, 45, 20)
+            owner := mload(0)
+        }
     }
 
     function _salt(address owner, Profile profile) internal pure returns (bytes32) {

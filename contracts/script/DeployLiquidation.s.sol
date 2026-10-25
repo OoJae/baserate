@@ -20,7 +20,8 @@ import {MezoAddresses, MezoNetwork} from "./config/MezoAddresses.sol";
 /// (every existing key is kept).
 /// @dev The two contracts reference each other, so the liquidator's CREATE address is predicted from the deployer's
 /// nonce and asserted after deployment. Everything is read from the registry and MezoAddresses; the only inputs are:
-/// - `SENTINEL` (env, optional): the backstop's deposit-pause role; defaults to the deployer on testnet;
+/// - `SENTINEL` (env): the backstop's deposit-pause role. Required on mainnet (the script reverts without it, since
+///   `Backstop.SENTINEL` is immutable); optional elsewhere, defaulting to the deployer;
 /// - `MAX_KEEPER_SALE` (env, optional): BTC per keeper sale, default 0.05 BTC.
 /// `MAX_IMPACT_BPS` is the break-even impact `1 - 1/LIF` (419 bps at LLTV 0.86, 689 bps at 0.77). If the deployer
 /// holds at least 1 MUSD, 1 MUSD of dead shares seeds the backstop (hygiene; the vesting already defeats the
@@ -61,7 +62,7 @@ contract DeployLiquidation is Script {
         vm.startBroadcast();
         (, address deployer,) = vm.readCallers();
         Deployed memory d;
-        d.sentinel = vm.envOr("SENTINEL", deployer);
+        d.sentinel = _sentinel(deployer);
         d.maxKeeperSale = vm.envOr("MAX_KEEPER_SALE", DEFAULT_MAX_KEEPER_SALE);
         d.maxImpactBps = _breakEvenImpactBps(params.lltv);
 
@@ -91,6 +92,17 @@ contract DeployLiquidation is Script {
         _check(d, params, net);
         _writeRegistry(path, json, d);
         return (address(d.backstop), address(d.liquidator));
+    }
+
+    /// @dev `Backstop.SENTINEL` is immutable, so mainnet takes no default: `SENTINEL` must be set explicitly.
+    function _sentinel(address deployer) internal view returns (address sentinel) {
+        if (block.chainid == MezoAddresses.MAINNET_CHAIN_ID) {
+            require(vm.envExists("SENTINEL"), "DeployLiquidation: set SENTINEL on mainnet");
+            sentinel = vm.envAddress("SENTINEL");
+            require(sentinel != address(0), "DeployLiquidation: SENTINEL is zero");
+        } else {
+            sentinel = vm.envOr("SENTINEL", deployer);
+        }
     }
 
     /// @dev The registry's market must be the factory's and exist on Morpho.

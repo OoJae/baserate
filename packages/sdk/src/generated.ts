@@ -2310,6 +2310,19 @@ export const borrowAccountFactoryGenerated = [
   },
   {
     type: 'function',
+    name: 'EXECUTION_WINDOW',
+    inputs: [],
+    outputs: [
+      {
+        name: '',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     name: 'IMPLEMENTATION',
     inputs: [],
     outputs: [
@@ -2589,7 +2602,7 @@ export const borrowAccountFactoryGenerated = [
     ],
     outputs: [
       {
-        name: '',
+        name: 'at',
         type: 'uint256',
         internalType: 'uint256',
       },
@@ -3306,6 +3319,25 @@ export const borrowAccountFactoryGenerated = [
   },
   {
     type: 'event',
+    name: 'PendingInvalidated',
+    inputs: [
+      {
+        name: 'selector',
+        type: 'bytes4',
+        indexed: true,
+        internalType: 'bytes4',
+      },
+      {
+        name: 'param',
+        type: 'bytes32',
+        indexed: true,
+        internalType: 'bytes32',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
     name: 'Revoked',
     inputs: [
       {
@@ -3742,7 +3774,7 @@ export const borrowAccountGenerated = [
     inputs: [],
     outputs: [
       {
-        name: '',
+        name: 'owner_',
         type: 'address',
         internalType: 'address',
       },
@@ -3873,6 +3905,30 @@ export const borrowAccountGenerated = [
     outputs: [
       {
         name: 'supplied',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'sweep',
+    inputs: [
+      {
+        name: 'token',
+        type: 'address',
+        internalType: 'address',
+      },
+      {
+        name: 'to',
+        type: 'address',
+        internalType: 'address',
+      },
+    ],
+    outputs: [
+      {
+        name: 'amount',
         type: 'uint256',
         internalType: 'uint256',
       },
@@ -4098,6 +4154,31 @@ export const borrowAccountGenerated = [
     anonymous: false,
   },
   {
+    type: 'event',
+    name: 'Swept',
+    inputs: [
+      {
+        name: 'token',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'to',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'amount',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  {
     type: 'error',
     name: 'BorrowPaused',
     inputs: [],
@@ -4120,6 +4201,17 @@ export const borrowAccountGenerated = [
         name: 'globalBorrowCap',
         type: 'uint256',
         internalType: 'uint256',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidReceiver',
+    inputs: [
+      {
+        name: 'receiver',
+        type: 'address',
+        internalType: 'address',
       },
     ],
   },
@@ -5101,6 +5193,19 @@ export const backstopGenerated = [
   },
   {
     type: 'function',
+    name: 'DUST_INVENTORY',
+    inputs: [],
+    outputs: [
+      {
+        name: '',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     name: 'INVENTORY_MARK',
     inputs: [],
     outputs: [
@@ -5401,6 +5506,25 @@ export const backstopGenerated = [
   },
   {
     type: 'function',
+    name: 'claimRedeemWithoutOracle',
+    inputs: [
+      {
+        name: 'id',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    outputs: [
+      {
+        name: 'assets',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     name: 'convertToAssets',
     inputs: [
       {
@@ -5467,7 +5591,7 @@ export const backstopGenerated = [
     ],
     outputs: [
       {
-        name: '',
+        name: 'shares',
         type: 'uint256',
         internalType: 'uint256',
       },
@@ -5606,7 +5730,7 @@ export const backstopGenerated = [
     ],
     outputs: [
       {
-        name: '',
+        name: 'assets',
         type: 'uint256',
         internalType: 'uint256',
       },
@@ -6329,6 +6453,31 @@ export const backstopGenerated = [
   },
   {
     type: 'event',
+    name: 'RedeemPartiallyClaimed',
+    inputs: [
+      {
+        name: 'id',
+        type: 'uint256',
+        indexed: true,
+        internalType: 'uint256',
+      },
+      {
+        name: 'sharesLeft',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+      {
+        name: 'assetsLeft',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
     name: 'RedeemRequested',
     inputs: [
       {
@@ -6445,6 +6594,17 @@ export const backstopGenerated = [
         name: 'actual',
         type: 'address',
         internalType: 'address',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'DustRemainder',
+    inputs: [
+      {
+        name: 'remaining',
+        type: 'uint256',
+        internalType: 'uint256',
       },
     ],
   },
@@ -6738,6 +6898,17 @@ export const backstopGenerated = [
   },
   {
     type: 'error',
+    name: 'NotRequestOwner',
+    inputs: [
+      {
+        name: 'caller',
+        type: 'address',
+        internalType: 'address',
+      },
+    ],
+  },
+  {
+    type: 'error',
     name: 'NotSentinel',
     inputs: [
       {
@@ -6756,6 +6927,22 @@ export const backstopGenerated = [
     type: 'error',
     name: 'ReentrancyGuardReentrantCall',
     inputs: [],
+  },
+  {
+    type: 'error',
+    name: 'SafeCastOverflowedUintDowncast',
+    inputs: [
+      {
+        name: 'bits',
+        type: 'uint8',
+        internalType: 'uint8',
+      },
+      {
+        name: 'value',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
   },
   {
     type: 'error',
@@ -7268,6 +7455,25 @@ export const flashLiquidatorGenerated = [
     stateMutability: 'nonpayable',
   },
   {
+    type: 'function',
+    name: 'sweepNative',
+    inputs: [
+      {
+        name: 'to',
+        type: 'address',
+        internalType: 'address',
+      },
+    ],
+    outputs: [
+      {
+        name: 'amount',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'nonpayable',
+  },
+  {
     type: 'event',
     name: 'Liquidated',
     inputs: [
@@ -7309,6 +7515,50 @@ export const flashLiquidatorGenerated = [
       },
       {
         name: 'profit',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'NativeKept',
+    inputs: [
+      {
+        name: 'caller',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'amount',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'NativeSwept',
+    inputs: [
+      {
+        name: 'caller',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'to',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'amount',
         type: 'uint256',
         indexed: false,
         internalType: 'uint256',
@@ -7524,6 +7774,19 @@ export const feeRouterGenerated = [
   },
   {
     type: 'function',
+    name: 'BRIBE_CUTOFF',
+    inputs: [],
+    outputs: [
+      {
+        name: '',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     name: 'EPOCH',
     inputs: [],
     outputs: [
@@ -7628,6 +7891,32 @@ export const feeRouterGenerated = [
   },
   {
     type: 'function',
+    name: 'SMUSD_GAS',
+    inputs: [],
+    outputs: [
+      {
+        name: '',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'SMUSD_GRACE_EPOCHS',
+    inputs: [],
+    outputs: [
+      {
+        name: '',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     name: 'TREASURY',
     inputs: [],
     outputs: [
@@ -7664,6 +7953,44 @@ export const feeRouterGenerated = [
       },
     ],
     stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'bribeCarry',
+    inputs: [
+      {
+        name: 'i',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    outputs: [
+      {
+        name: '',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'bribeWindowOpen',
+    inputs: [
+      {
+        name: 'timestamp',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    outputs: [
+      {
+        name: '',
+        type: 'bool',
+        internalType: 'bool',
+      },
+    ],
+    stateMutability: 'pure',
   },
   {
     type: 'function',
@@ -7707,6 +8034,21 @@ export const feeRouterGenerated = [
           },
           {
             name: 'epochStart',
+            type: 'uint256',
+            internalType: 'uint256',
+          },
+          {
+            name: 'bribesCarried',
+            type: 'uint256',
+            internalType: 'uint256',
+          },
+          {
+            name: 'smusdCarried',
+            type: 'uint256',
+            internalType: 'uint256',
+          },
+          {
+            name: 'smusdToTreasury',
             type: 'uint256',
             internalType: 'uint256',
           },
@@ -7779,7 +8121,48 @@ export const feeRouterGenerated = [
             type: 'uint256',
             internalType: 'uint256',
           },
+          {
+            name: 'bribesCarried',
+            type: 'uint256',
+            internalType: 'uint256',
+          },
+          {
+            name: 'smusdCarried',
+            type: 'uint256',
+            internalType: 'uint256',
+          },
+          {
+            name: 'smusdToTreasury',
+            type: 'uint256',
+            internalType: 'uint256',
+          },
         ],
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'smusdCarry',
+    inputs: [],
+    outputs: [
+      {
+        name: '',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'smusdFailingSince',
+    inputs: [],
+    outputs: [
+      {
+        name: '',
+        type: 'uint256',
+        internalType: 'uint256',
       },
     ],
     stateMutability: 'view',
@@ -7808,6 +8191,31 @@ export const feeRouterGenerated = [
       },
     ],
     stateMutability: 'view',
+  },
+  {
+    type: 'event',
+    name: 'BribeCarried',
+    inputs: [
+      {
+        name: 'gauge',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'amount',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+      {
+        name: 'reason',
+        type: 'uint8',
+        indexed: false,
+        internalType: 'enum IFeeRouter.CarryReason',
+      },
+    ],
+    anonymous: false,
   },
   {
     type: 'event',
@@ -7916,10 +8324,54 @@ export const feeRouterGenerated = [
   },
   {
     type: 'event',
+    name: 'SmusdShareToTreasury',
+    inputs: [
+      {
+        name: 'treasury',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'amount',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+      {
+        name: 'failingSince',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
     name: 'SmusdYieldDeferred',
     inputs: [
       {
         name: 'amount',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'SmusdYieldFailed',
+    inputs: [
+      {
+        name: 'amount',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+      {
+        name: 'failingSince',
         type: 'uint256',
         indexed: false,
         internalType: 'uint256',
@@ -8277,6 +8729,19 @@ export const riskLensGenerated = [
   },
   {
     type: 'function',
+    name: 'MAX_SKIP_PRICE',
+    inputs: [],
+    outputs: [
+      {
+        name: '',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     name: 'MAX_TROVES',
     inputs: [],
     outputs: [
@@ -8297,6 +8762,19 @@ export const riskLensGenerated = [
         name: '',
         type: 'uint32',
         internalType: 'uint32',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'MCR',
+    inputs: [],
+    outputs: [
+      {
+        name: '',
+        type: 'uint256',
+        internalType: 'uint256',
       },
     ],
     stateMutability: 'view',
@@ -9769,6 +10247,19 @@ export const baserateAllocatorGenerated = [
   },
   {
     type: 'function',
+    name: 'LIQUIDITY_WINDOW',
+    inputs: [],
+    outputs: [
+      {
+        name: '',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     name: 'MARKET_ADAPTER',
     inputs: [],
     outputs: [
@@ -9923,6 +10414,16 @@ export const baserateAllocatorGenerated = [
             type: 'uint192',
             internalType: 'uint192',
           },
+          {
+            name: 'm1SharePrice',
+            type: 'uint128',
+            internalType: 'uint128',
+          },
+          {
+            name: 'm1ExternalLiquidity',
+            type: 'int128',
+            internalType: 'int128',
+          },
         ],
       },
     ],
@@ -9961,6 +10462,24 @@ export const baserateAllocatorGenerated = [
     outputs: [
       {
         name: '',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'm1TrailingApy',
+    inputs: [],
+    outputs: [
+      {
+        name: 'apy',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+      {
+        name: 'window',
         type: 'uint256',
         internalType: 'uint256',
       },
@@ -10076,6 +10595,21 @@ export const baserateAllocatorGenerated = [
             name: 'liquidityAvailable',
             type: 'uint256',
             internalType: 'uint256',
+          },
+          {
+            name: 'm1TrailingApy',
+            type: 'uint256',
+            internalType: 'uint256',
+          },
+          {
+            name: 'conservativeLiquidity',
+            type: 'uint256',
+            internalType: 'uint256',
+          },
+          {
+            name: 'marketTouched',
+            type: 'bool',
+            internalType: 'bool',
           },
         ],
       },
@@ -10196,6 +10730,21 @@ export const baserateAllocatorGenerated = [
             name: 'liquidityAvailable',
             type: 'uint256',
             internalType: 'uint256',
+          },
+          {
+            name: 'm1TrailingApy',
+            type: 'uint256',
+            internalType: 'uint256',
+          },
+          {
+            name: 'conservativeLiquidity',
+            type: 'uint256',
+            internalType: 'uint256',
+          },
+          {
+            name: 'marketTouched',
+            type: 'bool',
+            internalType: 'bool',
           },
         ],
       },
@@ -10404,6 +10953,22 @@ export const baserateAllocatorGenerated = [
   },
   {
     type: 'error',
+    name: 'SafeCastOverflowedIntDowncast',
+    inputs: [
+      {
+        name: 'bits',
+        type: 'uint8',
+        internalType: 'uint8',
+      },
+      {
+        name: 'value',
+        type: 'int256',
+        internalType: 'int256',
+      },
+    ],
+  },
+  {
+    type: 'error',
     name: 'SafeCastOverflowedUintDowncast',
     inputs: [
       {
@@ -10411,6 +10976,17 @@ export const baserateAllocatorGenerated = [
         type: 'uint8',
         internalType: 'uint8',
       },
+      {
+        name: 'value',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'SafeCastOverflowedUintToInt',
+    inputs: [
       {
         name: 'value',
         type: 'uint256',
@@ -10441,6 +11017,32 @@ export const wsMusdLiquidityAdapterGenerated = [
       },
     ],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'RESCUE_PROBE_GAS',
+    inputs: [],
+    outputs: [
+      {
+        name: '',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'RESCUE_TIMELOCK',
+    inputs: [],
+    outputs: [
+      {
+        name: '',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'view',
   },
   {
     type: 'function',
@@ -10639,6 +11241,57 @@ export const wsMusdLiquidityAdapterGenerated = [
   },
   {
     type: 'function',
+    name: 'rescue',
+    inputs: [],
+    outputs: [
+      {
+        name: 'shares',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+      {
+        name: 'unwound',
+        type: 'bool',
+        internalType: 'bool',
+      },
+    ],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'rescueExecutableAt',
+    inputs: [],
+    outputs: [
+      {
+        name: '',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'rescued',
+    inputs: [],
+    outputs: [
+      {
+        name: '',
+        type: 'bool',
+        internalType: 'bool',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'revokeRescue',
+    inputs: [],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
     name: 'setSkimRecipient',
     inputs: [
       {
@@ -10675,6 +11328,13 @@ export const wsMusdLiquidityAdapterGenerated = [
       },
     ],
     stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'submitRescue',
+    inputs: [],
+    outputs: [],
+    stateMutability: 'nonpayable',
   },
   {
     type: 'function',
@@ -10741,6 +11401,70 @@ export const wsMusdLiquidityAdapterGenerated = [
   },
   {
     type: 'event',
+    name: 'RescueRevoked',
+    inputs: [
+      {
+        name: 'sender',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'RescueSubmitted',
+    inputs: [
+      {
+        name: 'executableAt',
+        type: 'uint64',
+        indexed: false,
+        internalType: 'uint64',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'RescueUnwound',
+    inputs: [
+      {
+        name: 'shares',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+      {
+        name: 'assets',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'RescuedInKind',
+    inputs: [
+      {
+        name: 'recipient',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'shares',
+        type: 'uint256',
+        indexed: false,
+        internalType: 'uint256',
+      },
+    ],
+    anonymous: false,
+  },
+  {
+    type: 'event',
     name: 'SetSkimRecipient',
     inputs: [
       {
@@ -10783,7 +11507,17 @@ export const wsMusdLiquidityAdapterGenerated = [
   },
   {
     type: 'error',
+    name: 'InsufficientGas',
+    inputs: [],
+  },
+  {
+    type: 'error',
     name: 'InvalidData',
+    inputs: [],
+  },
+  {
+    type: 'error',
+    name: 'NoPendingRescue',
     inputs: [],
   },
   {
@@ -10795,6 +11529,22 @@ export const wsMusdLiquidityAdapterGenerated = [
     type: 'error',
     name: 'ReentrancyGuardReentrantCall',
     inputs: [],
+  },
+  {
+    type: 'error',
+    name: 'RescuePending',
+    inputs: [],
+  },
+  {
+    type: 'error',
+    name: 'RescueTimelocked',
+    inputs: [
+      {
+        name: 'executableAt',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
   },
   {
     type: 'error',

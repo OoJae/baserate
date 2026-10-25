@@ -8,6 +8,7 @@ import {WsMusdLiquidityAdapter} from "../../src/vault/WsMusdLiquidityAdapter.sol
 import {IWsMusdLiquidityAdapter} from "../../src/interfaces/IWsMusdLiquidityAdapter.sol";
 import {MockERC20} from "../utils/MockERC20.sol";
 import {MockMUSD} from "../utils/MockMUSD.sol";
+import {SMUSDMock} from "../utils/SMUSDMock.sol";
 import {VaultBase} from "./VaultBase.t.sol";
 
 /// @notice WsMusdLiquidityAdapter against a real VaultV2 and the local wsMUSD/sMUSD stack.
@@ -29,6 +30,10 @@ contract WsMusdLiquidityAdapterTest is VaultBase {
         assertEq(musd.allowance(address(liq), address(vault)), type(uint256).max, "vault pulls deallocations");
         assertEq(musd.allowance(address(liq), address(ws)), type(uint256).max, "wsMUSD pulls deposits");
         assertEq(liq.skimRecipient(), address(0));
+        assertEq(liq.rescueExecutableAt(), 0);
+        assertFalse(liq.rescued());
+        assertEq(liq.RESCUE_TIMELOCK(), 72 hours);
+        assertEq(liq.RESCUE_PROBE_GAS(), 3_000_000);
     }
 
     function test_constructor_revertsOnAssetMismatch() public {
@@ -255,6 +260,138 @@ contract WsMusdLiquidityAdapterTest is VaultBase {
         uint256 held = liq.heldAssets();
         musd.mint(address(liq), 50e18);
         assertEq(liq.heldAssets(), held, "stray MUSD is not vault value");
+    }
+
+    // ---------------------------------------------------------------- rescue
+
+    function test_rescue_rolesAndTimelock() public {
+        address sentinel = makeAddr("sentinel");
+        vm.prank(curator); // vault owner
+        vault.setIsSentinel(sentinel, true);
+
+        vm.expectRevert(IWsMusdLiquidityAdapter.NoPendingRescue.selector);
+        vm.prank(curator);
+        liq.rescue();
+        vm.expectRevert(IWsMusdLiquidityAdapter.NoPendingRescue.selector);
+        vm.prank(sentinel);
+        liq.revokeRescue();
+
+        vm.expectRevert(IWsMusdLiquidityAdapter.NotAuthorized.selector);
+        vm.prank(sentinel); // only the curator submits
+        liq.submitRescue();
+        vm.expectRevert(IWsMusdLiquidityAdapter.NotAuthorized.selector);
+        vm.prank(stranger);
+        liq.submitRescue();
+
+        uint64 executableAt = uint64(block.timestamp + 72 hours);
+        vm.expectEmit(address(liq));
+        emit IWsMusdLiquidityAdapter.RescueSubmitted(executableAt);
+        vm.prank(curator);
+        liq.submitRescue();
+        assertEq(liq.rescueExecutableAt(), executableAt);
+        vm.expectRevert(IWsMusdLiquidityAdapter.RescuePending.selector);
+        vm.prank(curator);
+        liq.submitRescue();
+
+        skip(72 hours - 1);
+        vm.expectRevert(abi.encodeWithSelector(IWsMusdLiquidityAdapter.RescueTimelocked.selector, executableAt));
+        vm.prank(curator);
+        liq.rescue();
+
+        skip(1);
+        vm.expectRevert(IWsMusdLiquidityAdapter.NotAuthorized.selector);
+        vm.prank(stranger);
+        liq.rescue();
+        vm.expectRevert(IWsMusdLiquidityAdapter.NotAuthorized.selector);
+        vm.prank(stranger);
+        liq.revokeRescue();
+
+        // A sentinel cancels it.
+        vm.expectEmit(address(liq));
+        emit IWsMusdLiquidityAdapter.RescueRevoked(sentinel);
+        vm.prank(sentinel);
+        liq.revokeRescue();
+        assertEq(liq.rescueExecutableAt(), 0);
+        vm.expectRevert(IWsMusdLiquidityAdapter.NoPendingRescue.selector);
+        vm.prank(curator);
+        liq.rescue();
+    }
+
+    function test_rescue_whileWsMusdPays_unwindsToIdle_nothingLeaves() public {
+        _deposit(lender, 10_000e18);
+        uint256 held = liq.heldAssets();
+        uint256 total = vault.totalAssets();
+        vm.prank(curator);
+        liq.submitRescue();
+        skip(72 hours);
+
+        uint256 shares = ws.balanceOf(address(liq));
+        vm.prank(curator);
+        (uint256 rescuedShares, bool unwound) = liq.rescue();
+        assertEq(rescuedShares, shares);
+        assertTrue(unwound, "wsMUSD paid: unwound into idle");
+        assertFalse(liq.rescued());
+        assertEq(ws.balanceOf(address(liq)), 0);
+        assertEq(ws.balanceOf(curator), 0, "nothing left the adapter");
+        assertApproxEqAbs(liq.idle(), held, 2);
+        assertApproxEqAbs(liq.heldAssets(), held, 2);
+        assertApproxEqAbs(vault.totalAssets(), total, 2, "no loss");
+
+        // The next allocation puts the idle MUSD back into wsMUSD.
+        _deposit(lender2, 1e18);
+        assertEq(liq.idle(), 0);
+    }
+
+    function test_rescue_whenWsMusdCannotPay_sendsSharesInKindToOwner() public {
+        _deposit(lender, 10_000e18);
+        smusd.setDisabled(false, true, false); // sMUSD withdraw reverts: wsMUSD cannot pay out
+        vm.prank(lender);
+        vm.expectRevert(SMUSDMock.Disabled.selector);
+        vault.withdraw(100e18, lender, lender);
+
+        vm.prank(curator);
+        liq.submitRescue();
+        skip(72 hours);
+        uint256 shares = ws.balanceOf(address(liq));
+        vm.expectEmit(address(liq));
+        emit IWsMusdLiquidityAdapter.RescuedInKind(curator, shares);
+        vm.prank(curator); // curator and sentinel in this setup; the shares go to the vault's owner
+        (, bool unwound) = liq.rescue();
+        assertFalse(unwound);
+        assertTrue(liq.rescued());
+        assertEq(ws.balanceOf(curator), shares, "vault owner holds the wsMUSD shares");
+        assertEq(liq.heldAssets(), 0);
+        assertEq(liq.availableLiquidity(), 0);
+
+        // The vault books the shares' value as a loss on its next accrual; the sentinel syncs the allocation.
+        assertEq(vault.totalAssets(), 0);
+        vm.prank(curator);
+        vault.deallocate(address(liq), "", 0);
+        assertEq(vault.allocation(liq.adapterId()), 0);
+
+        // From now on the adapter keeps deposits idle (no new MUSD into the frozen wsMUSD), and they exit normally.
+        _deposit(lender2, 500e18);
+        assertEq(liq.idle(), 500e18);
+        assertEq(ws.balanceOf(address(liq)), 0);
+        uint256 lender2Shares = vault.balanceOf(lender2);
+        vm.prank(lender2);
+        assertApproxEqAbs(vault.redeem(lender2Shares, lender2, lender2), 500e18, 1, "idle pays out");
+
+        // The owner unwinds manually: in kind to sMUSD needs no sMUSD withdraw.
+        vm.prank(curator);
+        (uint256 smusdOut,) = ws.redeemInKind(shares, curator, curator);
+        assertApproxEqAbs(smusdOut, 10_100e18, 2);
+    }
+
+    function test_rescue_needsTheProbeStipend() public {
+        _deposit(lender, 1000e18);
+        vm.prank(curator);
+        liq.submitRescue();
+        skip(72 hours);
+        vm.prank(curator);
+        vm.expectRevert(IWsMusdLiquidityAdapter.InsufficientGas.selector);
+        liq.rescue{gas: 2_000_000}();
+        assertGt(ws.balanceOf(address(liq)), 0);
     }
 
     // ---------------------------------------------------------------- fuzz

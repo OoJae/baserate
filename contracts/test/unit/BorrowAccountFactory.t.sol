@@ -64,6 +64,7 @@ contract BorrowAccountFactoryTest is Test {
         assertEq(factory.LLTV(), 0.77e18);
         assertEq(factory.ORIGINATION_FEE_BPS(), 10);
         assertEq(factory.TIMELOCK(), 48 hours);
+        assertEq(factory.EXECUTION_WINDOW(), 14 days);
         assertEq(factory.MAX_CEILING_BPS(), 7675);
         assertEq(factory.governor(), governor);
         assertEq(factory.sentinel(), sentinel);
@@ -154,7 +155,7 @@ contract BorrowAccountFactoryTest is Test {
     }
 
     /// @dev Mezo's block gas limit is 10M; the factory deploy (with embedded receipt and implementation) must stay
-    /// under ~8M so `--gas-estimate-multiplier 110` still fits.
+    /// under 10M / 1.3 so the deploy script's `--gas-estimate-multiplier 130` still fits.
     function test_deployGas_fitsMezoBlock() public {
         bytes memory init = abi.encodePacked(type(BorrowAccountFactory).creationCode, abi.encode(_params()));
         uint256 calldataGas = 21_000 + 2 * ((init.length + 31) / 32); // base tx + EIP-3860 initcode words
@@ -169,7 +170,7 @@ contract BorrowAccountFactoryTest is Test {
         uint256 execGas = before - gasleft();
         assertTrue(f != address(0), "deploy failed");
         emit log_named_uint("factory deploy gas (approx)", execGas + calldataGas);
-        assertLt(execGas + calldataGas, 8_000_000);
+        assertLt(execGas + calldataGas, uint256(10_000_000) * 100 / 130);
         assertLt(init.length, 49_152, "EIP-3860 initcode limit");
     }
 
@@ -231,16 +232,69 @@ contract BorrowAccountFactoryTest is Test {
         factory.openCanary{value: 1e18}(0, 0);
     }
 
-    function test_setCanaryOperator_onlyGovernor() public {
+    /// @dev D-7: a canary grant is a ceiling raise for that address, so it goes through the 48 h queue like every
+    /// other raise; removal stays instant for the governor or the sentinel.
+    function test_setCanaryOperator_grantTimelockedRemovalInstant() public {
+        bytes memory grant = abi.encodeCall(IBorrowAccountFactory.setCanaryOperator, (alice, true));
+
+        vm.prank(governor);
+        vm.expectRevert(IBorrowAccountFactory.DataNotTimelocked.selector);
+        factory.setCanaryOperator(alice, true);
+
         vm.prank(sentinel);
         vm.expectRevert(IBorrowAccountFactory.Unauthorized.selector);
+        factory.submit(grant);
+
+        vm.prank(governor);
+        factory.submit(grant);
+        skip(48 hours - 1);
+        vm.expectRevert(abi.encodeWithSelector(IBorrowAccountFactory.TimelockNotExpired.selector, block.timestamp + 1));
         factory.setCanaryOperator(alice, true);
+        skip(1);
 
         vm.expectEmit(true, false, false, true, address(factory));
         emit IBorrowAccountFactory.CanaryOperatorSet(alice, true);
-        vm.prank(governor);
+        vm.prank(stranger); // anyone executes a due grant
         factory.setCanaryOperator(alice, true);
         assertTrue(factory.isCanaryOperator(alice));
+        assertEq(factory.executableAt(grant), 0, "consumed");
+
+        vm.prank(stranger);
+        vm.expectRevert(IBorrowAccountFactory.Unauthorized.selector);
+        factory.setCanaryOperator(alice, false);
+        vm.prank(sentinel);
+        factory.setCanaryOperator(alice, false);
+        assertFalse(factory.isCanaryOperator(alice));
+
+        vm.prank(governor);
+        vm.expectRevert(IBorrowAccountFactory.ZeroAddress.selector);
+        factory.setCanaryOperator(address(0), false);
+    }
+
+    /// @dev Removing an operator invalidates a grant to that operator queued earlier, but not grants to others.
+    function test_setCanaryOperator_removalInvalidatesQueuedGrantToSameOperator() public {
+        bytes memory grantAlice = abi.encodeCall(IBorrowAccountFactory.setCanaryOperator, (alice, true));
+        bytes memory grantStranger = abi.encodeCall(IBorrowAccountFactory.setCanaryOperator, (stranger, true));
+        vm.startPrank(governor);
+        factory.submit(grantAlice);
+        factory.submit(grantStranger);
+        vm.stopPrank();
+
+        vm.expectEmit(true, true, false, true, address(factory));
+        emit IBorrowAccountFactory.PendingInvalidated(
+            IBorrowAccountFactory.setCanaryOperator.selector, bytes32(uint256(uint160(alice)))
+        );
+        vm.prank(sentinel);
+        factory.setCanaryOperator(alice, false);
+        assertEq(factory.executableAt(grantAlice), 0, "invalidated");
+        assertEq(factory.executableAt(grantStranger), block.timestamp + 48 hours, "other operator untouched");
+
+        skip(48 hours);
+        vm.expectRevert(IBorrowAccountFactory.DataNotTimelocked.selector);
+        factory.setCanaryOperator(alice, true);
+        factory.setCanaryOperator(stranger, true);
+        assertTrue(factory.isCanaryOperator(stranger));
+        assertFalse(factory.isCanaryOperator(alice));
     }
 
     function test_comeBack_disabledWithoutBos() public {
@@ -253,7 +307,9 @@ contract BorrowAccountFactoryTest is Test {
     function test_riskParams_bundle() public {
         address account = factory.createAccount(alice);
         vm.prank(governor);
-        factory.setCanaryOperator(alice, true);
+        factory.submit(abi.encodeCall(IBorrowAccountFactory.setCanaryOperator, (alice, true)));
+        skip(48 hours);
+        factory.setCanaryOperator(alice, true); // being an operator does not change a STANDARD account's bundle
         IBorrowAccountFactory.RiskParams memory rp = factory.riskParams(account);
         assertEq(uint8(rp.profile), uint8(Profile.STANDARD));
         assertEq(rp.positionCap, 0.01e18);
@@ -381,7 +437,113 @@ contract BorrowAccountFactoryTest is Test {
         factory.submit(pause);
         vm.expectRevert(abi.encodeWithSelector(IBorrowAccountFactory.InvalidTimelockedCall.selector, bytes4(0)));
         factory.submit(hex"01");
+        // A timelocked selector without its argument word could never be executed.
+        bytes4 sel = IBorrowAccountFactory.setGlobalBorrowCap.selector;
+        vm.expectRevert(abi.encodeWithSelector(IBorrowAccountFactory.InvalidTimelockedCall.selector, sel));
+        factory.submit(abi.encodePacked(sel, bytes31(0)));
         vm.stopPrank();
+        assertEq(factory.executableAt(hex"01"), 0);
+    }
+
+    // ---------------------------------------------------------------- queue invalidation (A-2 / D-4) and expiry
+
+    /// @dev D-4: queued calldata executed while it is a decrease takes the instant path and is consumed with it.
+    function test_timelock_instantPathConsumesQueuedCalldata() public {
+        bytes memory raise = abi.encodeCall(IBorrowAccountFactory.setGlobalBorrowCap, (8000e18));
+        vm.prank(governor);
+        factory.submit(raise);
+        skip(48 hours);
+        // Make 8,000 a decrease: a second queued raise to 10,000 executes first.
+        bytes memory higher = abi.encodeCall(IBorrowAccountFactory.setGlobalBorrowCap, (10_000e18));
+        vm.prank(governor);
+        factory.submit(higher);
+        skip(48 hours);
+        factory.setGlobalBorrowCap(10_000e18);
+
+        vm.prank(governor);
+        factory.setGlobalBorrowCap(8000e18); // instant: 8,000 <= 10,000
+        assertEq(factory.executableAt(raise), 0, "consumed by the instant path");
+
+        vm.prank(sentinel);
+        factory.setGlobalBorrowCap(0);
+        vm.prank(stranger);
+        vm.expectRevert(IBorrowAccountFactory.DataNotTimelocked.selector);
+        factory.setGlobalBorrowCap(8000e18);
+    }
+
+    /// @dev A-2: a decrease of a parameter invalidates every raise of that parameter queued before it, and only those.
+    function test_timelock_decreaseInvalidatesQueuedRaisesOfSameParameterOnly() public {
+        bytes memory capRaise = abi.encodeCall(IBorrowAccountFactory.setGlobalBorrowCap, (9000e18));
+        bytes memory stdRaise = abi.encodeCall(IBorrowAccountFactory.setLimits, (Profile.STANDARD, 0.02e18, 7000));
+        bytes memory canRaise = abi.encodeCall(IBorrowAccountFactory.setLimits, (Profile.CANARY, 0.004e18, 7675));
+        bytes memory fee = abi.encodeCall(IBorrowAccountFactory.setFeeRecipient, (stranger));
+        vm.startPrank(governor);
+        factory.submit(capRaise);
+        factory.submit(stdRaise);
+        factory.submit(canRaise);
+        factory.submit(fee);
+        vm.stopPrank();
+        uint256 due = block.timestamp + 48 hours;
+
+        // Cutting the STANDARD ceiling invalidates only the queued STANDARD limits.
+        vm.expectEmit(true, true, false, true, address(factory));
+        emit IBorrowAccountFactory.PendingInvalidated(IBorrowAccountFactory.setLimits.selector, bytes32(0));
+        vm.prank(sentinel);
+        factory.setLimits(Profile.STANDARD, 0.01e18, 5000);
+        assertEq(factory.executableAt(stdRaise), 0);
+        assertEq(factory.executableAt(canRaise), due);
+        assertEq(factory.executableAt(capRaise), due);
+        assertEq(factory.executableAt(fee), due);
+
+        // Cutting the global cap invalidates the queued cap raise.
+        vm.expectEmit(true, true, false, true, address(factory));
+        emit IBorrowAccountFactory.PendingInvalidated(IBorrowAccountFactory.setGlobalBorrowCap.selector, bytes32(0));
+        vm.prank(sentinel);
+        factory.setGlobalBorrowCap(4000e18);
+        assertEq(factory.executableAt(capRaise), 0);
+
+        skip(48 hours);
+        vm.expectRevert(IBorrowAccountFactory.DataNotTimelocked.selector);
+        factory.setLimits(Profile.STANDARD, 0.02e18, 7000);
+        vm.expectRevert(IBorrowAccountFactory.DataNotTimelocked.selector);
+        factory.setGlobalBorrowCap(9000e18);
+        factory.setLimits(Profile.CANARY, 0.004e18, 7675);
+        factory.setFeeRecipient(stranger);
+        (, uint16 ceiling) = factory.limits(Profile.STANDARD);
+        assertEq(ceiling, 5000, "cut stands");
+        assertEq(factory.globalBorrowCap(), 4000e18, "cut stands");
+
+        // Revoking an invalidated entry fails like any non-live entry; resubmitting starts a fresh 48 h.
+        vm.prank(sentinel);
+        vm.expectRevert(IBorrowAccountFactory.DataNotTimelocked.selector);
+        factory.revoke(capRaise);
+        vm.prank(governor);
+        factory.submit(capRaise);
+        assertEq(factory.executableAt(capRaise), block.timestamp + 48 hours);
+        skip(48 hours);
+        factory.setGlobalBorrowCap(9000e18);
+        assertEq(factory.globalBorrowCap(), 9000e18);
+    }
+
+    /// @dev A queued call is executable for `EXECUTION_WINDOW` after its timelock; then it lapses and can be
+    /// resubmitted.
+    function test_timelock_expiresAfterExecutionWindow() public {
+        bytes memory raise = abi.encodeCall(IBorrowAccountFactory.setGlobalBorrowCap, (6000e18));
+        vm.prank(governor);
+        factory.submit(raise);
+        uint256 due = block.timestamp + 48 hours;
+        skip(48 hours + 14 days);
+        assertEq(factory.executableAt(raise), due, "last second of the window");
+        skip(1);
+        assertEq(factory.executableAt(raise), 0, "expired");
+        vm.expectRevert(IBorrowAccountFactory.DataNotTimelocked.selector);
+        factory.setGlobalBorrowCap(6000e18);
+
+        vm.prank(governor);
+        factory.submit(raise); // an expired entry does not block resubmission
+        skip(48 hours);
+        factory.setGlobalBorrowCap(6000e18);
+        assertEq(factory.globalBorrowCap(), 6000e18);
     }
 
     function test_setLimits_decreaseInstantIncreaseTimelocked() public {
@@ -446,6 +608,19 @@ contract BorrowAccountFactoryTest is Test {
         factory.setModuleApproval(module, false);
         vm.prank(sentinel);
         factory.setModuleApproval(module, false);
+        assertFalse(factory.isApprovedModule(module));
+    }
+
+    /// @dev Removing a module invalidates a re-approval of that module queued before the removal.
+    function test_setModuleApproval_removalInvalidatesQueuedApproval() public {
+        bytes memory approve = abi.encodeCall(IBorrowAccountFactory.setModuleApproval, (module, true));
+        vm.prank(governor);
+        factory.submit(approve);
+        vm.prank(sentinel);
+        factory.setModuleApproval(module, false);
+        skip(48 hours);
+        vm.expectRevert(IBorrowAccountFactory.DataNotTimelocked.selector);
+        factory.setModuleApproval(module, true);
         assertFalse(factory.isApprovedModule(module));
     }
 

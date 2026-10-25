@@ -9,6 +9,8 @@ import {ILiquidationVenues, Venue} from "./ILiquidationVenues.sol";
 /// @notice Permissionless, zero-capital liquidator for the M1 market (MUSD loan, bcBTC collateral).
 /// @dev `liquidate` calls `Morpho.liquidate` with a callback; inside `onMorphoLiquidate` the seized bcBTC is unwrapped
 /// to native BTC and sold on one venue, the repaid MUSD is approved to Morpho, and the surplus goes to the caller.
+/// Native BTC the liquidation leaves behind is forwarded to the caller when it can take it, else kept for
+/// `sweepNative`; native BTC already held (donations) is never forwarded by `liquidate`.
 interface IFlashLiquidator is ILiquidationVenues, IMorphoLiquidateCallback {
     /// @notice Per-venue outcome of selling a given amount of seized BTC.
     /// @param proceeds MUSD the venue would pay (0 when unavailable, out of cash or the quote failed).
@@ -64,6 +66,12 @@ interface IFlashLiquidator is ILiquidationVenues, IMorphoLiquidateCallback {
         uint256 profit
     );
 
+    /// @notice Emitted when the caller could not take the native BTC its liquidation left behind; it stays in the
+    /// contract for `sweepNative`.
+    event NativeKept(address indexed caller, uint256 amount);
+    /// @notice Emitted when `sweepNative` sends the contract's native BTC to `to`.
+    event NativeSwept(address indexed caller, address indexed to, uint256 amount);
+
     /// @notice A required address is zero.
     error ZeroAddress();
     /// @notice `MAX_IMPACT_BPS` is zero or above the 20% hard cap.
@@ -80,7 +88,7 @@ interface IFlashLiquidator is ILiquidationVenues, IMorphoLiquidateCallback {
     error InsufficientProceeds(uint256 proceeds, uint256 repaid);
     /// @notice The caller's profit is below `minProfit`.
     error ProfitTooLow(uint256 profit, uint256 minProfit);
-    /// @notice Sending leftover native BTC to the caller failed.
+    /// @notice `sweepNative` could not send the native BTC to `to`.
     error NativeSendFailed(address to, uint256 amount);
 
     /// @notice Liquidates `borrower` in M1 and sells the seized BTC through `venue`, with no capital from the caller.
@@ -95,6 +103,11 @@ interface IFlashLiquidator is ILiquidationVenues, IMorphoLiquidateCallback {
     function liquidate(address borrower, uint256 seizedAssets, Venue venue, uint256 minProfit)
         external
         returns (uint256 seized, uint256 repaid, uint256 profit);
+
+    /// @notice Sends all native BTC held here to `to`. Permissionless: the contract holds nothing between
+    /// transactions in normal operation, so this only moves donations and refunds a liquidation caller could not take.
+    /// @return amount Native BTC sent.
+    function sweepNative(address to) external returns (uint256 amount);
 
     /// @notice Full-liquidation preview for `borrower`, with the proceeds and profit of every venue.
     /// @dev Not a view, because QuoterV2 simulates the CL swap: call it with `eth_call` (viem `simulateContract` or
