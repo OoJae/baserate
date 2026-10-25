@@ -7,3 +7,6 @@
 [submodule "lib/morpho-blue"]
 	path = contracts/lib/morpho-blue
 	url = https://github.com/morpho-org/morpho-blue
+[submodule "contracts/lib/vault-v2"]
+	path = contracts/lib/vault-v2
+	url = https://github.com/morpho-org/vault-v2
