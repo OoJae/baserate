@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://baserate-mezo.vercel.app/evidence.schema.json",
+  "title": "Baserate evidence",
+  "description": "Curated on-chain evidence. Every entry is re-verified live against Blockscout when the Evidence page loads.",
+  "type": "object",
+  "required": ["entries"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["chainId", "kind", "tx", "block", "summary", "proves"],
+        "additionalProperties": false,
+        "properties": {
+          "chainId": {
+            "enum": [31611, 31612],
+            "description": "31611 Mezo testnet, 31612 Mezo mainnet"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Short machine label, e.g. deploy, borrow, repay-exit, wsmusd-deposit, wsmusd-sync, dispenser-claim",
+            "pattern": "^[a-z0-9-]{2,40}$"
+          },
+          "tx": { "type": "string", "pattern": "^0x[0-9a-fA-F]{64}$" },
+          "block": { "type": "integer", "minimum": 1 },
+          "summary": { "type": "string", "minLength": 3, "maxLength": 200 },
+          "proves": { "type": "string", "minLength": 3, "maxLength": 300 }
+        }
+      }
+    }
+  }
+}

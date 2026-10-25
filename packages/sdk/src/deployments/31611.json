@@ -1,0 +1,59 @@
+{
+  "$comment": "Mezo testnet registry. External addresses mirror contracts/script/config/MezoAddresses.sol (verified on-chain 2026-10-24/25). TODO(deploy): Baserate contract addresses are zero-address placeholders until the Wave 1 testnet deploy; regenerate from contracts/broadcast/*/31611/run-latest.json (06_ExportRegistry).",
+  "chainId": 31611,
+  "version": "w1-predeploy",
+  "startBlock": 0,
+  "external": {
+    "musd": "0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503",
+    "smusd": "0x6f461c68B2c5492C0F5CCEc5a264d692aA7A8e16",
+    "pcv": "0x4dDD70f4C603b6089c07875Be02fEdFD626b80Af",
+    "borrowerOperations": "0xCdF7028ceAB81fA0C6971208e83fa7872994beE5",
+    "borrowerOperationsSignatures": "0xD757e3646AF370b15f32EB557F0F8380Df7D639e",
+    "troveManager": "0xE47c80e8c23f6B4A1aE41c34837a0599D5D16bb0",
+    "sortedTroves": "0x722E4D24FD6Ff8b0AC679450F3D91294607268fA",
+    "priceFeed": "0x86bCF0841622a5dAC14A313a15f96A95421b9366",
+    "collSurplusPool": "0xB4C35747c26E4aB5F1a7CdC7E875B5946eFa6fa9",
+    "morpho": "0xCe1da828cA15cb1FDAfa84C366A53C8106655a73",
+    "irm": "0x0c97Fe017628636649ff374aD499529F91167441",
+    "pyth": "0x933aDeC2C7624b11E4B2b80ACE15BF9a71a31315",
+    "skipBtcUsd": "0x7b7c000000000000000000000000000000000015",
+    "btc": "0x7b7C000000000000000000000000000000000000",
+    "mezo": "0x7B7c000000000000000000000000000000000001",
+    "router": "0x9a1ff7FE3a0F69959A3fBa1F1e5ee18e1A9CD7E9",
+    "poolFactory": "0x4947243CC818b627A5D06d14C4eCe7398A23Ce1A",
+    "btcMusdVolatilePool": "0xd16A5Df82120ED8D626a1a15232bFcE2366d6AA9",
+    "multicall3": "0xcA11bde05977b3631167028862bE2a173976CA11",
+    "create2Deployer": "0x4e59b44847b379578588920cA78FbF26c0B4956C"
+  },
+  "lltv": "770000000000000000",
+  "feeds": {
+    "pythBtcUsd": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+    "pythMusdUsd": "0x0617a9b725011a126a2b9fd53563f4236501f32cf76d877644b943394606c6de"
+  },
+  "contracts": {
+    "oracle": { "address": "0x0000000000000000000000000000000000000000", "tx": null, "block": 0 },
+    "wsMusd": { "address": "0x0000000000000000000000000000000000000000", "tx": null, "block": 0 },
+    "factory": { "address": "0x0000000000000000000000000000000000000000", "tx": null, "block": 0 },
+    "collateral": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "tx": null,
+      "block": 0
+    },
+    "borrowAccountImpl": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "tx": null,
+      "block": 0
+    },
+    "dispenser": { "address": "0x0000000000000000000000000000000000000000", "tx": null, "block": 0 }
+  },
+  "markets": {
+    "M1": {
+      "id": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "loanToken": "0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503",
+      "collateralToken": "0x0000000000000000000000000000000000000000",
+      "oracle": "0x0000000000000000000000000000000000000000",
+      "irm": "0x0c97Fe017628636649ff374aD499529F91167441",
+      "lltv": "770000000000000000"
+    }
+  }
+}
