@@ -1,6 +1,6 @@
-# Judge guide: test everything in about 5 minutes
+# Judge guide: test everything in about 10 minutes
 
-You need an EVM wallet (MetaMask, Rabby, etc.) and one faucet drip. Everything runs on **Mezo testnet (chain 31611)**; test tokens have no value.
+You need an EVM wallet (MetaMask, Rabby, etc.) and one faucet drip. Everything runs on **Mezo testnet (chain 31611)**; test tokens have no value. Steps 1 to 5 are the core (about 5 minutes); steps 6 to 9 cover the lending vault, liquidations, risk and fees.
 
 ## 1. Get test BTC (1 minute)
 
@@ -28,8 +28,30 @@ You need an EVM wallet (MetaMask, Rabby, etc.) and one faucet drip. Everything r
 
 ## 5. Check the chain, not the UI (1 minute)
 
-Open **[Evidence](https://baserate-mezo.vercel.app/evidence)**. Every recorded transaction is re-verified live against Mezo's Blockscout explorer, and every contract shows its source-verification status (Sourcify exact match for ours).
+Open **[Evidence](https://baserate-mezo.vercel.app/evidence)**. Every recorded transaction, grouped by area (core, the recorded judge journey, Lend, Liquidations, Fees, Risk), is re-verified live against Mezo's Blockscout explorer, and every contract shows its source-verification status (Sourcify for ours).
+
+## 6. Lend MUSD in vMUSD (2 minutes)
+
+1. On **Lend**, look at where the vault's MUSD is: lent in M1, parked in wsMUSD, or idle; the M1 supply APY next to wsMUSD's; and the 2,000 MUSD borrow buffer the allocator keeps in M1.
+2. Deposit a few MUSD: approve, then deposit (Morpho Vault V2 has no permit deposit). You get vMUSD 1:1 and the liquidity adapter moves your MUSD into wsMUSD in the same transaction.
+3. Withdraw with **Max**. While the vault's idle MUSD and wsMUSD cover it, it comes straight from vMUSD; a larger withdrawal goes through the allocator, which pulls the rest out of M1 with no penalty.
+4. **Rebalance** is permissionless. It is disabled during the one-hour cooldown after a move, with a countdown, and shows what the next move would be.
+
+## 7. Liquidate, or watch the canary (1 minute)
+
+1. On **Liquidate**, positions are sorted riskiest first. The team's **Canary** sits just under the 77% liquidation LTV; each row shows the BTC price at which it becomes liquidatable.
+2. The preview comes from `FlashLiquidator.previewLiquidation`, simulated live: seizable BTC, repayment, bad debt, and what the backstop and the vAMM would pay. CL200 is disabled on testnet (no pool).
+3. If BTC dips below the canary's threshold, **Liquidate** turns on: one transaction, no MUSD needed, profit at least 90% of the preview. A keeper also watches it, so you may have to be quick.
+4. The **Backstop** card shows bMUSD's NAV, free cash, BTC inventory and auction; deposits are open and exits take 7 days.
+
+## 8. Read the risk dashboard (30 seconds)
+
+**Risk** is one `RiskLens.snapshot()` call: oracle health, MUSD peg, market, caps, backstop solvency, how much seized BTC the vAMM absorbs at each size, and the first troves in the MUSD redemption queue. Grey sources are the ones testnet does not have (CL200 pool, MUSD/USD pool).
+
+## 9. Follow the fees (30 seconds)
+
+**Fees** shows the FeeRouter's next split (40% sMUSD yield, 40% bribe on the BTC/MUSD gauge for veBTC voters, 20% treasury), the first distribution (an 8 MUSD bribe and 8 MUSD to sMUSD), and the pending switch of the factory's fee recipient to the router with its 48-hour timelock countdown. **Distribute** is permissionless and enabled whenever the router holds MUSD.
 
 ## What is built and what is next
 
-See [BUILT_VS_PLANNED.md](BUILT_VS_PLANNED.md). The sidebar's "Coming in the next release" items (lending vault, liquidations, credit lines, come-back flow, RiskLens) are designed and scheduled, and are not presented as working features.
+See [BUILT_VS_PLANNED.md](BUILT_VS_PLANNED.md). The sidebar's "Coming in the next release" items (credit lines and the come-back flow) are designed and scheduled, and are not presented as working features. The keeper service, the subgraph and mainnet proof mode are planned too.

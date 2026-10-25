@@ -1,8 +1,9 @@
 # Baserate web
 
-Vite + React 19 SPA for Mezo testnet: **Borrow** (MUSD against BTC on Mezo's Morpho), **Save** (wsMUSD) and
-**Evidence** (live Blockscout verification). Lend, Liquidate, Credit lines, Come back and RiskLens are listed in
-the nav as "Coming in the next release"; they have no screens yet.
+Vite + React 19 SPA for Mezo testnet: **Borrow** (MUSD against BTC on Mezo's Morpho), **Save** (wsMUSD), **Lend**
+(vMUSD, a Morpho Vault V2 with BaserateAllocator), **Liquidate** (FlashLiquidator and the bMUSD backstop), **Risk**
+(RiskLens), **Fees** (FeeRouter and the timelocked fee switch) and **Evidence** (live Blockscout verification).
+Credit lines and Come back are listed in the nav as "Coming in the next release"; they have no screens yet.
 
 Stack: wagmi 2.19.5, viem 2.57.11, RainbowKit 2.2.11, TanStack Query and Router (code-based routes), Tailwind 4.
 
@@ -26,9 +27,19 @@ Only `BASERATE_PUBLIC_*` variables reach the bundle (`envPrefix`); see `.env.exa
 | `BASERATE_PUBLIC_WC_PROJECT_ID` | Optional Reown project id. Without it, only injected (and EIP-6963) wallets are offered. |
 | `BASERATE_PUBLIC_LOCAL_FORK=1`  | Target an anvil fork of testnet on `http://127.0.0.1:8545` with chain id 31337.          |
 
-Contract addresses come from `packages/sdk/src/deployments/<chainId>.json`. Until the testnet deploy, Baserate
-contracts are zero-address placeholders and the UI shows live Mezo data (Skip, Pyth, trove queue, sMUSD) with
-borrowing and deposits disabled and labelled.
+Contract addresses come from `packages/sdk/src/deployments/<chainId>.json`. On a network where a Baserate contract
+is a zero-address placeholder, its page says so and its actions stay disabled.
+
+Calls that spend Skip precompile reads (`RiskLens.snapshot`, `FlashLiquidator.previewLiquidation`/`quoteVenues`) go
+through `directClient` in `src/wagmi.ts`, a client without multicall batching: Mezo allows 20 precompile calls per
+`eth_call`, so they must not be aggregated with other reads. History (allocator moves, distributions, accounts,
+backstop exits) is read from logs in 10,000-block windows (`src/lib/logs.ts`) until the subgraph lands.
+
+## End-to-end tests
+
+`pnpm --filter web e2e` runs the judge journey and the Wave 2 pages live on Mezo testnet with a funded test key
+(see `playwright.config.ts` for the environment variables). It sends real transactions (borrow, save, repay, a 3 MUSD
+vMUSD deposit and withdrawal) and only sends a liquidation if a position is actually liquidatable.
 
 ## How transactions work
 
