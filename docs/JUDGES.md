@@ -41,7 +41,7 @@ Open **[Evidence](https://baserate-mezo.vercel.app/evidence)**. Every recorded t
 
 1. On **Liquidate**, positions are sorted riskiest first. The team's **Canary** sits just under the 77% liquidation LTV; each row shows the BTC price at which it becomes liquidatable.
 2. The preview comes from `FlashLiquidator.previewLiquidation`, simulated live: seizable BTC, repayment, bad debt, and what the backstop and the vAMM would pay. CL200 is disabled on testnet (no pool).
-3. If BTC dips below the canary's threshold, **Liquidate** turns on: one transaction, no MUSD needed, profit at least 90% of the preview. A keeper also watches it, so you may have to be quick.
+3. If BTC dips below the canary's threshold, **Liquidate** turns on: one transaction, no MUSD needed, profit at least 90% of the preview. Our keeper ([public status](https://keeper-production-be8a.up.railway.app/status)) scans every 30 seconds, so you may have to be quick.
 4. The **Backstop** card shows bMUSD's NAV, free cash, BTC inventory and auction; deposits are open and exits take 7 days.
 
 ## 8. Read the risk dashboard (30 seconds)
@@ -54,4 +54,4 @@ Open **[Evidence](https://baserate-mezo.vercel.app/evidence)**. Every recorded t
 
 ## What is built and what is next
 
-See [BUILT_VS_PLANNED.md](BUILT_VS_PLANNED.md). The sidebar's "Coming in the next release" items (credit lines and the come-back flow) are designed and scheduled, and are not presented as working features. The keeper service, the subgraph and mainnet proof mode are planned too.
+See [BUILT_VS_PLANNED.md](BUILT_VS_PLANNED.md). The sidebar's "Coming in the next release" items (credit lines and the come-back flow) are designed and scheduled, and are not presented as working features. The keeper is live on Railway; the subgraph and mainnet proof mode are planned.

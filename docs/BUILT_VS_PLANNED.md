@@ -35,6 +35,7 @@ Judges told us to separate what works today from what is coming. Everything unde
 | Web app | Borrow, Save, Lend, Liquidate (with the backstop), Risk, Fees and Evidence pages; get-test-funds card | `apps/web/` |
 | e2e harness | Playwright drives the deployed UI with a real signing wallet: the judge journey, a vMUSD deposit and withdrawal, and live checks of Liquidate, Risk and Fees, each confirmed from the RPC (and `cast`) | `apps/web/e2e/` |
 | SDK | Typed chains and registry, ABIs generated from the contracts, Morpho math, MUSD permit signing, plain-language revert decoding, vault/liquidation/fee/RiskLens helpers | `packages/sdk/` |
+| Keeper | Runs on Railway with its own funded key; every call it makes is permissionless. Hourly `rebalance()` and `checkpoint()` on the allocator, a liquidation scan of every M1 account every 30 s (vAMM first, then the backstop), and `distribute()` on the FeeRouter outside the last hour of a Mezo Earn epoch. Recent actions and account LTVs at [/status](https://keeper-production-be8a.up.railway.app/status) | `apps/keeper/` |
 
 ## Planned
 
@@ -42,7 +43,7 @@ Judges told us to separate what works today from what is coming. Everything unde
 |---|---|
 | `CreditLineModule` | Capped, revocable MUSD credit lines for apps and AI agents, with an x402 agent demo |
 | Come-back flow | Lets borrowers whose troves were redeemed reclaim stranded BTC straight into a redemption-free position |
-| Keeper service | Automated rebalances, liquidations of the canary and others, backstop inventory sales and fee distributions, on Railway |
+| More keeper jobs | Backstop inventory sales, an sMUSD and Morpho upgrade watcher that cuts caps, and Telegram alerts |
 | Subgraph | A Goldsky indexer for history (positions, moves, distributions) instead of reading logs in the browser |
 | SDK release | `@baserate/sdk` published to npm |
 | Mainnet proof mode | The same contracts on Mezo mainnet with caps of at most 2,000 MUSD, plus recorded evidence transactions |

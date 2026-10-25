@@ -25,7 +25,7 @@ Baserate moves real BTC and MUSD. This page lists what can go wrong, what we bui
 | **MUSD depeg makes debt look smaller** | The MUSD leg is clamped to [1.00, 1.02]. Collateral is never valued above its USD price in MUSD terms. At today's ~$0.989 this undervalues collateral by about 1.1%, which is conservative |
 | **Positions bigger than liquidation depth** | All collateral must enter through `bcBTC`, which only registered accounts can mint, so per-position and global caps bind the whole market, not just our UI. Caps start at 0.01 BTC per position (testnet) and 2,000 MUSD global (mainnet) |
 | **Inflation, donation and sandwich attacks on wsMUSD** | Internal accounting means donations never move the price instantly. Harvested yield vests over 3 days. Same-block sandwiches earn about nothing. 1 MUSD of dead shares at deploy |
-| **sMUSD proxy upgrade or strategy change** | `redeemInKind` makes no calls into sMUSD's deposit, withdraw or claim functions. An upgrade watcher (keeper) alerts and cuts caps |
+| **sMUSD proxy upgrade or strategy change** | `redeemInKind` makes no calls into sMUSD's deposit, withdraw or claim functions. An upgrade watcher that alerts and cuts caps is a planned keeper job |
 | **Precompile and gas limits** (20 precompile calls per tx, 10M block gas) | Each flow's precompile budget is counted: open/borrow uses 2 Skip reads, exit uses 0. Deploy transactions stay under 8M gas |
 | **Front-running clone creation** | Clones have no initializer; the owner is an immutable argument at a CREATE2 address salted by (owner, profile) |
 | **Bad-debt seeding through canaries** | The canary profile (higher ceiling, for live liquidation demos) can only be opened by an allow-listed operator, at 0.002 BTC per position |
