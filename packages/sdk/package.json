@@ -51,7 +51,8 @@
     "gen:abis": "node scripts/gen-abis.mjs",
     "check:abis": "tsx scripts/check-abis.mjs ../src/abis.ts",
     "build": "tsup src/index.ts --format esm --dts --clean --target es2022 --external viem",
-    "prepublishOnly": "pnpm run build && pnpm run typecheck && pnpm run test"
+    "prepublishOnly": "pnpm run build && pnpm run typecheck && pnpm run test",
+    "sync:registry": "node scripts/sync-registry.mjs"
   },
   "peerDependencies": {
     "viem": "2.57.11"
