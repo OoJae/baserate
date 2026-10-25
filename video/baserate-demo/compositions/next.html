@@ -1,0 +1,77 @@
+<template>
+  <style>
+    @font-face {
+      font-family: "Iowan";
+      src: local("IowanOldStyle-Roman"), local("Iowan Old Style Roman"), local("Iowan Old Style");
+    }
+    #root {
+      position: absolute;
+      inset: 0;
+      background: #f6f5f1;
+      color: #14181d;
+      font-family: "Inter", sans-serif;
+    }
+    #next-stage {
+      position: absolute;
+      left: 192px;
+      top: 0;
+      width: 1536px;
+      height: 1080px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    #next-label {
+      font-size: 42px;
+      color: #565d68;
+      margin-bottom: 44px;
+    }
+    #root .line {
+      font-family: "Iowan", serif;
+      font-size: 92px;
+      line-height: 1.15;
+      letter-spacing: -0.015em;
+      padding: 10px 0;
+      border-top: 1px solid #e3e0d7;
+    }
+    #root .word {
+      display: inline-block;
+    }
+    #root .accent {
+      color: #0b6e5f;
+    }
+  </style>
+  <div id="root" data-composition-id="next" data-width="1920" data-height="1080">
+    <div id="next-stage" class="clip" data-start="0" data-duration="7" data-track-index="1">
+      <p id="next-label">Next</p>
+      <p id="next-credit" class="line">
+        <span class="word">Credit</span> <span class="word">lines</span> <span class="word">for</span>
+        <span class="word accent">AI agents</span>
+      </p>
+      <p id="next-comeback" class="line">
+        <span class="word">A</span> <span class="word">way</span> <span class="word">back</span>
+        <span class="word">for</span> <span class="word">redeemed</span> <span class="word">borrowers</span>
+      </p>
+      <p id="next-mainnet" class="line">
+        <span class="word">Mainnet,</span> <span class="word">caps</span> <span class="word">≤</span>
+        <span class="word">2,000</span> <span class="word">MUSD</span>
+      </p>
+    </div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    tl.fromTo("#next-label", { opacity: 0, filter: "blur(8px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.2, ease: "power4.out" }, 0.1);
+    // Each line prints word by word (light grey to ink) on the words the voice says.
+    const lines = [
+      ["#next-credit", 0.7],
+      ["#next-comeback", 2.4],
+      ["#next-mainnet", 4.4],
+    ];
+    for (const [sel, at] of lines) {
+      tl.fromTo(`${sel}`, { borderTopColor: "rgba(227,224,215,0)" }, { borderTopColor: "rgba(227,224,215,1)", duration: 0.3 }, at - 0.1);
+      tl.fromTo(`${sel} .word`, { color: "#e3e0d7" }, { color: (i, el) => (el.classList.contains("accent") ? "#0b6e5f" : "#14181d"), duration: 0.12, stagger: 0.08 }, at);
+    }
+    tl.to("#next-stage > *", { opacity: 0, filter: "blur(8px)", duration: 0.2, ease: "power3.in" }, 6.75);
+    window.__timelines["next"] = tl;
+  </script>
+</template>

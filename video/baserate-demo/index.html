@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #f6f5f1;
+      }
+      #root {
+        width: 100%;
+        height: 100%;
+        position: relative;
+      }
+      #ground {
+        position: absolute;
+        inset: 0;
+        background: #f6f5f1;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      Beat starts follow docs/VIDEO_SCRIPT.md at ~150 wpm. When the voiceover arrives, each host's data-start is set to
+      its first spoken word and data-duration runs to the next host's start.
+    -->
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="120"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div id="ground"></div>
+      <div id="problem" data-composition-id="problem" data-composition-src="compositions/problem.html" data-start="0" data-duration="18" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div id="borrow" data-composition-id="borrow" data-composition-src="compositions/borrow.html" data-start="18" data-duration="17" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div id="save" data-composition-id="save" data-composition-src="compositions/save.html" data-start="35" data-duration="9" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div id="lend" data-composition-id="lend" data-composition-src="compositions/lend.html" data-start="44" data-duration="14" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div id="liquidate" data-composition-id="liquidate" data-composition-src="compositions/liquidate.html" data-start="58" data-duration="16" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div id="fees" data-composition-id="fees" data-composition-src="compositions/fees.html" data-start="74" data-duration="12" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div id="exit" data-composition-id="exit" data-composition-src="compositions/exit.html" data-start="86" data-duration="8" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div id="proof" data-composition-id="proof" data-composition-src="compositions/proof.html" data-start="94" data-duration="13" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div id="next" data-composition-id="next" data-composition-src="compositions/next.html" data-start="107" data-duration="7" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div id="end" data-composition-id="end" data-composition-src="compositions/end.html" data-start="114" data-duration="6" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+    </div>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

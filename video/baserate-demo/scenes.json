@@ -1,0 +1,462 @@
+{
+  "_readme": "Footage beats for tools/build_scenes.py. Rects are [x, y, w, h] in recording pixels (2160x1350: the 1440x900 app layout at 1.5x). Times are seconds inside the scene; slot lengths must match the hosts in index.html.",
+  "borrow": {
+    "note": "0.0009 BTC typed, oracle and redemption panels, one-transaction borrow and the Borrowed toast",
+    "duration": 17,
+    "enter": "settle",
+    "exit": "whip",
+    "segments": [
+      {
+        "src": "assets/footage/01-borrow.mp4",
+        "mediaStart": 2.6,
+        "start": 0,
+        "duration": 3.0
+      },
+      {
+        "src": "assets/footage/01-borrow.mp4",
+        "mediaStart": 7.5,
+        "start": 3.0,
+        "duration": 6.8
+      },
+      {
+        "src": "assets/footage/01-borrow.mp4",
+        "mediaStart": 17.0,
+        "start": 9.8,
+        "duration": 7.2,
+        "rate": 1.5
+      }
+    ],
+    "cams": [
+      {
+        "at": 0,
+        "rect": [
+          400,
+          90,
+          1730,
+          973
+        ]
+      },
+      {
+        "at": 3.0,
+        "rect": [
+          444,
+          140,
+          952,
+          640
+        ],
+        "cut": true
+      },
+      {
+        "at": 6.4,
+        "rect": [
+          1250,
+          380,
+          1129,
+          635
+        ]
+      },
+      {
+        "at": 8.4,
+        "rect": [
+          1250,
+          840,
+          1129,
+          635
+        ]
+      },
+      {
+        "at": 9.8,
+        "rect": [
+          500,
+          470,
+          1000,
+          720
+        ],
+        "cut": true
+      },
+      {
+        "at": 14.7,
+        "rect": [
+          1400,
+          560,
+          760,
+          790
+        ]
+      }
+    ]
+  },
+  "save": {
+    "note": "wsMUSD page, then a 5 MUSD deposit with a permit landing in sMUSD",
+    "duration": 9,
+    "segments": [
+      {
+        "src": "assets/footage/03-save.mp4",
+        "mediaStart": 3.2,
+        "start": 0,
+        "duration": 3.0
+      },
+      {
+        "src": "assets/footage/03-save.mp4",
+        "mediaStart": 6.8,
+        "start": 3.0,
+        "duration": 6.0,
+        "rate": 1.5
+      }
+    ],
+    "cams": [
+      {
+        "at": 0,
+        "rect": [
+          400,
+          80,
+          1720,
+          968
+        ]
+      },
+      {
+        "at": 3.0,
+        "rect": [
+          400,
+          200,
+          1020,
+          574
+        ],
+        "cut": true
+      }
+    ]
+  },
+  "lend": {
+    "note": "vMUSD page, where the MUSD sits, the allocator, then a 3 MUSD deposit",
+    "duration": 14,
+    "segments": [
+      {
+        "src": "assets/footage/06-lend.mp4",
+        "mediaStart": 1.2,
+        "start": 0,
+        "duration": 3.4
+      },
+      {
+        "src": "assets/footage/06-lend.mp4",
+        "mediaStart": 10.6,
+        "start": 3.4,
+        "duration": 5.0
+      },
+      {
+        "src": "assets/footage/06-lend.mp4",
+        "mediaStart": 24.0,
+        "start": 8.4,
+        "duration": 5.6,
+        "rate": 1.5
+      }
+    ],
+    "cams": [
+      {
+        "at": 0,
+        "rect": [
+          400,
+          100,
+          1720,
+          968
+        ]
+      },
+      {
+        "at": 3.4,
+        "rect": [
+          400,
+          60,
+          1020,
+          574
+        ],
+        "cut": true
+      },
+      {
+        "at": 5.9,
+        "rect": [
+          400,
+          760,
+          1020,
+          574
+        ]
+      },
+      {
+        "at": 8.4,
+        "rect": [
+          400,
+          100,
+          1020,
+          620
+        ],
+        "cut": true
+      },
+      {
+        "at": 11.9,
+        "rect": [
+          1000,
+          560,
+          1160,
+          790
+        ]
+      }
+    ]
+  },
+  "liquidate": {
+    "note": "Liquidate page, the preview's venues, the canary row, then the Evidence page's keeper card",
+    "duration": 16,
+    "segments": [
+      {
+        "src": "assets/footage/07-liquidate.mp4",
+        "mediaStart": 2.9,
+        "start": 0,
+        "duration": 3.3,
+        "rate": 0.6
+      },
+      {
+        "src": "assets/footage/07-liquidate.mp4",
+        "mediaStart": 8.1,
+        "start": 3.3,
+        "duration": 4.2,
+        "rate": 0.6
+      },
+      {
+        "src": "assets/footage/07-liquidate.mp4",
+        "mediaStart": 5.8,
+        "start": 7.5,
+        "duration": 2.5,
+        "rate": 0.7
+      },
+      {
+        "src": "assets/footage/05-evidence.mp4",
+        "mediaStart": 6.4,
+        "start": 10.0,
+        "duration": 6.0,
+        "rate": 0.36
+      }
+    ],
+    "cams": [
+      {
+        "at": 0,
+        "rect": [
+          400,
+          130,
+          1730,
+          973
+        ]
+      },
+      {
+        "at": 3.3,
+        "rect": [
+          400,
+          240,
+          1020,
+          574
+        ],
+        "cut": true
+      },
+      {
+        "at": 5.2,
+        "rect": [
+          400,
+          640,
+          1020,
+          574
+        ]
+      },
+      {
+        "at": 7.5,
+        "rect": [
+          440,
+          500,
+          960,
+          420
+        ],
+        "cut": true
+      },
+      {
+        "at": 10.0,
+        "rect": [
+          415,
+          320,
+          1200,
+          675
+        ],
+        "cut": true
+      },
+      {
+        "at": 12.6,
+        "rect": [
+          415,
+          320,
+          1720,
+          720
+        ],
+        "dur": 0.7
+      }
+    ]
+  },
+  "fees": {
+    "note": "FeeRouter split and gauge bribe target, then the first distribution",
+    "duration": 12,
+    "segments": [
+      {
+        "src": "assets/footage/09-fees.mp4",
+        "mediaStart": 2.8,
+        "start": 0,
+        "duration": 8.0,
+        "rate": 0.13
+      },
+      {
+        "src": "assets/footage/09-fees.mp4",
+        "mediaStart": 6.9,
+        "start": 8.0,
+        "duration": 4.0,
+        "rate": 0.7
+      }
+    ],
+    "cams": [
+      {
+        "at": 0,
+        "rect": [
+          400,
+          110,
+          1280,
+          720
+        ]
+      },
+      {
+        "at": 2.0,
+        "rect": [
+          440,
+          600,
+          960,
+          340
+        ]
+      },
+      {
+        "at": 5.0,
+        "rect": [
+          440,
+          860,
+          960,
+          300
+        ]
+      },
+      {
+        "at": 8.0,
+        "rect": [
+          445,
+          600,
+          950,
+          300
+        ],
+        "cut": true
+      }
+    ]
+  },
+  "exit": {
+    "note": "Repay & withdraw: the click, the wait, then the position-closed banner",
+    "duration": 8,
+    "segments": [
+      {
+        "src": "assets/footage/04-repay-exit.mp4",
+        "mediaStart": 16.4,
+        "start": 0,
+        "duration": 1.6
+      },
+      {
+        "src": "assets/footage/04-repay-exit.mp4",
+        "mediaStart": 19.5,
+        "start": 1.6,
+        "duration": 6.4,
+        "rate": 1.453
+      }
+    ],
+    "cams": [
+      {
+        "at": 0,
+        "rect": [
+          400,
+          540,
+          1150,
+          700
+        ]
+      },
+      {
+        "at": 1.6,
+        "rect": [
+          400,
+          640,
+          1050,
+          600
+        ],
+        "cut": true
+      },
+      {
+        "at": 6.1,
+        "rect": [
+          400,
+          380,
+          1130,
+          640
+        ]
+      }
+    ]
+  },
+  "proof": {
+    "note": "Evidence page: verified-live rows, the list scrolling, then the contracts table",
+    "duration": 13,
+    "exit": "blur",
+    "segments": [
+      {
+        "src": "assets/footage/05-evidence.mp4",
+        "mediaStart": 2.6,
+        "start": 0,
+        "duration": 2.5
+      },
+      {
+        "src": "assets/footage/05-evidence.mp4",
+        "mediaStart": 11.0,
+        "start": 2.5,
+        "duration": 2.5,
+        "rate": 1.6
+      },
+      {
+        "src": "assets/footage/05-evidence.mp4",
+        "mediaStart": 29.3,
+        "start": 5.0,
+        "duration": 8.0,
+        "rate": 0.8
+      }
+    ],
+    "cams": [
+      {
+        "at": 0,
+        "rect": [
+          400,
+          140,
+          1730,
+          973
+        ]
+      },
+      {
+        "at": 2.5,
+        "rect": [
+          445,
+          100,
+          1460,
+          820
+        ],
+        "cut": true
+      },
+      {
+        "at": 5.0,
+        "rect": [
+          450,
+          300,
+          1460,
+          820
+        ],
+        "cut": true
+      }
+    ]
+  }
+}

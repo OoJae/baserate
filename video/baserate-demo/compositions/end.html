@@ -1,0 +1,92 @@
+<template>
+  <style>
+    @font-face {
+      font-family: "Iowan";
+      src: local("IowanOldStyle-Roman"), local("Iowan Old Style Roman"), local("Iowan Old Style");
+    }
+    #root {
+      position: absolute;
+      inset: 0;
+      background: #f6f5f1;
+      color: #14181d;
+      font-family: "Inter", sans-serif;
+    }
+    #end-stage {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    #end-lockup {
+      display: flex;
+      align-items: center;
+      gap: 40px;
+    }
+    #end-mark {
+      width: 168px;
+      height: 168px;
+      display: block;
+    }
+    #end-wordmark {
+      font-family: "Iowan", serif;
+      font-size: 150px;
+      line-height: 1;
+      letter-spacing: -0.02em;
+    }
+    #end-tagline {
+      font-family: "Iowan", serif;
+      font-size: 64px;
+      margin-top: 76px;
+    }
+    #root .word {
+      display: inline-block;
+    }
+    #end-url {
+      font-size: 38px;
+      color: #565d68;
+      margin-top: 36px;
+    }
+    #end-url b {
+      color: #0b6e5f;
+      font-weight: 700;
+    }
+  </style>
+  <div id="root" data-composition-id="end" data-width="1920" data-height="1080">
+    <div id="end-stage" class="clip" data-start="0" data-duration="6" data-track-index="1">
+      <div id="end-lockup">
+        <svg id="end-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect id="end-mark-fill" width="32" height="32" rx="9" fill="#0b6e5f" />
+          <path id="end-mark-base" d="M8 23h16" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" />
+          <path
+            id="end-mark-rate"
+            d="M8 18.5h6.2l3.6-5h6.2"
+            fill="none"
+            stroke="#ffffff"
+            stroke-width="2.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        <span id="end-wordmark">Baserate</span>
+      </div>
+      <p id="end-tagline">
+        <span class="word">Mezo’s</span> <span class="word">rails,</span> <span class="word">Mezo’s</span>
+        <span id="end-market" class="word">market.</span>
+      </p>
+      <p id="end-url"><b>baserate-mezo.vercel.app</b> · live on Mezo testnet</p>
+    </div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    // The mark is performed: its fill rises from the base, then the base and the rate line draw.
+    tl.fromTo("#end-mark-fill", { clipPath: "inset(100% 0 0 0 round 9px)" }, { clipPath: "inset(0% 0 0 0 round 9px)", duration: 0.55, ease: "expo.out" }, 0.1);
+    tl.fromTo("#end-mark-base", { strokeDasharray: 16, strokeDashoffset: 16 }, { strokeDashoffset: 0, duration: 0.3, ease: "power2.out" }, 0.4);
+    tl.fromTo("#end-mark-rate", { strokeDasharray: 19, strokeDashoffset: 19 }, { strokeDashoffset: 0, duration: 0.45, ease: "power2.inOut" }, 0.55);
+    tl.fromTo("#end-wordmark", { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.5, ease: "power3.out" }, 0.75);
+    tl.fromTo("#end-tagline .word", { color: "#e3e0d7" }, { color: (i, el) => (el.id === "end-market" ? "#0b6e5f" : "#14181d"), duration: 0.12, stagger: 0.09 }, 1.5);
+    tl.fromTo("#end-url", { opacity: 0, filter: "blur(6px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.2, ease: "power4.out" }, 2.6);
+    window.__timelines["end"] = tl;
+  </script>
+</template>

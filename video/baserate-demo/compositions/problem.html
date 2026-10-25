@@ -1,0 +1,134 @@
+<template>
+  <style>
+    @font-face {
+      font-family: "Iowan";
+      src: local("IowanOldStyle-Roman"), local("Iowan Old Style Roman"), local("Iowan Old Style");
+    }
+    #root {
+      position: absolute;
+      inset: 0;
+      background: #f6f5f1;
+      color: #14181d;
+      font-family: "Inter", sans-serif;
+    }
+    #root .stage {
+      position: absolute;
+      left: 192px;
+      top: 0;
+      width: 1536px;
+      height: 1080px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    #root .label {
+      font-size: 42px;
+      line-height: 1.2;
+      color: #565d68;
+    }
+    #root .num {
+      font-family: "Iowan", serif;
+      font-size: 440px;
+      line-height: 0.95;
+      letter-spacing: -0.02em;
+      margin-top: 20px;
+      display: flex;
+      align-items: baseline;
+      gap: 28px;
+    }
+    #root .unit {
+      font-family: "Inter", sans-serif;
+      font-size: 84px;
+      letter-spacing: 0;
+      color: #565d68;
+    }
+    #root .sub {
+      font-size: 42px;
+      line-height: 1.25;
+      margin-top: 36px;
+    }
+    #root .word {
+      display: inline-block;
+    }
+    #problem-source {
+      position: absolute;
+      left: 192px;
+      bottom: 108px;
+      font-size: 28px;
+      color: #676e78;
+    }
+  </style>
+  <div id="root" data-composition-id="problem" data-width="1920" data-height="1080">
+    <div id="problem-troves" class="stage clip" data-start="0" data-duration="6.8" data-track-index="1">
+      <p id="problem-troves-label" class="label">Open MUSD troves on Mezo mainnet</p>
+      <p class="num"><span id="problem-troves-count">104</span></p>
+      <p id="problem-troves-sub" class="sub">down from 104</p>
+    </div>
+    <div id="problem-price" class="stage clip" data-start="6.8" data-duration="3.2" data-track-index="1">
+      <p class="label">MUSD price</p>
+      <p id="problem-price-num" class="num">$0.989</p>
+      <p id="problem-price-sub" class="sub">
+        <span class="word">below</span> <span class="word">its</span> <span class="word">≈</span>
+        <span class="word">$0.9925</span> <span class="word">redemption</span> <span class="word">floor</span>
+      </p>
+    </div>
+    <div id="problem-redeemed" class="stage clip" data-start="10" data-duration="3" data-track-index="1">
+      <p class="label">Redeemed in 30 days</p>
+      <p id="problem-redeemed-num" class="num">1.28M<span class="unit">MUSD</span></p>
+      <p id="problem-redeemed-sub" class="sub">Every new trove is first in line.</p>
+    </div>
+    <div id="problem-morpho" class="stage clip" data-start="13" data-duration="5" data-track-index="1">
+      <p class="label">MUSD lent on Mezo’s own Morpho Blue</p>
+      <p id="problem-morpho-num" class="num">0<span class="unit">MUSD</span></p>
+      <p id="problem-morpho-sub" class="sub">Nothing lends MUSD on Mezo today.</p>
+    </div>
+    <p id="problem-source" class="clip" data-start="0" data-duration="18" data-track-index="2">
+      Mezo mainnet, on-chain reads, 23–24 Oct 2026
+    </p>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    const blurIn = { opacity: 1, filter: "blur(0px)", ease: "power4.out" };
+    const out = (sel, at) =>
+      tl.to(sel, { opacity: 0, filter: "blur(8px)", duration: 0.18, ease: "power3.in" }, at);
+
+    // 104 troves counting down to 1 as the voice says "one hundred and four to one".
+    // The label and "104" are on screen from frame 0: it is the thumbnail.
+    const troves = { n: 104 };
+    tl.fromTo(troves, { n: 104 }, { n: 1, duration: 1.5, ease: "power2.inOut" }, 3.6);
+    // Written on every render of the timeline (seeks included), so any frame shows the count for its time.
+    const trovesEl = document.getElementById("problem-troves-count");
+    tl.eventCallback("onUpdate", () => {
+      trovesEl.textContent = String(Math.round(troves.n));
+    });
+    tl.fromTo("#problem-troves-count", { color: "#14181d" }, { color: "#b42318", duration: 0.3 }, 4.9);
+    tl.fromTo("#problem-troves-sub", { opacity: 0, filter: "blur(6px)" }, { ...blurIn, duration: 0.2 }, 5.2);
+    out("#problem-troves .label, #problem-troves .num, #problem-troves .sub", 6.55);
+
+    // $0.989, then the floor it sits under, word by word from grey to ink.
+    tl.fromTo("#problem-price .label", { opacity: 0 }, { opacity: 1, duration: 0.15 }, 6.8);
+    tl.fromTo("#problem-price-num", { opacity: 0, filter: "blur(10px)" }, { ...blurIn, duration: 0.2 }, 6.85);
+    tl.fromTo(
+      "#problem-price-sub .word",
+      { color: "#cfcbc0" },
+      { color: "#14181d", duration: 0.12, stagger: 0.08 },
+      7.6,
+    );
+    out("#problem-price .label, #problem-price .num, #problem-price .sub", 9.75);
+
+    // 1.28M redeemed.
+    tl.fromTo("#problem-redeemed .label", { opacity: 0 }, { opacity: 1, duration: 0.15 }, 10);
+    tl.fromTo("#problem-redeemed-num", { opacity: 0, filter: "blur(10px)" }, { ...blurIn, duration: 0.2 }, 10.05);
+    tl.fromTo("#problem-redeemed-sub", { opacity: 0, filter: "blur(6px)" }, { ...blurIn, duration: 0.2 }, 10.2);
+    out("#problem-redeemed .label, #problem-redeemed .num, #problem-redeemed .sub", 12.82);
+
+    // 0 MUSD on Mezo's Morpho.
+    tl.fromTo("#problem-morpho .label", { opacity: 0 }, { opacity: 1, duration: 0.15 }, 13);
+    tl.fromTo("#problem-morpho-num", { opacity: 0, filter: "blur(10px)" }, { ...blurIn, duration: 0.2 }, 13.6);
+    tl.fromTo("#problem-morpho-sub", { opacity: 0, filter: "blur(6px)" }, { ...blurIn, duration: 0.2 }, 14.6);
+    tl.fromTo("#problem-source", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 0.6);
+    out("#problem-morpho .label, #problem-morpho .num, #problem-morpho .sub, #problem-source", 17.7);
+
+    window.__timelines["problem"] = tl;
+  </script>
+</template>
