@@ -2,7 +2,7 @@
 
 Baserate moves real BTC and MUSD. This page lists what can go wrong, what we built to stop it, and what we have not solved.
 
-**Status:** pre-audit. Contracts are verified on testnet. Mainnet runs in proof mode, with hard caps of at most 2,000 MUSD of borrowing.
+**Status:** no third-party audit yet. Three internal AI audit rounds are logged in [`docs/audit/FINDINGS.md`](audit/FINDINGS.md), and their fixes have been live on testnet since 26 Oct. Contracts are verified on testnet. Mainnet runs in proof mode, with hard caps of at most 2,000 MUSD of borrowing.
 
 ## Design principles
 
@@ -22,7 +22,7 @@ Baserate moves real BTC and MUSD. This page lists what can go wrong, what we bui
 | Threat | Mitigation |
 |---|---|
 | **Stale or manipulated BTC price** (the root cause of Velar's exploit) | Skip BTC/USD rejected if older than 60 s. Pyth BTC acts as a ±10% sanity band while its last print is at most 600 s old; the MUSD leg accepts Pyth MUSD/USD up to 3,900 s old. Prices are never taken from DEX pools |
-| **Oracle outage freezes the market** | Morpho does not consult the oracle once a position has no debt, so `repayAndWithdraw` works with the oracle down. A divergence freeze lasts at most 10 minutes, because the band stops applying once Pyth's last BTC print is 600 s old, so a lagging Pyth cannot hold liquidations through a fast crash. A Skip outage is unbounded, and is disclosed. Backstop deposits never read the oracle, its exits need none while it holds at most dust BTC (under 0.00001 BTC), and an exit's owner can always claim with the BTC valued at 0 |
+| **Oracle outage freezes the market** | Morpho does not consult the oracle once a position has no debt, so `repayAndWithdraw` works with the oracle down. A divergence freeze from a lagging Pyth lasts at most 10 minutes, because the band stops applying once Pyth's last BTC print is 600 s old. Pyth updates are permissionless, though: during a crash steeper than 10% per 10 minutes, anyone pushing genuine but lagged prints can stretch it (round 3, R3F-C), and between Mezo's hourly pushes the band is off (R3E-3). The planned fix is the keeper pushing the latest Pyth update every few minutes and before each liquidation. A Skip outage is unbounded, and is disclosed. Backstop deposits never read the oracle, its exits need none while it holds at most dust BTC (under 0.00001 BTC), and an exit's owner can always claim with the BTC valued at 0 |
 | **MUSD depeg makes debt look smaller** | The MUSD leg is clamped to [1.00, 1.02]. Collateral is never valued above its USD price in MUSD terms. At today's ~$0.989 this undervalues collateral by about 1.1%, which is conservative |
 | **Positions bigger than liquidation depth** | All collateral must enter through `bcBTC`, which only registered accounts can mint, so per-position and global caps bind the whole market, not just our UI. A position above its cap cannot borrow; extra collateral behind existing debt does not enlarge a liquidation, which Morpho sizes by the debt. Caps start at 0.01 BTC per position (testnet) and 2,000 MUSD global (mainnet) |
 | **Inflation, donation and sandwich attacks on wsMUSD** | Internal accounting: nothing that lands in a block, whether a donation or sMUSD protocol yield, moves the price in that block. Unclaimed sMUSD yield counts nothing until a sync harvests it; harvested yield and every surplus then vest over 3 days, so a failing or short sMUSD claim never lowers the price or breaks a preview. Same-block sandwiches earn nothing. 1 MUSD of dead shares at deploy |
@@ -50,7 +50,7 @@ Baserate moves real BTC and MUSD. This page lists what can go wrong, what we bui
 
 ## Known limitations
 
-- **Pre-audit.** AI-assisted review rounds are logged in `docs/audit/`. A third-party audit is planned before any cap increase.
+- **No third-party audit yet.** Three AI-assisted review rounds are logged in `docs/audit/`; round 3's Lows are open and scheduled. A third-party audit is planned before any cap increase.
 - **Thin liquidation depth.** About 0.1 BTC clears cleanly on Mezo mainnet today, which is why mainnet caps are deliberately tiny.
 - **Upgradeable dependencies.** sMUSD, MUSD's BorrowerOperationsSignatures and Pyth are upgradeable by their owners.
 - **A broken sMUSD withdraw strands vMUSD's wsMUSD share.** Vault V2 only exits in MUSD, so if sMUSD's withdraw breaks, the part of vMUSD parked in wsMUSD cannot be withdrawn until it is fixed; the M1 part still can, through the allocator. The adapter rescue then sends the wsMUSD shares to the vault owner, who has to unwind them (`redeemInKind` gives sMUSD) and return the value. Until then the vault books that value as a loss, and value returned through the vault is rate-limited by its `maxRate`. After a rescue the sentinel should cut the wsMUSD adapter's cap to 0 so nobody deposits into the marked-down vault.

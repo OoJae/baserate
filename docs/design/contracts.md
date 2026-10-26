@@ -456,7 +456,7 @@ Native value transfers are EVM statedb operations, not precompile calls [I]. A l
 **Oracle failure (Morpho semantics):**
 - Frozen: borrow, withdraw with debt, and liquidation.
 - Still open: supplyCollateral, repay, and withdraw after full repay.
-- The UI shows the oracle-free exit. A divergence freeze lasts at most 10 min (the band only applies while Pyth BTC is at most 600 s old); a Skip outage is unbounded. Disclose both.
+- The UI shows the oracle-free exit. A passive divergence freeze lasts at most 10 min (the band only applies while Pyth BTC is at most 600 s old), but lagged Pyth pushes can stretch it in a sustained crash (R3F-C) until the keeper pushes fresh updates; a Skip outage is unbounded. Disclose both.
 
 **Roles:**
 - Governor = Safe 2-of-3, used for timelocked raises.
@@ -486,7 +486,7 @@ Native value transfers are EVM statedb operations, not precompile calls [I]. A l
 | Backstop economics | 7-day queue at min(NAV) with partial claims, vested premium (new deposits buy their share of it at full value), deposits closed while BTC is held, 0.95 mark, FlashLiquidator as the primary path |
 | Signed claims | `comeBack` pays only the caller's own clone, with borrower = `msg.sender` |
 | sMUSD upgrade risk | `redeemInKind` makes no sMUSD state calls; the allocator's exit retries M1-first when wsMUSD cannot pay; the adapter's timelocked rescue moves vMUSD's wsMUSD shares in kind to the vault owner only if wsMUSD's redeem fails; the Backstop pays exits in kind and pauses parking when wsMUSD's withdraw reverts; keeper watches `Upgraded` and `StrategyUpdated`, then the sentinel cuts caps |
-| Oracle liveness | 60 s Skip bound, band only while Pyth BTC ≤ 600 s (so a divergence freeze lasts at most 10 min), invariant 13 |
+| Oracle liveness | 60 s Skip bound, band only while Pyth BTC ≤ 600 s (a passive divergence freeze lasts at most 10 min; lagged pushes can stretch it, R3F-C), invariant 13 |
 | Yield sniping | the vesting rule in §0.7 |
 | ERC-2771 | absent; MezoForwarder is ECDSA-only, so contracts cannot be spoofed |
 | M2 and EscapeHatch | not built |
