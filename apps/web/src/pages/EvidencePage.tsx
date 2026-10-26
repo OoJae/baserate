@@ -55,7 +55,7 @@ const AREA_TITLE: Record<EvidenceArea, { title: string; blurb: string }> = {
   },
   risk: { title: 'Risk', blurb: 'RiskLens' },
   keeper: {
-    title: 'Keeper',
+    title: 'Keeper actions',
     blurb: 'Autonomous upkeep by the Railway keeper: liquidations, the canary, vault and yield',
   },
   v1: {
