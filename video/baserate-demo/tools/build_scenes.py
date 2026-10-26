@@ -137,7 +137,7 @@ def scene_html(sid, sc):
     #root {{
       position: absolute;
       inset: 0;
-      background: #f6f5f1;
+      background: #F2EEE3;
       overflow: hidden;
     }}
     #{sid}-stage {{
