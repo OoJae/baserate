@@ -31,14 +31,14 @@ LIVE ON TESTNET (14 contracts, audited internally, all source-verified on Sourci
 - Lend: vMUSD, a Morpho Vault V2 from Mezo's VaultV2Factory; idle MUSD earns sMUSD, an allocator lends into M1 only when it pays more.
 - Liquidate: zero-capital FlashLiquidator (Tigris vAMM/CL200) + Backstop pool.
 - Fees: FeeRouter sends 40% to sMUSD and 40% as MUSD bribes to veBTC voters on the BTC/MUSD gauge. RiskLens: oracle, depth, caps and trove queue in one call.
-- Web app (Borrow, Lend, Save, Liquidate, Risk, Fees, Evidence), SDK on npm (@baserate/sdk), subgraph on Goldsky, judge dispenser.
+- Site and app in our "Intaglio" banknote identity: a landing with an engraved WebGL coin and live chain data, How it works, Security and Brand pages, and the app (Borrow, Lend, Save, Liquidate, Risk, Fees, Evidence). SDK on npm (@baserate/sdk), subgraph on Goldsky, judge dispenser.
 - Keeper on Railway, 10 jobs: 12 s liquidation scan, allocator, wsMUSD sync, backstop upkeep, fee flush, canary upkeep, sMUSD watcher. On the first deployment it liquidated its own canary unattended (0x44fc007a…a6f43a). Status: keeper-production-be8a.up.railway.app/status.
 
 SECURITY. Three AI audit rounds with a public ledger (docs/audit/FINDINGS.md); every contract finding is proven by a Foundry PoC. Rounds 1–2: 10 Medium and 23 Low/Info findings fixed, 3 documented as known limits; the whole stack was redeployed with the fixes on 26 Oct. Round 3: no Medium or worse; 8 Lows scheduled. Morpho does the accounting; immutable core; exits never pause; 48 h timelock on raises.
 
 PROOF. 754 Foundry tests (unit, fuzz, invariant, forks of Mezo mainnet and testnet). The judge journey runs end to end with a real wallet on the audited contracts: borrow 0x9c1c879d…ae4057, exit 0x2d6d2323…5f2804, vault deposit 0x75deb40f…4e1519, keeper's first rebalance 0xd72f5453…ef71f4. The Evidence page re-verifies every tx live.
 
-NEXT (Wave 2): round-3 contract fixes, credit lines with an x402 agent, come-back flow for redeemed borrowers, the Intaglio site and app redesign, mainnet with caps ≤2,000 MUSD.
+NEXT (Wave 2): round-3 contract fixes, credit lines with an x402 agent, come-back flow for redeemed borrowers, mainnet with caps ≤2,000 MUSD.
 
 ## How it works (long form, if the form asks separately)
 Baserate adds a credit lane next to MUSD troves. A user posts BTC; their own BorrowAccount clone wraps it into bcBTC, supplies it to the M1 market on Mezo's Morpho Blue and borrows MUSD straight to their wallet. Because loans live in Morpho, nobody can redeem them at par while MUSD sits below the floor, and there is no 2,000-MUSD minimum. Lenders deposit MUSD into vMUSD, a Morpho Vault V2: an allocator lends into M1 when it pays more and keeps the rest in wsMUSD, so lenders never earn less than sMUSD. Unhealthy loans are liquidated with no capital up front through the FlashLiquidator, which sells seized BTC on Tigris or to the Backstop pool. Protocol fees flow to sMUSD and, as MUSD bribes, to veBTC voters on the BTC/MUSD pool gauge that liquidations depend on. A keeper runs all of this upkeep, and anyone can call it. When the peg heals, demand can return to 1% troves; Baserate complements them.
