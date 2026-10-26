@@ -5,7 +5,7 @@ You need an EVM wallet (MetaMask, Rabby, etc.) and one faucet drip. Everything r
 ## 1. Get test BTC (1 minute)
 
 1. Open [faucet.test.mezo.org](https://faucet.test.mezo.org), keep **BTC** selected, paste your address and request tokens (0.001 BTC per day).
-2. Open [baserate-mezo.vercel.app](https://baserate-mezo.vercel.app) and connect. The app offers to add Mezo testnet to your wallet if needed.
+2. Open [baserate-mezo.vercel.app](https://baserate-mezo.vercel.app) for the one-minute story, then click **Open the app** (or go straight to [/borrow](https://baserate-mezo.vercel.app/borrow)) and connect. The app offers to add Mezo testnet to your wallet if needed.
 
 ## 2. Borrow MUSD against BTC in one transaction (1 minute)
 
@@ -28,7 +28,7 @@ You need an EVM wallet (MetaMask, Rabby, etc.) and one faucet drip. Everything r
 
 ## 5. Check the chain, not the UI (1 minute)
 
-Open **[Evidence](https://baserate-mezo.vercel.app/evidence)**. Every recorded transaction, grouped by area (core, the recorded judge journey, Lend, Liquidations, Fees, Risk), is re-verified live against Mezo's Blockscout explorer, and every contract shows its source-verification status (Sourcify for ours). The **Keeper** card shows the off-chain keeper's jobs, the positions it watches and its recent transactions, live.
+Open **[Evidence](https://baserate-mezo.vercel.app/evidence)**. Every recorded transaction, grouped by area (core, the recorded judge journey, Lend, Liquidations, Fees, Risk, the keeper, and the retired v1 deployment), is re-verified live against Mezo's Blockscout explorer, and every contract shows its source-verification status (Sourcify for ours). The **Keeper** card shows the off-chain keeper's jobs, the positions it watches and its recent transactions, live.
 
 ## 6. Lend MUSD in vMUSD (2 minutes)
 
