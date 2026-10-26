@@ -46,6 +46,8 @@ jobs:
         with:
           path: ~/.foundry/cache/rpc
           key: fork-rpc-${{ hashFiles('contracts/test/fork/blocks.json') }}
+      # Some suites load contracts by artifact name (vm.getCode), so build everything first.
+      - run: forge build
       - run: forge test --match-path "test/fork/*" -j 1 -vvv
 
   web:
