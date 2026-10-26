@@ -1,6 +1,25 @@
 # @baserate/sdk
 
-TypeScript building blocks for Baserate on Mezo. ESM source, `viem` 2.57.11 as a peer dependency.
+TypeScript building blocks for Baserate on Mezo: chains, the contract registry, ABIs, Morpho math, MUSD permits and plain-language errors. ESM, built to `dist/` with types; `viem` ^2.57.11 is a peer dependency.
+
+```sh
+npm i @baserate/sdk viem
+```
+
+```ts
+import { createPublicClient } from 'viem'
+import { borrowAccountFactoryAbi, getRegistry, mezoTestnet, transportFor } from '@baserate/sdk'
+
+const registry = getRegistry(mezoTestnet.id)
+const client = createPublicClient({ chain: mezoTestnet, transport: transportFor(mezoTestnet) })
+const cap = await client.readContract({
+  address: registry.contracts.factory.address,
+  abi: borrowAccountFactoryAbi,
+  functionName: 'globalBorrowCap',
+})
+```
+
+The testnet registry (`src/deployments/31611.json`, also exported as `@baserate/sdk/deployments/31611.json`) holds the audited v2 stack.
 
 | Module      | Contents                                                                                                                                                                                                                                                                                                                  |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -14,6 +33,8 @@ TypeScript building blocks for Baserate on Mezo. ESM source, `viem` 2.57.11 as a
 | `errors`    | `decodeBaserateError` / `decodeRevertData`: custom errors, OpenZeppelin errors, Morpho string reasons, wallet rejections and RPC failures as plain messages                                                                                                                                                               |
 | `format`    | MUSD (2 dp), BTC (6–8 dp), USD, percentages, durations, `parseAmount`                                                                                                                                                                                                                                                     |
 | `explorer`  | Blockscout UI and API URLs per chain                                                                                                                                                                                                                                                                                      |
+
+Working in the monorepo:
 
 ```sh
 pnpm --filter @baserate/sdk test       # vitest

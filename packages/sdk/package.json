@@ -55,7 +55,7 @@
     "sync:registry": "node scripts/sync-registry.mjs"
   },
   "peerDependencies": {
-    "viem": "2.57.11"
+    "viem": "^2.57.11"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
