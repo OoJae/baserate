@@ -36,3 +36,7 @@ video/*/snapshots/
 # Per-agent build dirs
 contracts/out-*/
 contracts/cache-*/
+
+# Voiceover recordings stay local
+video/*/assets/vo.*
+/baserate vo.*
