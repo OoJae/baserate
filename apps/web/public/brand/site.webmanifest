@@ -1,0 +1,27 @@
+{
+  "name": "Baserate",
+  "short_name": "Baserate",
+  "description": "Dollars against your bitcoin, at the base rate: redemption-free BTC to MUSD credit on Mezo.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0C1512",
+  "theme_color": "#0C1512",
+  "icons": [
+    { "src": "/brand/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/brand/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/brand/icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    {
+      "src": "/brand/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/brand/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

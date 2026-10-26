@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en" data-ground="intaglio">
+  <head>
+    <meta charset="utf-8" />
+    <title>Baserate · Open Graph card</title>
+    <!--
+      The link-preview card, rendered to public/brand/og.png (1200 × 630) by render-assets.mjs. Self-contained: the
+      brand tokens and fonts (src/brand/tokens.css, node_modules/@fontsource*) and the engraving it generates into
+      public/brand. To preview, serve apps/web (e.g. `npx serve apps/web`) and open /scripts/brand/og.html.
+
+      Feeds show the card at about 42 % (506 × 265 on X, smaller on phones) with only a domain chip, so everything
+      that has to be read survives that: the word "Baserate" at a 30 px capital height (13 px in feed), a lead line
+      that says Mezo and what is different (13 px in feed), and a frame of 3 px rules (1.3 px in feed). The serial
+      and the engraving are texture at that size, and read when the card is opened.
+    -->
+    <link rel="stylesheet" href="../../src/brand/tokens.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+      }
+
+      body {
+        position: relative;
+        width: 1200px;
+        height: 630px;
+        overflow: hidden;
+        background: var(--ground);
+        color: var(--fg);
+        font-family: var(--face-body);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* A note's frame: a 3 px engraved rule with a 1 px rule inside it. */
+      .frame {
+        position: absolute;
+        inset: 20px;
+        border: 3px solid var(--engrave);
+      }
+
+      .frame::after {
+        content: "";
+        position: absolute;
+        inset: 4px;
+        border: 1px solid var(--engrave);
+      }
+
+      /* The horizontal lockup at 88 px: the word's capital height is 30 px. */
+      .lockup {
+        position: absolute;
+        top: 58px;
+        left: 66px;
+        height: 88px;
+      }
+
+      /* Feeds show the card at about 42 %, so the headline takes the optical size it is read at, not the one it is
+         set at: opsz 36 keeps Bodoni's hairlines alive in a 500 px thumbnail. */
+      h1 {
+        position: absolute;
+        top: 178px;
+        left: 66px;
+        margin: 0;
+        font-family: var(--face-display);
+        font-size: 80px;
+        font-weight: 500;
+        font-optical-sizing: none;
+        font-variation-settings: "opsz" 36;
+        line-height: 0.95;
+        letter-spacing: -0.022em;
+        white-space: nowrap;
+      }
+
+      h1 em {
+        font-style: italic;
+      }
+
+      .lead {
+        position: absolute;
+        top: 430px;
+        left: 70px;
+        margin: 0;
+        font-size: 30px;
+        font-weight: 500;
+        line-height: 1.25;
+        white-space: nowrap;
+      }
+
+      /* The woven band runs along the foot of the note, under the coin. */
+      .band {
+        position: absolute;
+        left: 28px;
+        right: 28px;
+        top: 562px;
+        height: 28px;
+        background: url("../../public/brand/band.svg") repeat-x 0 50% / auto 28px;
+      }
+
+      /* The note's serial number, set over the start of the band on a ground-coloured strip. */
+      .serial {
+        position: absolute;
+        top: 562px;
+        left: 28px;
+        margin: 0;
+        padding: 0 14px 0 42px;
+        background: var(--ground);
+        font-family: var(--face-mono);
+        font-size: 18px;
+        font-weight: var(--serial-weight);
+        line-height: 28px;
+        letter-spacing: var(--serial-tracking);
+        text-transform: var(--serial-case);
+        color: var(--fg-muted);
+        white-space: nowrap;
+      }
+
+      .serial .no {
+        text-transform: none;
+      }
+
+      .coin {
+        position: absolute;
+        top: 50px;
+        left: 640px;
+        width: 520px;
+        height: 520px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame"></div>
+    <div class="band"></div>
+    <img class="coin" src="../../public/brand/coin.svg" alt="" />
+    <img class="lockup" src="../../public/brand/lockup-horizontal-reverse.svg" alt="Baserate" />
+    <h1>Dollars against<br />your bitcoin.<br />At the <em>base rate.</em></h1>
+    <p class="lead">Borrow MUSD on Mezo.<br />No redemption queue.</p>
+    <p class="serial">Mezo testnet · <span class="no">No.</span> 000001</p>
+  </body>
+</html>

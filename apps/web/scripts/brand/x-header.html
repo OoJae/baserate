@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en" data-ground="intaglio">
+  <head>
+    <meta charset="utf-8" />
+    <title>Baserate · X header</title>
+    <!--
+      The X (Twitter) profile header, rendered to public/brand/x-header.png (1500 × 500) by render-assets.mjs.
+      Self-contained like og.html. X lays the avatar over the bottom-left corner (from about y 333, x 40 to 375), so
+      the words keep above it and the coin keeps to the right. It is seen at about 40 %, like the Open Graph card: the
+      lead line and the 3 px frame are sized to survive that.
+    -->
+    <link rel="stylesheet" href="../../src/brand/tokens.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+      }
+
+      body {
+        position: relative;
+        width: 1500px;
+        height: 500px;
+        overflow: hidden;
+        background: var(--ground);
+        color: var(--fg);
+        font-family: var(--face-body);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .frame {
+        position: absolute;
+        inset: 20px;
+        border: 3px solid var(--engrave);
+      }
+
+      .frame::after {
+        content: "";
+        position: absolute;
+        inset: 4px;
+        border: 1px solid var(--engrave);
+      }
+
+      .band {
+        position: absolute;
+        left: 28px;
+        right: 28px;
+        top: 438px;
+        height: 28px;
+        background: url("../../public/brand/band.svg") repeat-x 0 50% / auto 28px;
+      }
+
+      /* Seen at about 40 % on a profile page: opsz 36, as on the Open Graph card. */
+      h1 {
+        position: absolute;
+        top: 92px;
+        left: 92px;
+        margin: 0;
+        font-family: var(--face-display);
+        font-size: 68px;
+        font-weight: 500;
+        font-optical-sizing: none;
+        font-variation-settings: "opsz" 36;
+        line-height: 1;
+        letter-spacing: -0.022em;
+        white-space: nowrap;
+      }
+
+      h1 em {
+        font-style: italic;
+      }
+
+      .lead {
+        position: absolute;
+        top: 250px;
+        left: 95px;
+        margin: 0;
+        font-size: 28px;
+        font-weight: 500;
+        line-height: 1.25;
+        white-space: nowrap;
+      }
+
+      .serial {
+        position: absolute;
+        top: 300px;
+        left: 96px;
+        margin: 0;
+        font-family: var(--face-mono);
+        font-size: 18px;
+        font-weight: var(--serial-weight);
+        line-height: 1.2;
+        letter-spacing: var(--serial-tracking);
+        text-transform: var(--serial-case);
+        color: var(--fg-muted);
+        white-space: nowrap;
+      }
+
+      .serial .no {
+        text-transform: none;
+      }
+
+      .coin {
+        position: absolute;
+        top: 46px;
+        left: 1052px;
+        width: 408px;
+        height: 408px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame"></div>
+    <div class="band"></div>
+    <img class="coin" src="../../public/brand/coin.svg" alt="" />
+    <h1>Dollars against your bitcoin.<br />At the <em>base rate.</em></h1>
+    <p class="lead">Borrow MUSD on Mezo. No redemption queue.</p>
+    <p class="serial">Mezo testnet · <span class="no">No.</span> 000001</p>
+  </body>
+</html>

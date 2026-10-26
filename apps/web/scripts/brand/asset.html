@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Baserate · asset frame</title>
+    <!--
+      Shows one SVG from public/brand full-bleed, so render-assets.mjs can screenshot it at an exact pixel size
+      (icon-512.png, icon-192.png, apple-touch-icon.png, favicon-16.png, favicon-32.png, coin.png):
+      asset.html?src=icon.svg. The favicon PNGs are shot with a dark colour scheme, so they take its Guilloche rim.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: transparent;
+      }
+
+      img {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <img alt="" />
+    <script>
+      const src = new URLSearchParams(location.search).get('src') ?? ''
+      if (!/^[a-z0-9-]+\.svg$/.test(src)) throw new Error('src must name an SVG in public/brand')
+      document.querySelector('img').src = `../../public/brand/${src}`
+    </script>
+  </body>
+</html>
