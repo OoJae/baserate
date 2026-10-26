@@ -10,7 +10,9 @@ import {ILiquidationVenues, Venue} from "./ILiquidationVenues.sol";
 /// permissionless Dutch auction and bounded keeper sales on Tigris.
 /// @dev Exits go through a 7-day queue paid at min(NAV at request, NAV at claim), in part when cash is short; instant
 /// ERC-4626 withdraw and redeem are disabled (`maxWithdraw` and `maxRedeem` are 0). Deposits and mints are priced at
-/// book + unvested gains (gross), not at `totalAssets`, so a new share pays for its part of the gains still vesting.
+/// book + unvested gains (gross), not at `totalAssets`, so a new share pays for its part of the gains still vesting,
+/// and are closed while the backstop holds at least `DUST_INVENTORY` of BTC (`maxDeposit` and `maxMint` are then 0).
+/// Exits are paid in kind (wsMUSD shares) when wsMUSD cannot pay out MUSD.
 interface IBackstop is IERC4626, ILiquidationVenues {
     /// @notice Constructor parameters (roles are explicit: deployment may go through a CREATE2 deployer).
     /// @param musd MUSD, the ERC-4626 asset.
@@ -75,6 +77,12 @@ interface IBackstop is IERC4626, ILiquidationVenues {
     event InventorySold(address indexed caller, Venue indexed venue, uint256 btcIn, uint256 musdOut);
     /// @notice Emitted when the sentinel pauses or unpauses deposits.
     event DepositsPausedSet(bool paused);
+    /// @notice Emitted when an exit is paid in kind because wsMUSD's withdraw reverted: `receiver` got all the idle
+    /// `musd` plus `wsMusdShares` worth the rest of `assets` (rounded down), instead of `assets` MUSD.
+    event PaidInKind(address indexed receiver, uint256 assets, uint256 musd, uint256 wsMusdShares);
+    /// @notice Emitted when an exit paid in kind (wsMUSD's withdraw reverted) pauses parking until `until`: idle MUSD
+    /// stays idle meanwhile.
+    event ParkingPaused(uint256 until);
 
     /// @notice A required address is zero.
     error ZeroAddress();
@@ -110,12 +118,19 @@ interface IBackstop is IERC4626, ILiquidationVenues {
     error NotRequestOwner(address caller);
     /// @notice A sale would leave less than `DUST_INVENTORY` of BTC (take it all instead).
     error DustRemainder(uint256 remaining);
+    /// @notice Deposits and mints are closed while the backstop holds at least `DUST_INVENTORY` of BTC.
+    error HoldingInventory(uint256 inventory);
+    /// @notice A purchase needs MUSD parked in wsMUSD and wsMUSD's withdraw reverted; only `idle` MUSD was at hand.
+    error CashUnavailable(uint256 needed, uint256 idle);
 
     /// @notice Buys seized BTC (`msg.value`) and pays `btc x price x (1 - DISCOUNT)` MUSD to the caller.
-    /// @dev FlashLiquidator only; paid from free cash, never from MUSD reserved for queued exits.
+    /// @dev FlashLiquidator only; paid from free cash, never from MUSD reserved for queued exits. Idle MUSD pays first;
+    /// if the rest must come out of wsMUSD and its withdraw reverts, reverts `CashUnavailable` (the liquidator then
+    /// uses a DEX venue).
     function buyCollateral(uint256 minOut) external payable returns (uint256 musdOut);
 
     /// @notice MUSD `buyCollateral` would pay for `btcIn` now, or 0 if free cash cannot cover it or the oracle is down.
+    /// While parking is paused after a failed wsMUSD withdraw, only idle MUSD counts as payable.
     function quoteBuy(uint256 btcIn) external view returns (uint256 musdOut);
 
     /// @notice Queues an exit: escrows `shares` from `owner`, records their NAV, and makes them claimable in 7 days.
@@ -124,16 +139,17 @@ interface IBackstop is IERC4626, ILiquidationVenues {
     /// @notice Pays a matured request at min(NAV at request, NAV now) and burns its shares. Anyone may call.
     /// @dev When cash cannot cover it, pays all the cash, burns the matching fraction of the shares (rounded up) and
     /// keeps the rest queued at the same request NAV per share; reverts `InsufficientCash` only with no cash at all.
-    /// Reads the oracle while the inventory is at least `DUST_INVENTORY`.
-    /// @return assets MUSD paid by this call.
+    /// Reads the oracle while the inventory is at least `DUST_INVENTORY`. If the wsMUSD withdraw it needs reverts, the
+    /// payment is made in kind: all the idle MUSD plus the wsMUSD shares worth the rest, rounded down (`PaidInKind`).
+    /// @return assets MUSD value paid by this call.
     function claimRedeem(uint256 id) external returns (uint256 assets);
 
     /// @notice Like `claimRedeem`, but values the BTC inventory at 0 for this claim only, so an exit can complete
     /// during an oracle outage. Owner only: it pays min(NAV at request, min(book, cash) per share), never more than
-    /// `claimRedeem` would, and always in full from cash.
+    /// `claimRedeem` would, and always in full from cash (in kind, like `claimRedeem`, if wsMUSD cannot pay MUSD).
     /// @dev Tries the oracle: if it answers (or only dust is held) the usual checkpoints run around the claim; if it is
     /// down, vested gains move into the book and no gain or loss is recognised for anyone else.
-    /// @return assets MUSD paid by this call.
+    /// @return assets MUSD value paid by this call.
     function claimRedeemWithoutOracle(uint256 id) external returns (uint256 assets);
 
     /// @notice Buys `btcOut` of inventory at the current Dutch-auction price, paying MUSD; BTC goes to `to`.
@@ -185,8 +201,16 @@ interface IBackstop is IERC4626, ILiquidationVenues {
     /// @notice Id of the next exit request.
     function nextRequestId() external view returns (uint256);
 
-    /// @notice Whether deposits and mints are paused.
+    /// @notice Whether the sentinel paused deposits and mints (they are also closed while BTC inventory is held).
     function depositsPaused() external view returns (bool);
+
+    /// @notice Until when idle MUSD stays idle instead of being parked in wsMUSD (0 or past: parking is on). Set to
+    /// now + `PARK_PAUSE` when an exit is paid in kind because wsMUSD's withdraw reverted (a purchase reverts instead
+    /// and sets nothing); cleared by the next successful withdraw.
+    function parkingPausedUntil() external view returns (uint48);
+
+    /// @notice How long a reverting wsMUSD withdraw pauses parking.
+    function PARK_PAUSE() external view returns (uint256);
 
     /// @notice wsMUSD, where idle MUSD is parked.
     function WSMUSD() external view returns (address);

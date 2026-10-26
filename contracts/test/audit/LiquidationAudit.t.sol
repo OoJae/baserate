@@ -281,24 +281,30 @@ contract LiquidationAuditBackstopTest is BackstopBase {
 
     // ---------------------------------------------------------------- script
 
-    /// @notice DeployLiquidation: `Backstop.SENTINEL` is immutable, so mainnet requires an explicit `SENTINEL`.
+    /// @notice DeployLiquidation: `Backstop.SENTINEL` is immutable, so mainnet requires an explicit `SENTINEL`. The rule
+    /// is checked with the env passed in, never through `vm.setEnv`, which would leak into every other test of the
+    /// process (Deploy.s.sol's dry run reads `SENTINEL` too).
     function test_fix_deployScriptRequiresSentinelOnMainnet() public {
         DeployLiquidationHarness script = new DeployLiquidationHarness();
         address deployer = makeAddr("deployer");
         address safe = makeAddr("safe");
 
+        assertEq(script.pickSentinel(31_611, deployer, false, address(0)), deployer, "testnet default");
+        assertEq(script.pickSentinel(31_611, deployer, true, safe), safe, "testnet override");
+        vm.expectRevert(bytes("DeployLiquidation: set SENTINEL on mainnet"));
+        script.pickSentinel(31_612, deployer, false, address(0));
+        assertEq(script.pickSentinel(31_612, deployer, true, safe), safe, "explicit sentinel on mainnet");
+        vm.expectRevert(bytes("DeployLiquidation: SENTINEL is zero"));
+        script.pickSentinel(31_612, deployer, true, address(0));
+
+        // The env-reading wrapper, against whatever the process environment holds (read-only).
         vm.chainId(31_611);
-        if (!vm.envExists("SENTINEL")) assertEq(script.sentinelFor(deployer), deployer, "testnet default");
+        if (!vm.envExists("SENTINEL")) assertEq(script.sentinelFor(deployer), deployer, "testnet default (env)");
         vm.chainId(31_612);
         if (!vm.envExists("SENTINEL")) {
             vm.expectRevert(bytes("DeployLiquidation: set SENTINEL on mainnet"));
             script.sentinelFor(deployer);
         }
-        vm.setEnv("SENTINEL", vm.toString(safe));
-        assertEq(script.sentinelFor(deployer), safe, "explicit sentinel on mainnet");
-        vm.setEnv("SENTINEL", vm.toString(address(0)));
-        vm.expectRevert(bytes("DeployLiquidation: SENTINEL is zero"));
-        script.sentinelFor(deployer);
     }
 
     function _etchBtc() internal returns (BtcPrecompileMock) {

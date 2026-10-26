@@ -170,6 +170,7 @@ contract BaserateAllocatorTest is VaultBase {
         _deposit(lender, 10_000e18);
         _borrow(borrower, 1500e18); // M1 liquidity 1,500 < 2,000 floor
         assertEq(_m1Liquidity(), 1500e18);
+        _nextBlock(); // the borrow is from an earlier block
 
         vm.expectEmit(true, false, false, false, address(allocator));
         emit IBaserateAllocator.Rebalanced(IBaserateAllocator.Action.BUFFER_TOP_UP, 0, 0, 0, 0, 0, 0);
@@ -180,22 +181,33 @@ contract BaserateAllocatorTest is VaultBase {
         assertEq(_m1Liquidity(), 2000e18, "buffer restored");
         assertApproxEqAbs(_vaultM1(), 500e18, 1, "vault supplied the deficit");
         assertEq(allocator.lastRebalance(), 0, "a top-up does not start the cooldown");
+        assertEq(allocator.lastTopUpAt(), block.timestamp);
         assertEq(allocator.readyAt(), 0);
     }
 
     function test_rebalance_bufferTopUp_noHistoryNeeded_andBoundedPerCall() public {
         _deposit(lender, 10_000e18);
         _borrow(borrower, 2900e18); // liquidity 100: needs 1,900
+        _nextBlock();
         (IBaserateAllocator.Action action, uint256 amount) = _rebalance();
         assertEq(uint256(action), uint256(IBaserateAllocator.Action.BUFFER_TOP_UP));
         assertEq(amount, allocator.MAX_MOVE(), "bounded per call");
 
-        // No cooldown for top-ups: the next call, even in the same block, closes the rest of the deficit.
+        // At most one top-up per block (R2X-3)...
+        (IBaserateAllocator.Action pending,,) = allocator.previewRebalance();
+        assertEq(uint256(pending), uint256(IBaserateAllocator.Action.NONE), "preview: none left in this block");
+        (action, amount) = _rebalance();
+        assertEq(uint256(action), uint256(IBaserateAllocator.Action.NONE), "second call in the block");
+        assertEq(amount, 0);
+
+        // ...but no cooldown: the next block closes the rest of the deficit.
+        _nextBlock();
         (action, amount) = _rebalance();
         assertEq(uint256(action), uint256(IBaserateAllocator.Action.BUFFER_TOP_UP));
         assertApproxEqAbs(amount, 900e18, 1);
         assertApproxEqAbs(_m1Liquidity(), 2000e18, 1, "buffer restored on the second call");
         assertGe(_m1Liquidity(), _bufferTarget() - 1);
+        _nextBlock();
         (action, amount) = _rebalance();
         assertEq(uint256(action), uint256(IBaserateAllocator.Action.NONE), "nothing left");
     }
@@ -211,41 +223,99 @@ contract BaserateAllocatorTest is VaultBase {
         _nextBlock();
         _borrow(makeAddr("big"), _m1Liquidity() - 500e18);
         assertLt(_m1Liquidity(), _bufferTarget());
+        _nextBlock();
         assertEq(allocator.readyAt(), block.timestamp, "a due top-up is ready now");
 
         uint256 amount;
         (action, amount) = _rebalance();
         assertEq(uint256(action), uint256(IBaserateAllocator.Action.BUFFER_TOP_UP));
         assertEq(amount, 1000e18);
+        _nextBlock();
         (action, amount) = _rebalance();
         assertEq(uint256(action), uint256(IBaserateAllocator.Action.BUFFER_TOP_UP));
         assertGe(_m1Liquidity(), _bufferTarget(), "buffer restored inside the cooldown");
         assertEq(allocator.readyAt(), cooldownEnd, "top-ups leave the rate cooldown alone");
 
         // Nothing left to top up: rate moves still wait for the cooldown.
+        _nextBlock();
         vm.expectRevert(abi.encodeWithSelector(IBaserateAllocator.CooldownActive.selector, cooldownEnd));
         allocator.rebalance();
     }
 
     function test_rebalance_bufferTargetIs15PercentOfSupply() public {
-        // Large M1: 20k supplied by the team, 18k borrowed -> target 15% of supply (> 2k floor).
+        // Large M1: 20k supplied by the team, 17.5k borrowed -> target 15% of supply (> 2k floor).
         _fundApprove(team, 17_000e18, address(morpho));
         vm.prank(team);
         morpho.supply(params, 17_000e18, 0, team, "");
         _deposit(lender, 50_000e18);
         _borrow(borrower, 17_500e18); // supply 20k, liquidity 2.5k, target 3k
+        _nextBlock(); // the borrow is from an earlier block; 12 s of interest raise supply (and so the target)
+        (uint256 supply, uint256 borrowed) = _market();
+        uint256 liquidity = supply - borrowed;
+        assertEq(liquidity, 2500e18, "interest raises supply and borrow alike");
+        // x = (0.15 S - L) / 0.85, rounded up, on M1 accrued to now.
+        uint256 expected = (supply * 1500 - liquidity * 10_000 + 8499) / 8500;
+
         (IBaserateAllocator.Action action, uint256 amount) = _rebalance();
         assertEq(uint256(action), uint256(IBaserateAllocator.Action.BUFFER_TOP_UP));
-        // (0.15 * 20,000 - 2,500) / 0.85 = 588.23...
-        assertEq(amount, 588_235_294_117_647_058_824);
+        assertEq(amount, expected, "closes the 15% deficit exactly");
+        // (0.15 * 20,000 - 2,500) / 0.85 = 588.23..., plus 15/85 of the 12 s of interest.
+        assertApproxEqRel(amount, 588_235_294_117_647_058_824, 1e12);
         assertGe(_m1Liquidity(), _bufferTarget(), "target met after the move");
+    }
+
+    /// @notice R2X-3: in a block where M1 was touched first, a top-up is sized on the larger of spot and the last
+    /// checkpoint, so a transient low (a borrow or withdrawal undone later in the same transaction) cannot trigger
+    /// one. A low that a checkpoint has recorded is still topped up, even when someone touches M1 first.
+    function test_rebalance_topUp_touchedBlock_sizedOnLastCheckpoint() public {
+        _deposit(lender, 10_000e18);
+        _nextBlock();
+
+        // A borrow earlier in the block leaves M1 short of the buffer on spot; it may be repaid in the same transaction.
+        _borrow(borrower, 1500e18);
+        (IBaserateAllocator.Action action, uint256 amount, IBaserateAllocator.Snapshot memory s) =
+            allocator.previewRebalance();
+        assertTrue(s.marketTouched);
+        assertEq(s.m1Liquidity, 1500e18, "spot: below the 2,000 floor");
+        assertEq(uint256(action), uint256(IBaserateAllocator.Action.NONE), "sized on the checkpoint's 3,000");
+        (action, amount) = _rebalance();
+        assertEq(uint256(action), uint256(IBaserateAllocator.Action.NONE));
+        assertEq(amount, 0);
+        assertEq(_vaultM1(), 0, "nothing supplied on a possibly transient low");
+        assertEq(allocator.lastTopUpAt(), 0);
+
+        // The borrow stays. Until a checkpoint records it, a block in which M1 is touched first still waits...
+        _nextBlock();
+        morpho.accrueInterest(params);
+        (action,,) = allocator.previewRebalance();
+        assertEq(uint256(action), uint256(IBaserateAllocator.Action.NONE), "the last checkpoint still says 3,000");
+
+        // ...an hour later a checkpoint taken in a block nobody touched M1 in records the real low...
+        skip(1 hours);
+        vm.roll(block.number + 1);
+        assertTrue(allocator.checkpoint());
+        assertEq(allocator.checkpointAt(1).m1ExternalLiquidity, int128(1500e18), "real low recorded");
+
+        // ...and from then on the top-up runs even in a block where M1 is touched first (a bare accrual here).
+        _nextBlock();
+        morpho.accrueInterest(params);
+        (action, amount, s) = allocator.previewRebalance();
+        assertTrue(s.marketTouched);
+        assertEq(uint256(action), uint256(IBaserateAllocator.Action.BUFFER_TOP_UP));
+        assertEq(amount, 500e18);
+        (action, amount) = _rebalance();
+        assertEq(uint256(action), uint256(IBaserateAllocator.Action.BUFFER_TOP_UP));
+        assertEq(amount, 500e18);
+        assertEq(_m1Liquidity(), 2000e18, "buffer restored");
+        assertEq(allocator.lastTopUpAt(), block.timestamp);
     }
 
     function test_borrower_canBorrowFromBuffer() public {
         _deposit(lender, 10_000e18);
         _borrow(borrower, 2900e18);
+        _nextBlock();
         _rebalance();
-        skip(1 hours);
+        _nextBlock();
         _rebalance();
         // A new borrower can take the whole standing buffer.
         address other = makeAddr("other");
@@ -293,7 +363,7 @@ contract BaserateAllocatorTest is VaultBase {
         assertEq(c.m1ExternalLiquidity, int128(int256(_m1Liquidity() - _vaultM1())), "supply - borrow - vMUSD");
     }
 
-    function test_checkpoint_inTouchedBlock_neverRecordsMoreExternalLiquidity() public {
+    function test_checkpoint_inTouchedBlock_carriesTheLastValueForward() public {
         skip(1 hours);
         // An outside supply earlier in the block may be transient: the checkpoint keeps the previous value.
         _supplyM1(stranger, 10_000e18);
@@ -304,11 +374,22 @@ contract BaserateAllocatorTest is VaultBase {
         assertTrue(allocator.checkpoint());
         assertEq(allocator.checkpointAt(2).m1ExternalLiquidity, int128(int256(TEAM_SUPPLY + 10_000e18)));
 
-        // A lower value in a touched block is recorded (conservative).
+        // A lower value in a touched block may be transient too (borrow, checkpoint, repay; R2V-3): carried forward.
         skip(1 hours);
         _borrow(borrower, 5000e18);
         assertTrue(allocator.checkpoint());
-        assertEq(allocator.checkpointAt(3).m1ExternalLiquidity, int128(int256(TEAM_SUPPLY + 5000e18)));
+        assertEq(allocator.checkpointAt(3).m1ExternalLiquidity, int128(int256(TEAM_SUPPLY + 10_000e18)));
+        // The share prices are still recorded as usual.
+        assertEq(allocator.checkpointAt(3).m1SharePrice, _m1Price());
+        assertEq(allocator.checkpointAt(3).timestamp, block.timestamp);
+
+        // The borrow stayed: the next untouched checkpoint records it.
+        skip(1 hours);
+        vm.roll(block.number + 1);
+        assertTrue(allocator.checkpoint());
+        assertApproxEqAbs(
+            allocator.checkpointAt(4).m1ExternalLiquidity, int128(int256(TEAM_SUPPLY + 5000e18)), 1e15, "real low"
+        );
     }
 
     function test_rebalance_noRateMoveWhenM1TouchedEarlierInTheBlock() public {
@@ -371,6 +452,7 @@ contract BaserateAllocatorTest is VaultBase {
     function test_rebalance_toLiquidity_ignoresOutsideSupplyFromTheLastDay() public {
         _deposit(lender, 10_000e18);
         _borrow(borrower, 2000e18); // liquidity 1,000
+        _nextBlock();
         _rebalance(); // top-up 1,000: vMUSD holds 1,000 of M1, liquidity at the 2,000 floor
         _advanceWithCheckpoints(1 days);
         // A real outside lender arrives; on spot M1 now has 10,000 to spare.
@@ -501,6 +583,7 @@ contract BaserateAllocatorTest is VaultBase {
     function test_rebalance_zeroCap_blocksMarketMoves() public {
         _deposit(lender, 10_000e18);
         _borrow(borrower, 2000e18); // buffer deficit
+        _nextBlock();
         bytes[4] memory data = _idData(cfg, _deployment());
         vm.prank(curator);
         vault.decreaseAbsoluteCap(data[1], 0); // collateralToken id
@@ -543,8 +626,8 @@ contract BaserateAllocatorTest is VaultBase {
 
     function test_rebalance_parksVaultIdle() public {
         _deposit(lender, 1000e18);
-        vm.prank(stranger);
-        vault.forceDeallocate(address(liq), "", 600e18, stranger);
+        vm.prank(curator); // a sentinel deallocation
+        vault.deallocate(address(liq), "", 600e18);
         assertEq(musd.balanceOf(address(vault)), 600e18);
 
         vm.expectEmit(address(allocator));
@@ -556,14 +639,96 @@ contract BaserateAllocatorTest is VaultBase {
 
     function test_bufferTopUp_usesVaultIdleFirst() public {
         _deposit(lender, 1000e18);
-        vm.prank(stranger);
-        vault.forceDeallocate(address(liq), "", 600e18, stranger);
+        vm.prank(curator); // a sentinel deallocation
+        vault.deallocate(address(liq), "", 600e18);
         _borrow(borrower, 1500e18);
+        _nextBlock();
         uint256 heldBefore = liq.heldAssets();
         (, uint256 amount) = _rebalance();
         assertEq(amount, 500e18);
         assertEq(musd.balanceOf(address(vault)), 0, "rest of the idle parked");
         assertApproxEqAbs(liq.heldAssets(), heldBefore + 100e18, 2, "500 of the 600 idle went to M1");
+    }
+
+    /// @notice R2X-4: idle vault MUSD is parked even during the cooldown of a rate-driven move. The pending move is
+    /// skipped (`NONE`) instead of the whole call reverting, and `readyAt()` tells the keeper to call now.
+    function test_rebalance_parksIdleDuringCooldown() public {
+        _scenario(10_000e18, 1000e18);
+        (IBaserateAllocator.Action action,) = _rebalance();
+        assertEq(uint256(action), uint256(IBaserateAllocator.Action.TO_MARKET));
+        uint64 movedAt = allocator.lastRebalance();
+        uint256 cooldownEnd = uint256(movedAt) + 1 hours;
+
+        // A sentinel deallocation leaves MUSD idle in the vault during the cooldown.
+        _nextBlock();
+        vm.prank(curator);
+        vault.deallocate(address(liq), "", 600e18);
+        assertEq(musd.balanceOf(address(vault)), 600e18);
+        assertEq(allocator.readyAt(), block.timestamp, "idle to park: ready now");
+        (IBaserateAllocator.Action pending,,) = allocator.previewRebalance();
+        assertEq(uint256(pending), uint256(IBaserateAllocator.Action.TO_MARKET), "a rate move is pending");
+
+        uint256 heldBefore = liq.heldAssets();
+        vm.expectEmit(address(allocator));
+        emit IBaserateAllocator.IdleAllocated(600e18);
+        uint256 amount;
+        (action, amount) = _rebalance();
+        assertEq(uint256(action), uint256(IBaserateAllocator.Action.NONE), "the rate move waits");
+        assertEq(amount, 0);
+        assertEq(musd.balanceOf(address(vault)), 0, "the idle MUSD does not");
+        assertApproxEqAbs(liq.heldAssets(), heldBefore + 600e18, 2);
+        assertEq(allocator.lastRebalance(), movedAt, "the cooldown is unchanged");
+        assertEq(allocator.readyAt(), cooldownEnd, "nothing left to park");
+    }
+
+    function test_rebalance_cooldownWithoutIdle_reverts() public {
+        _scenario(10_000e18, 1000e18);
+        _rebalance(); // TO_MARKET starts the cooldown
+        uint256 cooldownEnd = uint256(allocator.lastRebalance()) + 1 hours;
+        _nextBlock();
+        assertEq(musd.balanceOf(address(vault)), 0, "nothing idle");
+        assertEq(allocator.readyAt(), cooldownEnd);
+        vm.expectRevert(abi.encodeWithSelector(IBaserateAllocator.CooldownActive.selector, cooldownEnd));
+        allocator.rebalance();
+
+        // Idle dust under MIN_MOVE is not worth a call: still the cooldown.
+        vm.prank(curator);
+        vault.deallocate(address(liq), "", 0.5e18);
+        assertEq(allocator.readyAt(), cooldownEnd, "dust does not make it ready");
+        vm.expectRevert(abi.encodeWithSelector(IBaserateAllocator.CooldownActive.selector, cooldownEnd));
+        allocator.rebalance();
+
+        // Once the cooldown ends, the pending rate move runs.
+        vm.warp(cooldownEnd);
+        vm.roll(block.number + 1);
+        (IBaserateAllocator.Action action,) = _rebalance();
+        assertEq(uint256(action), uint256(IBaserateAllocator.Action.TO_MARKET));
+    }
+
+    function test_rebalance_parkIdle_respectsLiquidityCap() public {
+        _deposit(lender, 1000e18);
+        vm.prank(curator); // a sentinel deallocation
+        vault.deallocate(address(liq), "", 600e18);
+        bytes32 wsId = liq.adapterId();
+        bytes[4] memory data = _idData(cfg, _deployment());
+        uint256 held = liq.heldAssets();
+        vm.prank(curator);
+        vault.decreaseAbsoluteCap(data[3], held + 200e18); // room for 200 of the 600 idle MUSD
+
+        vm.expectEmit(address(allocator));
+        emit IBaserateAllocator.IdleAllocated(200e18);
+        (IBaserateAllocator.Action action,) = _rebalance();
+        assertEq(uint256(action), uint256(IBaserateAllocator.Action.NONE));
+        assertEq(musd.balanceOf(address(vault)), 400e18, "the rest stays idle");
+        assertLe(vault.allocation(wsId), vault.absoluteCap(wsId), "within the cap");
+
+        // A zero cap parks nothing, and the call still succeeds.
+        vm.prank(curator);
+        vault.decreaseAbsoluteCap(data[3], 0);
+        _nextBlock();
+        (action,) = _rebalance();
+        assertEq(uint256(action), uint256(IBaserateAllocator.Action.NONE));
+        assertEq(musd.balanceOf(address(vault)), 400e18, "zero cap: nothing parked");
     }
 
     function test_previewRebalance_matchesRebalance() public {

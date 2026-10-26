@@ -154,16 +154,16 @@ Global rules:
   - `MUSD_FEED = 0x0617a9b725011a126a2b9fd53563f4236501f32cf76d877644b943394606c6de`.
 - **Constants:**
   - `SKIP = 0x7b7c000000000000000000000000000000000015` (same on both networks);
-  - `SKIP_MAX_AGE = 60`, `PYTH_MAX_AGE = 3900`, `MAX_DEV_BPS = 1000`;
+  - `SKIP_MAX_AGE = 60`, `PYTH_BTC_BAND_MAX_AGE = 600` (the band), `PYTH_MAX_AGE = 3900` (the MUSD leg), `MAX_DEV_BPS = 1000`;
   - `MUSD_MIN = 1e18`, `MUSD_MAX = 1.02e18`.
 - **Functions:**
   - `price() view returns (uint256)` = `btcUsd18 * 1e36 / musdUsd18`. Check: 0.001 BTC gives 80.66 MUSD of value, i.e. 62.1 MUSD of maximum borrow at 0.77.
   - `btcUsd() view returns (uint256 px18, uint256 updatedAt)`, validated: `answer > 0`, `now − updatedAt ≤ 60`; `updatedAt > now` is treated as age 0.
-  - `musdUsd() view returns (uint256 px18, bool fresh)`: clamped to [1.00, 1.02]; 1.00 if stale or invalid.
-  - `pythBtc() view returns (uint256 px18, bool fresh)`.
+  - `musdUsd() view returns (uint256 px18, bool fresh)`: clamped to [1.00, 1.02] while Pyth MUSD is at most 3,900 s old; 1.00 if stale or invalid.
+  - `pythBtc() view returns (uint256 px18, bool fresh)`: `fresh` while Pyth BTC is valid and at most 600 s old.
   - `status() view returns (Status)`: never reverts (try/catch on Skip). Fields: Skip answer and age, Pyth BTC and MUSD with ages, deviation in bps, `ok`, `reason`. Used by the UI, RiskLens and the keeper.
 - **Pyth reads:** low-level `staticcall` to `getPriceUnsafe`. Require 128-byte return data, `price > 0`, `expo ∈ [−18, 0]`. Otherwise treat as stale; never revert on Pyth. Scale with `uint64(price) * 10**(18 + expo)`.
-- **Band:** if Pyth BTC is fresh and |skip − pyth| × 1e4 > 1000 × pyth, revert `PythDeviation(skip, pyth)`.
+- **Band:** if Pyth BTC is fresh (at most `PYTH_BTC_BAND_MAX_AGE` = 600 s old) and |skip − pyth| × 1e4 > 1000 × pyth, revert `PythDeviation(skip, pyth)`. Pyth is pushed about hourly, so the band is on for the first 10 minutes after a push. A stalled or lagging Pyth therefore stops gating within 10 minutes and cannot freeze liquidations through a fast crash for longer (round-2 audit R2X-2; the bound used to be 3,900 s).
 - **Errors:** `SkipInvalidAnswer(int256)`, `SkipStale(uint256 age)`, `PythDeviation(uint256, uint256)`.
 - **Precompile cost:** 1 Skip call per `price()`.
 
@@ -332,7 +332,7 @@ Configuration transactions, in order (VaultV2 starts with all timelocks at 0, so
    - `addAdapter` ×2;
    - `setIsAllocator(BaserateAllocator | SAFE | deployer, true)`;
    - `increaseAbsoluteCap(idData, cap)` and `increaseRelativeCap(idData, 1e18)` for each id: `abi.encode("this", mm)`, `abi.encode("collateralToken", brBTC)`, `abi.encode("this/marketParams", mm, M1)` (each cap ≤ the M1 cap, 2k), and `abi.encode("this", ws)` (cap = the vMUSD deposit cap, 3k in proof mode, because every deposit allocates there);
-   - `setForceDeallocatePenalty(mm, small)`, `(ws, 0)`.
+   - `setForceDeallocatePenalty(mm, small)`, `(ws, 0)`. The ws adapter itself rejects `forceDeallocate` while it is the vault's liquidity adapter (round-2 audit R2X-4), so its 0 penalty only applies once withdrawals no longer reach it.
 4. Allocator (deployer): `setLiquidityAdapterAndData(ws, "")`, `setMaxRate(15854895991)`.
 5. Curator: `setIsAllocator(deployer, false)`. Then `increaseTimelock(sel, 48h)` for addAdapter, removeAdapter, setIsAllocator, the four gates, setAdapterRegistry, abdicate, both fees, both fee recipients, increaseAbsoluteCap, increaseRelativeCap and setForceDeallocatePenalty. `decreaseTimelock` is auto-locked. Optionally `abdicate` the gates.
 6. Owner: `setCurator(SAFE)`, `setOwner(SAFE)`.
@@ -345,18 +345,19 @@ Fees stay 0, as in the USDC vault.
 **WsMusdLiquidityAdapter** (from vault-v2 MorphoVaultV1Adapter @ `2026-08-13`):
 - `ids = [keccak256(abi.encode("this", this))]`.
 - `allocate` deposits `min(assets, wsMUSD.maxDeposit(this))` and leaves the rest idle in the adapter.
-- `deallocate` uses idle first.
+- `deallocate` uses idle first. It reverts `ForceDeallocateDisabled` when the vault calls it from `forceDeallocate` (Vault V2 passes the selector) while this adapter is the vault's liquidity adapter with empty data (round-2 audit R2X-4). Its penalty is 0 and every withdrawal reaches it anyway, so a force-deallocation could only park vMUSD's wsMUSD position idle and forfeit its share of wsMUSD's vesting yield. Withdrawals and allocator or sentinel `deallocate` calls are unaffected, and `forceDeallocate` works again as an in-kind exit of last resort once the vault's exit path no longer reaches this adapter.
 - `realAssets` = `previewRedeem(shares)` + idle; change = new − old allocation.
 - `availableLiquidity` = idle + `wsMUSD.maxWithdraw(this)`. It is optimistic: a view cannot see an sMUSD withdraw that reverts, so the allocator's exits do not rely on it.
 - Rescue (audit B-2): the vault's curator calls `submitRescue()`; after `RESCUE_TIMELOCK` (72 h, revocable by the curator or a sentinel) the curator or a sentinel calls `rescue()`. It first tries `wsMUSD.redeem(all shares)` into idle MUSD with a guaranteed 3M-gas stipend; if that works nothing leaves the adapter. Only if it reverts do the wsMUSD shares go in kind to the vault's owner for manual unwinding (`redeemInKind` to sMUSD), and the adapter keeps later allocations idle. The vault books the shares' value as a loss until the owner returns it, so the sentinel should also cut the adapter's cap to 0.
 - Reentrancy rules: follow vault-v2's adapter docs (commits from 2026-10-12 to 10-15).
 
 **BaserateAllocator** (permissionless; holds the allocator role):
-- `rebalance()` keeps M1 idle ≥ max(2k MUSD, 15% of M1 supply). Buffer top-ups ignore the cooldown and do not start it.
+- `rebalance()` keeps M1 idle ≥ max(2k MUSD, 15% of M1 supply). Buffer top-ups ignore the cooldown and do not start it, but run at most once per block (`lastTopUpAt`). When M1 was touched earlier in the block, a top-up is sized on the larger of spot liquidity and the last checkpoint's (its external liquidity plus vMUSD's M1 position), so a borrow or withdrawal undone in the same transaction cannot trigger one (round-2 audit R2X-3).
 - Moves the excess only when two views agree (audit B-1). The direction comes from 7-day trailing realized APYs: M1's supply-share price against wsMUSD's `convertToAssets(1e18)`, both in the hourly checkpoint ring buffer, over the same window. The size is bisected on the spot model, M1 supply APY = `IRM.borrowRateView × utilization × (1 − fee)`, so the post-move rate still beats (or trails) wsMUSD's.
-- No rate-driven move when M1 was touched earlier in the block (Morpho `lastUpdate == now`): its totals may be a transient supply, repay or borrow.
-- `TO_LIQUIDITY` is sized on a conservative liquidity: vMUSD's M1 position plus the lowest external M1 liquidity (supply − borrow − vMUSD) of now and of the last day's checkpoints. A checkpoint taken in a block where M1 was already touched never records more than the previous one.
-- At most 1k MUSD per call, with a 1 h cooldown between rate-driven moves.
+- No rate-driven move when M1 was touched earlier in the block (Morpho `lastUpdate == now`): its totals may be a transient supply, repay or borrow. A free `Morpho.accrueInterest` therefore vetoes that block's move; this liveness cost is kept on purpose (round-2 audit R2V-4).
+- `TO_LIQUIDITY` is sized on a conservative liquidity: vMUSD's M1 position plus the lowest external M1 liquidity (supply − borrow − vMUSD) of now and of the last day's checkpoints. A checkpoint taken in a block where M1 was already touched carries the previous external liquidity forward unchanged, so a transient high or low is never recorded (round-2 audit R2V-3).
+- At most 1k MUSD per call, with a 1 h cooldown between rate-driven moves. During the cooldown a call parks idle vault MUSD and returns `NONE` (the pending rate-driven move waits); it reverts `CooldownActive` only when there is nothing to park. `readyAt()` returns now while a top-up is due or idle MUSD can be parked.
+- Every `rebalance` ends by parking idle vault MUSD in the liquidity adapter, within its caps.
 - `withdraw`/`redeem` for vMUSD holders: idle and wsMUSD first, only the shortfall from M1. If the wsMUSD leg reverts, retry M1-first, so the M1-backed share always exits without the force-deallocate penalty.
 
 **FlashLiquidator:**
@@ -373,7 +374,10 @@ Fees stay 0, as in the USDC vault.
 - `buyCollateral(minOut) payable` pays `btc × skip × (1 − incentive/2)`.
 - NAV marks BTC inventory at Skip × 0.95 and excludes unvested premium. Inventory below `DUST_INVENTORY` (1e13 wei, about 1 MUSD) counts as 0, so dust never puts the oracle on the exit path; sales must take all the inventory or leave at least that much.
 - Deposits and mints are priced at book + unvested (gross), not at NAV: each deposit joins the book and the unvested premium pro rata, so a late depositor pays for the premium still vesting and shares the next loss pro rata.
+- Deposits and mints are closed while the inventory is at least `DUST_INVENTORY` (they revert `HoldingInventory`; `maxDeposit` and `maxMint` return 0). Held BTC sits at the 0.95 mark, below what its sale clears at, so a deposit between a purchase and its sale would take the recovery the incumbents paid for (audit R2V-1). Deposits never read the oracle.
+- DeployLiquidation must seed 1 MUSD of dead shares and reverts before deploying anything without it: deposits are priced at gross, which a donation raises at once, so the seed is what defeats the inflation attack (audit R2V-2).
 - `requestRedeem(shares)` / `claimRedeem(id)` after 7 days pay at min(NAV at request, NAV at claim). When cash is short, a claim pays all the cash, burns the matching fraction of the shares and keeps the rest queued. During an oracle outage the owner may `claimRedeemWithoutOracle(id)`, which values the inventory at 0 for that claim only.
+- Payments use idle MUSD first, then `wsMUSD.withdraw`. If that withdraw reverts (a broken sMUSD withdraw), a claim is paid in kind: the idle MUSD plus wsMUSD shares worth the rest, rounded down (`PaidInKind`; the receiver leaves through `wsMUSD.redeemInKind`). A purchase reverts `CashUnavailable` instead, so the liquidator picks a DEX. An in-kind payment also pauses parking for `PARK_PAUSE` (1 day), or until a withdraw succeeds, so sale proceeds and deposits stay idle; meanwhile `quoteBuy` counts only idle MUSD (audit R2V-7). A gas-capped call cannot force the in-kind path: a withdraw that runs out of gas leaves too little for the rest of the claim.
 - Premium vests over 7 days; losses are recognised instantly.
 - Inventory is sold through a Dutch auction (Skip × 1.00 decaying to × 0.95 over 6 h) and bounded keeper sales.
 - The sentinel can pause deposits only.
@@ -439,7 +443,7 @@ Native value transfers are EVM statedb operations, not precompile calls [I]. A l
 13. With the oracle reverting, `repayAndWithdraw` still succeeds.
 14. (W2) Credit outstanding ≤ allowance, and revoked spenders cannot draw.
 15. (W2) Backstop share value changes only on realized PnL.
-16. (W2) Allocator moves stay within caps, never pull M1 below the buffer, and never come from M1 state touched earlier in the block.
+16. (W2) Allocator moves stay within caps, never pull M1 below the buffer, and never come from M1 state touched earlier in the block. At most one buffer top-up runs per block, idle vault MUSD is always parked, and the wsMUSD adapter never accepts a force-deallocation while it is the liquidity adapter.
 
 **Fuzz targets:**
 - oracle math: expo range, clamps, the deviation boundary;
@@ -452,7 +456,7 @@ Native value transfers are EVM statedb operations, not precompile calls [I]. A l
 **Oracle failure (Morpho semantics):**
 - Frozen: borrow, withdraw with debt, and liquidation.
 - Still open: supplyCollateral, repay, and withdraw after full repay.
-- The UI shows the oracle-free exit. Worst-case divergence freeze is about 65 min; a Skip outage is unbounded. Disclose both.
+- The UI shows the oracle-free exit. A divergence freeze lasts at most 10 min (the band only applies while Pyth BTC is at most 600 s old); a Skip outage is unbounded. Disclose both.
 
 **Roles:**
 - Governor = Safe 2-of-3, used for timelocked raises.
@@ -469,6 +473,7 @@ Native value transfers are EVM statedb operations, not precompile calls [I]. A l
 - wsMUSD uses internal accounting plus vesting, plus a 1 MUSD dead seed.
 - brBTC accounting uses supply only.
 - vMUSD gets a 100 MUSD dead seed.
+- The Backstop gets a mandatory 1 MUSD dead seed (its deposits are priced at gross, which a donation moves at once).
 
 **Red-team fixes mapped to code:**
 
@@ -478,10 +483,10 @@ Native value transfers are EVM statedb operations, not precompile calls [I]. A l
 | Caps sized to depth | factory caps, keeper cap script, sentinel cuts |
 | vMUSD deposit DoS | wsMUSD has no pause and a raise-only 250k cap; the adapter deposits `min(maxDeposit)`; id caps follow vault semantics; `maxRate` set in configuration step 4 |
 | Fees | performance fee 0 |
-| Backstop economics | 7-day queue at min(NAV) with partial claims, vested premium (new deposits buy their share of it at full value), 0.95 mark, FlashLiquidator as the primary path |
+| Backstop economics | 7-day queue at min(NAV) with partial claims, vested premium (new deposits buy their share of it at full value), deposits closed while BTC is held, 0.95 mark, FlashLiquidator as the primary path |
 | Signed claims | `comeBack` pays only the caller's own clone, with borrower = `msg.sender` |
-| sMUSD upgrade risk | `redeemInKind` makes no sMUSD state calls; the allocator's exit retries M1-first when wsMUSD cannot pay; the adapter's timelocked rescue moves vMUSD's wsMUSD shares in kind to the vault owner only if wsMUSD's redeem fails; keeper watches `Upgraded` and `StrategyUpdated`, then the sentinel cuts caps |
-| Oracle liveness | 60 s Skip bound, band only while Pyth ≤ 3,900 s, invariant 13 |
+| sMUSD upgrade risk | `redeemInKind` makes no sMUSD state calls; the allocator's exit retries M1-first when wsMUSD cannot pay; the adapter's timelocked rescue moves vMUSD's wsMUSD shares in kind to the vault owner only if wsMUSD's redeem fails; the Backstop pays exits in kind and pauses parking when wsMUSD's withdraw reverts; keeper watches `Upgraded` and `StrategyUpdated`, then the sentinel cuts caps |
+| Oracle liveness | 60 s Skip bound, band only while Pyth BTC ≤ 600 s (so a divergence freeze lasts at most 10 min), invariant 13 |
 | Yield sniping | the vesting rule in §0.7 |
 | ERC-2771 | absent; MezoForwarder is ECDSA-only, so contracts cannot be spoofed |
 | M2 and EscapeHatch | not built |

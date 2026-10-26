@@ -17,11 +17,14 @@ import {IWsMusdLiquidityAdapter} from "../interfaces/IWsMusdLiquidityAdapter.sol
 /// @notice vMUSD's liquidity adapter: every vMUSD deposit is allocated here and parked in wsMUSD (savings yield,
 /// fully liquid); withdrawals are served from here before anything touches the M1 market.
 /// @dev Derived from morpho-org/vault-v2 `MorphoVaultV1Adapter` at tag 2026-08-13 (GPL-2.0-or-later, Copyright (c)
-/// 2025 Morpho Association), with four changes:
+/// 2025 Morpho Association), with five changes:
 /// - `allocate` deposits `min(idle + assets, wsMUSD.maxDeposit(this))` inside try/catch and keeps the rest as
 ///   accounted idle MUSD. A full wsMUSD cap, or a wsMUSD/sMUSD deposit that reverts, therefore never blocks a vMUSD
 ///   deposit (the "vMUSD deposit DoS" in docs/design/red-team.md). Idle MUSD is redeposited on later allocations.
 /// - `deallocate` pays from idle MUSD first and withdraws only the remainder from wsMUSD.
+/// - `deallocate` rejects the vault's `forceDeallocate` while this adapter is the vault's liquidity adapter (its
+///   penalty is 0 and every withdrawal reaches the adapter anyway, so a force-deallocation could only park vMUSD's
+///   wsMUSD position idle, forfeiting its share of wsMUSD's vesting yield; round-2 audit R2X-4).
 /// - `realAssets = wsMUSD.previewRedeem(shares) + idle`. Idle is tracked internally, so stray MUSD donated to the
 ///   adapter is not counted and can be skimmed; wsMUSD shares can never be skimmed.
 /// - A timelocked rescue for a wsMUSD exit that no longer works (sMUSD's withdraw reverting): the vault's curator
@@ -191,14 +194,22 @@ contract WsMusdLiquidityAdapter is IWsMusdLiquidityAdapter, ReentrancyGuardTrans
     }
 
     /// @notice Releases `assets` MUSD to the vault: idle MUSD first, then a wsMUSD withdrawal for the remainder.
-    /// @dev Reverts (wsMUSD `ERC4626ExceededMaxWithdraw`) if the adapter holds less than `assets`.
-    function deallocate(bytes memory data, uint256 assets, bytes4, address)
+    /// @dev Reverts (wsMUSD `ERC4626ExceededMaxWithdraw`) if the adapter holds less than `assets`. Vault V2 passes the
+    /// selector it was called with: `forceDeallocate` is rejected (`ForceDeallocateDisabled`) while this adapter is
+    /// the vault's liquidity adapter with empty liquidity data, because every withdrawal already reaches it then and a
+    /// free force-deallocation could only park vMUSD's savings leg idle (round-2 audit R2X-4). Withdrawals
+    /// (`withdraw`/`redeem`), allocator and sentinel `deallocate` calls are unaffected, and `forceDeallocate` works
+    /// again whenever the vault's exit path no longer reaches this adapter, so it stays an in-kind exit of last resort.
+    function deallocate(bytes memory data, uint256 assets, bytes4 selector, address)
         external
         nonReentrant
         returns (bytes32[] memory, int256)
     {
         if (data.length != 0) revert InvalidData();
         if (msg.sender != parentVault) revert NotAuthorized();
+        if (selector == IVaultV2.forceDeallocate.selector && _isVaultLiquidityAdapter()) {
+            revert ForceDeallocateDisabled();
+        }
 
         uint256 idleAssets = idle;
         uint256 fromIdle = assets < idleAssets ? assets : idleAssets;
@@ -240,6 +251,13 @@ contract WsMusdLiquidityAdapter is IWsMusdLiquidityAdapter, ReentrancyGuardTrans
     /// @inheritdoc IWsMusdLiquidityAdapter
     function availableLiquidity() external view returns (uint256) {
         return idle + IERC4626(wsMusd).maxWithdraw(address(this));
+    }
+
+    /// @dev Whether the vault's own exit path (`withdraw`/`redeem`) deallocates from this adapter: it is the vault's
+    /// liquidity adapter and the liquidity data is empty (anything else would revert `InvalidData` here).
+    function _isVaultLiquidityAdapter() internal view returns (bool) {
+        IVaultV2 vault = IVaultV2(parentVault);
+        return vault.liquidityAdapter() == address(this) && vault.liquidityData().length == 0;
     }
 
     function _onlyCuratorOrSentinel() internal view {

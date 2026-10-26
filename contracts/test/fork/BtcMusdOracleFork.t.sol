@@ -102,7 +102,7 @@ contract BtcMusdOracleForkTest is MezoFork {
         assertEq(s.pythBtcPrice, uint256(uint64(btc.price)) * 10 ** uint256(int256(18 + btc.expo)), "pyth btc scale");
         assertEq(s.pythBtcAge, block.timestamp - btc.publishTime, "pyth btc age");
         assertTrue(s.pythBtcFresh, "pyth btc fresh at the pinned block");
-        assertLe(s.pythBtcAge, oracle.PYTH_MAX_AGE(), "pyth btc age bound");
+        assertLe(s.pythBtcAge, oracle.PYTH_BTC_BAND_MAX_AGE(), "pyth btc band age bound (600 s)");
         assertLt(s.deviationBps, 50, "skip and pyth agree within 0.5%");
 
         assertTrue(s.musdFresh, "pyth musd fresh at the pinned block");

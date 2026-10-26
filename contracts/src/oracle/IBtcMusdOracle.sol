@@ -16,12 +16,14 @@ interface IBtcMusdOracle is IOracle {
     /// @param pythBtcPrice Pyth BTC/USD, or 0 when the Pyth read failed validation.
     /// @param pythBtcAge Seconds since Pyth BTC's `publishTime` (0 when in the future), or `type(uint256).max` when the
     /// read failed validation.
-    /// @param pythBtcFresh True when Pyth BTC is valid and at most `PYTH_MAX_AGE` old, i.e. the deviation band is on.
+    /// @param pythBtcFresh True when Pyth BTC is valid and at most `PYTH_BTC_BAND_MAX_AGE` (600 s) old, i.e. the
+    /// deviation band is on.
     /// @param musdPrice Raw Pyth MUSD/USD before clamping, or 0 when the read failed validation. The leg actually used by
     /// `price()` is `musdUsd()`.
     /// @param musdAge Seconds since Pyth MUSD's `publishTime` (0 when in the future), or `type(uint256).max` when the read
     /// failed validation.
-    /// @param musdFresh True when Pyth MUSD is valid and at most `PYTH_MAX_AGE` old (otherwise the leg is 1.00).
+    /// @param musdFresh True when Pyth MUSD is valid and at most `PYTH_MAX_AGE` (3,900 s) old (otherwise the leg is
+    /// 1.00).
     /// @param deviationBps |skip - pythBtc| in bps of pythBtc, rounded up, whenever both are readable (even if Pyth is
     /// stale); 0 otherwise. The band trips when `pythBtcFresh && deviationBps > MAX_DEV_BPS`.
     struct Status {
@@ -44,7 +46,8 @@ interface IBtcMusdOracle is IOracle {
     error SkipInvalidAnswer(int256 answer);
     /// @notice Skip's last update is older than `SKIP_MAX_AGE`.
     error SkipStale(uint256 age);
-    /// @notice Skip and a fresh Pyth BTC price differ by more than `MAX_DEV_BPS` of the Pyth price.
+    /// @notice Skip and a Pyth BTC price at most `PYTH_BTC_BAND_MAX_AGE` old differ by more than `MAX_DEV_BPS` of the
+    /// Pyth price.
     error PythDeviation(uint256 skipPrice, uint256 pythPrice);
     /// @notice A constructor address argument was zero.
     error ZeroAddress();
@@ -58,7 +61,7 @@ interface IBtcMusdOracle is IOracle {
 
     /// @notice Pyth BTC/USD scaled to 18 decimals. Never reverts.
     /// @return px18 The Pyth price, or 0 when the read failed validation.
-    /// @return fresh True when valid and at most `PYTH_MAX_AGE` old (the deviation band is then enforced).
+    /// @return fresh True when valid and at most `PYTH_BTC_BAND_MAX_AGE` old (the deviation band is then enforced).
     function pythBtc() external view returns (uint256 px18, bool fresh);
 
     /// @notice The MUSD/USD leg used by `price()`. Never reverts.

@@ -148,6 +148,12 @@ contract VaultForkTest is MezoFork, VaultSetup {
         }
     }
 
+    /// @dev The next block (a later timestamp), so M1 counts as untouched in it.
+    function _nextBlock() internal {
+        skip(4);
+        vm.roll(vm.getBlockNumber() + 1);
+    }
+
     function _mockWsApy(uint256 apy) internal {
         IBaserateAllocator.Checkpoint memory c = allocator.checkpointAt(0);
         uint256 window = block.timestamp - c.timestamp;
@@ -274,6 +280,7 @@ contract VaultForkTest is MezoFork, VaultSetup {
     function _borrowerAlwaysHasBuffer() internal {
         _deposit(lender, 10_000e18);
         _borrow("b1", 1500e18); // M1 liquidity ~1,498.5 (10 bps origination fee) < 2,000
+        _nextBlock(); // a top-up runs on M1 state left by earlier blocks (R2X-3)
         uint256 deficit = 2000e18 - _m1Liquidity();
         (IBaserateAllocator.Action action, uint256 amount) = allocator.rebalance();
         assertEq(uint256(action), uint256(IBaserateAllocator.Action.BUFFER_TOP_UP));

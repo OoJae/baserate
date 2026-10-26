@@ -123,15 +123,25 @@ contract BackstopMainnetForkTest is LiquidationForkBase {
     }
 
     function test_mainnet_backstopPrecompileBudget() public {
-        _fillInventory(0.02e18);
-        // With BTC held, a deposit reads Skip once (its checkpoint also prices the shares); requests and claims once.
-        deal(net.musd, keeper, 100e18);
+        // Deposits never read Skip: with no BTC held NAV needs no price, and while BTC is held they are refused before
+        // any read. Requests and claims read it once while BTC is held.
+        deal(net.musd, keeper, 200e18);
         vm.startPrank(keeper);
-        musd.approve(address(backstop), 100e18);
+        musd.approve(address(backstop), 200e18);
         vm.startStateDiffRecording();
         uint256 shares = backstop.deposit(100e18, keeper);
         (uint256 skipCalls, uint256 btcCalls) = _countPrecompiles(vm.stopAndReturnStateDiff());
-        assertEq(skipCalls, 1, "deposit");
+        assertEq(skipCalls, 0, "deposit");
+        assertEq(btcCalls, 0);
+        vm.stopPrank();
+
+        uint256 seized = _fillInventory(0.02e18);
+        vm.startPrank(keeper);
+        vm.startStateDiffRecording();
+        vm.expectRevert(abi.encodeWithSelector(IBackstop.HoldingInventory.selector, seized));
+        backstop.deposit(100e18, keeper);
+        (skipCalls, btcCalls) = _countPrecompiles(vm.stopAndReturnStateDiff());
+        assertEq(skipCalls, 0, "deposit refused while holding BTC");
         assertEq(btcCalls, 0);
         vm.startStateDiffRecording();
         backstop.requestRedeem(shares, keeper, keeper);

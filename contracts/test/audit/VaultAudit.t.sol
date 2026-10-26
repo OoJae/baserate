@@ -35,8 +35,11 @@ contract VaultAuditAllocatorTest is VaultBase {
         _deposit(lender, 20_000e18);
         _wsYield(1e18);
         _borrow(borrower, 2900e18);
+        // Top-ups need no cooldown, but run at most once per block, on M1 state left by earlier blocks (R2X-3).
+        _nextBlock();
         allocator.rebalance();
-        allocator.rebalance(); // top-ups need no cooldown
+        _nextBlock();
+        allocator.rebalance();
         _advanceWithCheckpoints(1 days);
     }
 
@@ -74,7 +77,8 @@ contract VaultAuditAllocatorTest is VaultBase {
         assertEq(uint256(action), uint256(IBaserateAllocator.Action.NONE), "policy not inverted");
         assertEq(amount, 0);
         assertGe(musd.balanceOf(address(flash)) + 1, capital);
-        assertEq(_vaultM1(), vaultM1Before, "vMUSD's M1 supply untouched");
+        // Untouched: at most the attacker's 1 wei of Morpho share rounding accrues to M1's suppliers.
+        assertApproxEqAbs(_vaultM1(), vaultM1Before, 1, "vMUSD's M1 supply untouched");
         assertGe(_m1Liquidity(), _bufferTarget(), "buffer intact");
         assertEq(allocator.lastRebalance(), 0, "no cooldown started");
 
@@ -110,8 +114,11 @@ contract VaultAuditAllocatorTest is VaultBase {
         _deposit(lender, 20_000e18);
         _wsYield(1e18);
         _borrow(borrower, 1900e18);
+        // Two top-ups, one per block on M1 state left by earlier blocks: liquidity back at the 2k floor.
+        _nextBlock();
         allocator.rebalance();
-        allocator.rebalance(); // two top-ups: liquidity back at the 2k floor
+        _nextBlock();
+        allocator.rebalance();
         _advanceWithCheckpoints(1 days);
         _mockWsApy(0.5e18); // wsMUSD pays more: the honest direction is TO_LIQUIDITY, sized on the true liquidity
         (IBaserateAllocator.Action honest, uint256 honestAmount,) = allocator.previewRebalance();
@@ -170,9 +177,11 @@ contract VaultAuditAllocatorTest is VaultBase {
         _nextBlock();
         _borrow(makeAddr("big"), _m1Liquidity() - 100e18);
         assertLt(_m1Liquidity(), _bufferTarget());
+        _nextBlock(); // top-ups run on M1 state left by earlier blocks, one per block (R2X-3)
         assertEq(allocator.readyAt(), block.timestamp, "a top-up is ready now");
         (action,) = allocator.rebalance();
         assertEq(uint256(action), uint256(IBaserateAllocator.Action.BUFFER_TOP_UP));
+        _nextBlock();
         (action,) = allocator.rebalance();
         assertEq(uint256(action), uint256(IBaserateAllocator.Action.BUFFER_TOP_UP));
         assertGe(_m1Liquidity(), _bufferTarget(), "restored inside the cooldown");

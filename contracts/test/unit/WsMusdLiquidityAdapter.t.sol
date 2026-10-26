@@ -171,14 +171,59 @@ contract WsMusdLiquidityAdapterTest is VaultBase {
         vault.deallocate(address(liq), "", 5000e18);
     }
 
-    function test_forceDeallocate_noPenalty_inKind() public {
-        _deposit(lender, 1000e18);
-        // Anyone can move the adapter's assets to vault idle; the liquidity adapter carries no penalty.
+    /// @dev R2X-4: the liquidity adapter's force-deallocate penalty is 0 and every withdrawal reaches it anyway, so
+    /// `forceDeallocate` could only park vMUSD's wsMUSD position idle. It is rejected, for holders and strangers alike.
+    function test_forceDeallocate_rejectedWhileLiquidityAdapter() public {
+        uint256 shares = _deposit(lender, 1000e18);
+        uint256 held = liq.heldAssets();
         vm.prank(stranger);
-        uint256 penaltyShares = vault.forceDeallocate(address(liq), "", 500e18, stranger);
+        vm.expectRevert(IWsMusdLiquidityAdapter.ForceDeallocateDisabled.selector);
+        vault.forceDeallocate(address(liq), "", 500e18, stranger);
+        vm.prank(lender);
+        vm.expectRevert(IWsMusdLiquidityAdapter.ForceDeallocateDisabled.selector);
+        vault.forceDeallocate(address(liq), "", 500e18, lender);
+        vm.prank(lender);
+        vm.expectRevert(IWsMusdLiquidityAdapter.ForceDeallocateDisabled.selector);
+        vault.forceDeallocate(address(liq), "", 0, lender);
+        assertEq(liq.heldAssets(), held, "position untouched");
+        assertEq(musd.balanceOf(address(vault)), 0);
+
+        // Withdrawals, sentinel and allocator deallocations still reach the adapter.
+        vm.prank(lender);
+        vault.withdraw(300e18, lender, lender);
+        assertEq(musd.balanceOf(lender), 300e18, "withdraw pays from the adapter");
+        vm.prank(lender);
+        vault.redeem(shares / 10, lender, lender);
+        vm.prank(curator); // sentinel
+        vault.deallocate(address(liq), "", 100e18);
+        vm.prank(address(allocator));
+        vault.deallocate(address(liq), "", 100e18);
+        assertEq(musd.balanceOf(address(vault)), 200e18, "deallocations land in vault idle");
+    }
+
+    /// @dev Once the vault's exit path no longer reaches the adapter (another liquidity adapter, or liquidity data
+    /// this adapter rejects), `forceDeallocate` is the in-kind exit of last resort again, with its 0 penalty.
+    function test_forceDeallocate_allowedOnceNotTheVaultsExitPath() public {
+        _deposit(lender, 1000e18);
+        vm.prank(address(allocator)); // holds the allocator role
+        vault.setLiquidityAdapterAndData(address(0), "");
+        vm.prank(stranger);
+        uint256 penaltyShares = vault.forceDeallocate(address(liq), "", 400e18, stranger);
         assertEq(penaltyShares, 0);
-        assertEq(musd.balanceOf(address(vault)), 500e18, "vault idle");
-        // The allocator parks it back.
+        assertEq(musd.balanceOf(address(vault)), 400e18, "vault idle");
+
+        vm.prank(address(allocator));
+        vault.setLiquidityAdapterAndData(address(liq), hex"01"); // withdrawals would revert InvalidData here
+        vm.prank(stranger);
+        vault.forceDeallocate(address(liq), "", 100e18, stranger);
+        assertEq(musd.balanceOf(address(vault)), 500e18);
+
+        vm.prank(address(allocator));
+        vault.setLiquidityAdapterAndData(address(liq), "");
+        vm.prank(stranger);
+        vm.expectRevert(IWsMusdLiquidityAdapter.ForceDeallocateDisabled.selector);
+        vault.forceDeallocate(address(liq), "", 100e18, stranger);
+        // The allocator parks the idle back.
         allocator.rebalance();
         assertEq(musd.balanceOf(address(vault)), 0, "swept back");
     }

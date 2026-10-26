@@ -22,7 +22,8 @@ interface IBaserateAllocator {
     /// @param sharePrice wsMUSD `convertToAssets(1e18)`.
     /// @param m1SharePrice M1 supply-share price: MUSD wei per 1e24 supply shares (1e18 at par), interest accrued.
     /// @param m1ExternalLiquidity M1 supply minus borrow minus vMUSD's own M1 supply (may be negative). If M1 was
-    /// touched earlier in the recording block, never above the previous checkpoint's value.
+    /// touched earlier in the recording block (its totals may be transient), the previous checkpoint's value, carried
+    /// forward unchanged.
     struct Checkpoint {
         uint64 timestamp;
         uint192 sharePrice;
@@ -46,7 +47,9 @@ interface IBaserateAllocator {
     /// direction of rate-driven moves.
     /// @param conservativeLiquidity `vaultMarketAssets` plus the lowest external M1 liquidity of now and of the
     /// checkpoints of the last `LIQUIDITY_WINDOW` (<= `m1Liquidity`); `TO_LIQUIDITY` is sized on it.
-    /// @param marketTouched M1 was touched earlier in this block: no rate-driven move (buffer top-ups still run).
+    /// @param marketTouched M1 was touched earlier in this block: no rate-driven move, and a buffer top-up is sized on
+    /// the larger of `m1Liquidity` and the last checkpoint's liquidity (its external liquidity plus
+    /// `vaultMarketAssets`), so a transient low cannot trigger one.
     struct Snapshot {
         uint256 m1SupplyAssets;
         uint256 m1BorrowAssets;
@@ -97,8 +100,9 @@ interface IBaserateAllocator {
     function checkpoint() external returns (bool recorded);
 
     /// @notice Permissionless: tops up the M1 buffer, or moves excess between wsMUSD and M1 by APY, by at most
-    /// `MAX_MOVE`, then parks idle vMUSD MUSD in the liquidity adapter. Buffer top-ups always run; anything else
-    /// reverts `CooldownActive` during the cooldown that follows a rate-driven move.
+    /// `MAX_MOVE`, then parks idle vMUSD MUSD in the liquidity adapter. Buffer top-ups ignore the cooldown but run at
+    /// most once per block. During the cooldown that follows a rate-driven move, a call with idle MUSD to park parks it
+    /// and returns `NONE` (any rate-driven move waits); otherwise it reverts `CooldownActive`.
     function rebalance() external returns (Action action, uint256 amount);
 
     /// @notice Withdraws exactly `assets` MUSD of the caller's vMUSD to `receiver`. Idle MUSD and wsMUSD are used
@@ -113,7 +117,8 @@ interface IBaserateAllocator {
     /// for `shares`.
     function redeem(uint256 shares, address receiver) external returns (uint256 assets);
 
-    /// @notice What `rebalance` would do now (ignoring the cooldown), with its inputs.
+    /// @notice What `rebalance` would do now (ignoring the cooldown, honouring the one-top-up-per-block rule), with its
+    /// inputs.
     function previewRebalance() external view returns (Action action, uint256 amount, Snapshot memory snapshot);
 
     /// @notice Current decision inputs.
@@ -137,8 +142,11 @@ interface IBaserateAllocator {
     /// @notice Timestamp of the last rate-driven move (`TO_MARKET` or `TO_LIQUIDITY`); buffer top-ups do not set it.
     function lastRebalance() external view returns (uint64);
 
+    /// @notice Timestamp of the block of the last buffer top-up (at most one per block).
+    function lastTopUpAt() external view returns (uint64);
+
     /// @notice Earliest timestamp at which `rebalance` can move funds: `lastRebalance + COOLDOWN`, or now while a buffer
-    /// top-up is due (top-ups ignore the cooldown).
+    /// top-up is due or idle vault MUSD can be parked (both ignore the cooldown).
     function readyAt() external view returns (uint256);
 
     /// @notice The M1 market parameters.

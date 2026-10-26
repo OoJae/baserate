@@ -14,13 +14,15 @@ import {WsMUSD} from "../../src/savings/WsMUSD.sol";
 import {BaserateAllocator} from "../../src/vault/BaserateAllocator.sol";
 import {WsMusdLiquidityAdapter} from "../../src/vault/WsMusdLiquidityAdapter.sol";
 import {IBaserateAllocator} from "../../src/interfaces/IBaserateAllocator.sol";
+import {IWsMusdLiquidityAdapter} from "../../src/interfaces/IWsMusdLiquidityAdapter.sol";
 import {IMorphoMarketV1AdapterV2Lite} from "../../src/interfaces/external/IMorphoMarketV1AdapterV2Lite.sol";
 import {MockERC20} from "../utils/MockERC20.sol";
 import {MockMUSD} from "../utils/MockMUSD.sol";
 import {IRealAssets, VaultBase} from "../unit/VaultBase.t.sol";
 
-/// @notice Drives lenders, M1 borrowers, time, wsMUSD yield, force deallocations, curator cap cuts, permissionless
-/// rebalances and an atomic transient-supply attacker against vMUSD, recording allocator rule violations as ghost flags.
+/// @notice Drives lenders, M1 borrowers, time, wsMUSD yield, force and sentinel deallocations, curator cap cuts,
+/// permissionless rebalances and atomic transient-supply and transient-withdraw attackers against vMUSD, recording
+/// allocator and adapter rule violations as ghost flags.
 contract VaultHandler is CommonBase, StdCheats, StdUtils {
     using MorphoBalancesLib for IMorpho;
 
@@ -46,8 +48,13 @@ contract VaultHandler is CommonBase, StdCheats, StdUtils {
     bool public bufferBroken;
     bool public bufferNeglected;
     bool public manipulatedMove;
+    bool public freeForceDeallocate;
+    bool public doubleTopUp;
+    bool public idleStuck;
     uint256 public rebalances;
     uint256 public moves;
+    uint256 public topUps;
+    uint256 internal lastTopUpTimestamp;
 
     constructor(BaserateAllocator allocator_, address curator_) {
         allocator = allocator_;
@@ -120,13 +127,31 @@ contract VaultHandler is CommonBase, StdCheats, StdUtils {
         vault.forceDeallocate(address(mm), abi.encode(params), amount, who);
     }
 
-    function forceDeallocateLiquidity(uint256 amount) external {
+    /// @dev R2X-4: `forceDeallocate` on the liquidity adapter (penalty 0) must revert `ForceDeallocateDisabled` for
+    /// holders and strangers alike while it is the vault's liquidity adapter; anything else is a free deallocation.
+    function forceDeallocateLiquidity(uint256 seed, uint256 amount) external {
         if (vault.allocation(ids[3]) == 0) return;
         uint256 available = liq.availableLiquidity();
         if (available < 1e18) return;
         amount = bound(amount, 1e18, available);
-        vm.prank(stranger);
-        vault.forceDeallocate(address(liq), "", amount, stranger);
+        address who = seed % 2 == 0 ? stranger : lenders[seed % lenders.length];
+        vm.prank(who);
+        try vault.forceDeallocate(address(liq), "", amount, who) {
+            freeForceDeallocate = true;
+        } catch (bytes memory reason) {
+            if (bytes4(reason) != IWsMusdLiquidityAdapter.ForceDeallocateDisabled.selector) freeForceDeallocate = true;
+        }
+    }
+
+    /// @dev A sentinel deallocation from the liquidity adapter: MUSD idle in the vault, which the next `rebalance`
+    /// must park again (also during a cooldown).
+    function sentinelDeallocateLiquidity(uint256 amount) external {
+        if (vault.allocation(ids[3]) == 0) return;
+        uint256 available = liq.availableLiquidity();
+        if (available < 1e18) return;
+        amount = bound(amount, 1e18, available);
+        vm.prank(curator);
+        vault.deallocate(address(liq), "", amount);
     }
 
     // ---------------------------------------------------------------- borrowers and yield
@@ -185,17 +210,53 @@ contract VaultHandler is CommonBase, StdCheats, StdUtils {
         musd.approve(address(morpho), amount);
         (, uint256 shares) = morpho.supply(params, amount, 0, attacker, "");
         uint256 vaultM1Before = mm.expectedSupplyAssets(allocator.MARKET_ID());
+        _transientRebalance();
+        morpho.withdraw(params, 0, shares, attacker, attacker);
+        vm.stopPrank();
+        if (mm.expectedSupplyAssets(allocator.MARKET_ID()) + 1 < vaultM1Before) manipulatedMove = true;
+    }
+
+    /// @dev Atomic manipulation (R2X-3): an outside M1 supplier withdraws what M1 can pay of its standing supply, calls
+    /// `rebalance()` and re-supplies, up to three times in one call. No rate-driven move may come out of it, and at
+    /// most one buffer top-up may run per block. The first call only opens the standing supply.
+    function transientWithdrawLoop(uint256 amount, uint256 rounds) external {
+        vm.startPrank(attacker);
+        musd.approve(address(morpho), type(uint256).max);
+        if (morpho.position(Id.wrap(allocator.MARKET_ID()), attacker).supplyShares == 0) {
+            amount = bound(amount, 1e18, 50_000e18);
+            musd.mint(attacker, amount);
+            morpho.supply(params, amount, 0, attacker, "");
+            vm.stopPrank();
+            return;
+        }
+        uint256 vaultM1Before = mm.expectedSupplyAssets(allocator.MARKET_ID());
+        rounds = bound(rounds, 1, 3);
+        for (uint256 i; i < rounds; ++i) {
+            (uint256 supply,, uint256 borrowed,) = morpho.expectedMarketBalances(params);
+            uint256 out = morpho.expectedSupplyAssets(params, attacker);
+            if (out > supply - borrowed) out = supply - borrowed;
+            if (out == 0) break;
+            morpho.withdraw(params, out, 0, attacker, attacker);
+            _transientRebalance();
+            morpho.supply(params, out, 0, attacker, "");
+        }
+        vm.stopPrank();
+        if (mm.expectedSupplyAssets(allocator.MARKET_ID()) + 1 < vaultM1Before) manipulatedMove = true;
+    }
+
+    /// @dev `rebalance()` on M1 totals the caller changed earlier in the transaction.
+    function _transientRebalance() internal {
         try allocator.rebalance() returns (IBaserateAllocator.Action action, uint256) {
             rebalances++;
             if (action == IBaserateAllocator.Action.TO_MARKET || action == IBaserateAllocator.Action.TO_LIQUIDITY) {
                 manipulatedMove = true;
             }
+            _recordTopUp(action);
+            _checkIdleParked();
         } catch (bytes memory reason) {
             if (bytes4(reason) != IBaserateAllocator.CooldownActive.selector) capViolated = true;
+            _checkIdleParked();
         }
-        morpho.withdraw(params, 0, shares, attacker, attacker);
-        vm.stopPrank();
-        if (mm.expectedSupplyAssets(allocator.MARKET_ID()) + 1 < vaultM1Before) manipulatedMove = true;
     }
 
     // ---------------------------------------------------------------- allocator
@@ -208,6 +269,8 @@ contract VaultHandler is CommonBase, StdCheats, StdUtils {
         try allocator.rebalance() returns (IBaserateAllocator.Action action, uint256 amount) {
             rebalances++;
             if (action != IBaserateAllocator.Action.NONE) moves++;
+            _recordTopUp(action);
+            _checkIdleParked();
 
             // Every id whose allocation grew must be within its caps.
             for (uint256 i; i < 4; ++i) {
@@ -225,14 +288,38 @@ contract VaultHandler is CommonBase, StdCheats, StdUtils {
                 if (next == IBaserateAllocator.Action.BUFFER_TOP_UP) bufferNeglected = true;
             }
         } catch (bytes memory reason) {
-            // Only the cooldown may stop a rebalance.
+            // Only the cooldown may stop a rebalance, and only with nothing idle to park.
             if (bytes4(reason) != IBaserateAllocator.CooldownActive.selector) capViolated = true;
+            _checkIdleParked();
         }
+    }
+
+    // ---------------------------------------------------------------- ghost checks
+
+    /// @dev At most one buffer top-up per block (R2X-3).
+    function _recordTopUp(IBaserateAllocator.Action action) internal {
+        if (action != IBaserateAllocator.Action.BUFFER_TOP_UP) return;
+        topUps++;
+        if (lastTopUpTimestamp == block.timestamp) doubleTopUp = true;
+        lastTopUpTimestamp = block.timestamp;
+    }
+
+    /// @dev After a rebalance (or its cooldown revert) no idle vault MUSD the liquidity adapter could take is left
+    /// (R2X-4): parkable = min(vault idle, absolute cap - max(allocation, held)); the relative caps are 100%.
+    function _checkIdleParked() internal {
+        uint256 alloc = vault.allocation(ids[3]);
+        uint256 held = liq.heldAssets();
+        if (held > alloc) alloc = held;
+        uint256 cap = vault.absoluteCap(ids[3]);
+        uint256 room = cap > alloc ? cap - alloc : 0;
+        uint256 idleAssets = musd.balanceOf(address(vault));
+        if ((idleAssets < room ? idleAssets : room) >= allocator.MIN_MOVE()) idleStuck = true;
     }
 }
 
 /// @notice vMUSD invariants: accounting (vault total = idle + adapters' real assets, capped by maxRate), the allocator
-/// never grows an allocation past its caps, never pulls M1 below the buffer, and tops it up whenever it can.
+/// never grows an allocation past its caps, never pulls M1 below the buffer, tops it up whenever it can but at most
+/// once per block, and always parks idle MUSD; the liquidity adapter never accepts a free force deallocation.
 contract VaultInvariantTest is VaultBase {
     VaultHandler internal handler;
 
@@ -267,11 +354,30 @@ contract VaultInvariantTest is VaultBase {
     }
 
     function invariant_noRateMoveOnTransientM1State() public view {
-        assertFalse(handler.manipulatedMove(), "a transient M1 supply drove a rate move or pulled vMUSD out of M1");
+        assertFalse(handler.manipulatedMove(), "a transient M1 state drove a rate move or pulled vMUSD out of M1");
     }
 
     function invariant_bufferKeptWhenPossible() public view {
         assertFalse(handler.bufferBroken(), "allocator pulled M1 below the buffer");
         assertFalse(handler.bufferNeglected(), "allocator left a buffer deficit it could close");
+    }
+
+    /// @dev R2X-4: nobody can force-deallocate the liquidity adapter for free. R2X-3: at most one buffer top-up runs per
+    /// block, however many times a transaction loops withdraw, rebalance, re-supply.
+    function invariant_noFreeForceDeallocateOrDoubleTopUp() public view {
+        assertFalse(handler.freeForceDeallocate(), "forceDeallocate on the liquidity adapter did not revert");
+        assertFalse(handler.doubleTopUp(), "two buffer top-ups in one block");
+    }
+
+    /// @dev R2X-4: `rebalance` parks idle vault MUSD within the liquidity adapter's caps, during a cooldown too.
+    function invariant_rebalanceParksIdle() public view {
+        assertFalse(handler.idleStuck(), "rebalance left parkable idle MUSD in the vault");
+    }
+
+    /// @notice Coverage report for `forge test -vv`: how often the allocator ran, moved funds and topped up.
+    function afterInvariant() public {
+        emit log_named_uint("rebalances", handler.rebalances());
+        emit log_named_uint("moves", handler.moves());
+        emit log_named_uint("buffer top-ups", handler.topUps());
     }
 }

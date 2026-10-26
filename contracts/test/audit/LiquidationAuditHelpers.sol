@@ -9,6 +9,7 @@ import {DeployLiquidation} from "../../script/DeployLiquidation.s.sol";
 import {CollateralBTC} from "../../src/collateral/CollateralBTC.sol";
 import {ICLSwapRouter} from "../../src/interfaces/external/ICLSwapRouter.sol";
 import {Venue} from "../../src/interfaces/ILiquidationVenues.sol";
+import {Backstop} from "../../src/liquidation/Backstop.sol";
 import {FlashLiquidator} from "../../src/liquidation/FlashLiquidator.sol";
 import {MockMUSD} from "../utils/MockMUSD.sol";
 
@@ -86,9 +87,27 @@ contract MockCLRouter {
     }
 }
 
-/// @notice Exposes DeployLiquidation's sentinel selection.
+/// @notice Exposes DeployLiquidation's sentinel selection and its mandatory backstop seed.
 contract DeployLiquidationHarness is DeployLiquidation {
     function sentinelFor(address deployer) external view returns (address) {
         return _sentinel(deployer);
+    }
+
+    /// @dev The selection rule with the `SENTINEL` env passed in, so tests never have to set (and leak) it.
+    function pickSentinel(uint256 chainId, address deployer, bool set, address fromEnv)
+        external
+        pure
+        returns (address)
+    {
+        return _pickSentinel(chainId, deployer, set, fromEnv);
+    }
+
+    function requireSeedFunds(address musd, address deployer) external view {
+        _requireSeedFunds(musd, deployer);
+    }
+
+    /// @dev Seeds from this contract's own MUSD (it plays the broadcaster).
+    function seed(Backstop backstop, address musd) external {
+        _seed(backstop, musd);
     }
 }

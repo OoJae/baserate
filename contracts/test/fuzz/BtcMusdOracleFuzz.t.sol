@@ -42,11 +42,11 @@ contract BtcMusdOracleFuzzTest is BtcMusdOracleBase {
     function testFuzz_pythScaling(int64 rawPrice, int32 expo, uint256 age) public {
         rawPrice = int64(bound(rawPrice, 1, type(int64).max));
         expo = int32(bound(expo, -18, 0));
-        age = bound(age, 0, 3900);
+        age = bound(age, 0, 10_000);
         pyth.setPrice(BTC_FEED, rawPrice, expo, NOW - age);
         (uint256 px, bool fresh) = oracle.pythBtc();
         assertEq(px, uint256(uint64(rawPrice)) * 10 ** uint256(int256(18 + expo)), "scaled");
-        assertTrue(fresh, "fresh");
+        assertEq(fresh, age <= 600, "the band is on for 600 s");
     }
 
     function testFuzz_pythOutOfRangeExpoIsIgnored(int64 rawPrice, int32 expo) public {
@@ -63,13 +63,19 @@ contract BtcMusdOracleFuzzTest is BtcMusdOracleBase {
         assertEq(oracle.price(), SKIP_PX * 1e18);
     }
 
-    function testFuzz_musdLegIsClamped(int64 rawPrice, uint256 age) public {
+    /// @dev The two Pyth legs age independently: the BTC band is on for 600 s, the MUSD leg is used for 3,900 s.
+    function testFuzz_musdLegIsClamped(int64 rawPrice, uint256 age, uint256 btcAge) public {
         rawPrice = int64(bound(rawPrice, 1, type(int64).max));
         age = bound(age, 0, 10_000);
+        btcAge = bound(btcAge, 0, 10_000);
         pyth.setPrice(MUSD_FEED, rawPrice, -8, NOW - age);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        pyth.setPrice(BTC_FEED, int64(int256(SKIP_PX / 1e10)), -8, NOW - btcAge); // agrees with Skip: never trips
         bool fresh = age <= 3900;
         uint256 expected = fresh ? _clamp(uint256(uint64(rawPrice)) * 1e10) : 1e18;
 
+        (, bool btcFresh) = oracle.pythBtc();
+        assertEq(btcFresh, btcAge <= 600, "band age");
         (uint256 leg, bool legFresh) = oracle.musdUsd();
         assertEq(leg, expected, "leg");
         assertEq(legFresh, fresh, "fresh");
@@ -196,6 +202,9 @@ contract BtcMusdOracleFuzzTest is BtcMusdOracleBase {
             assertEq(s.price, 0, "no price when not ok");
         }
         if (s.pythBtcFresh) assertEq(s.ok, skipUp && skipAge <= 60 && s.deviationBps <= 1000, "band via deviationBps");
+        // The band is on exactly while a valid Pyth BTC print is at most 600 s old.
+        if (btcShape % 4 == 0 && pythPx / 1e10 != 0) assertEq(s.pythBtcFresh, btcAge <= 600, "band age");
+        if (s.pythBtcFresh) assertLe(s.pythBtcAge, 600, "band only on recent prints");
     }
 
     /// @dev Arbitrary Pyth return data for both feeds never makes `status()` revert, and `price()` only reverts through

@@ -6,8 +6,9 @@ import {IAdapter} from "vault-v2/interfaces/IAdapter.sol";
 /// @notice Vault V2 liquidity adapter that parks the parent vault's MUSD in wsMUSD (ERC-4626 over sMUSD).
 /// @dev Derived from vault-v2's MorphoVaultV1Adapter (tag 2026-08-13). The difference: `allocate` deposits at most
 /// `wsMUSD.maxDeposit(adapter)` and keeps the rest as accounted idle MUSD, so a full wsMUSD (or a failing wsMUSD
-/// deposit) can never make a vMUSD deposit revert. `deallocate` pays from idle first. A timelocked rescue moves the
-/// wsMUSD position out in kind, to the vault's owner, only when wsMUSD can no longer pay it out.
+/// deposit) can never make a vMUSD deposit revert. `deallocate` pays from idle first and rejects the vault's
+/// `forceDeallocate` while this adapter is the vault's liquidity adapter (withdrawals reach it anyway). A timelocked
+/// rescue moves the wsMUSD position out in kind, to the vault's owner, only when wsMUSD can no longer pay it out.
 interface IWsMusdLiquidityAdapter is IAdapter {
     /// @notice Emitted when the parent vault's owner sets the skim recipient.
     event SetSkimRecipient(address indexed newSkimRecipient);
@@ -48,6 +49,8 @@ interface IWsMusdLiquidityAdapter is IAdapter {
     error NoPendingRescue();
     error RescueTimelocked(uint64 executableAt);
     error InsufficientGas();
+    /// @notice The vault's `forceDeallocate` was called on this adapter while it is the vault's liquidity adapter.
+    error ForceDeallocateDisabled();
 
     /// @notice The Vault V2 (vMUSD) this adapter serves; the only caller of `allocate` and `deallocate`.
     function parentVault() external view returns (address);

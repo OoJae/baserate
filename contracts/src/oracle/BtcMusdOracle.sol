@@ -14,8 +14,10 @@ import {IBtcMusdOracle} from "./IBtcMusdOracle.sol";
 /// @dev Inputs:
 /// - Primary: Mezo's Skip BTC/USD precompile. Requires answer > 0 and age <= 60 s (`updatedAt` in the future counts as
 ///   age 0). `answeredInRound` is always 0 on Skip and is ignored.
-/// - Band: Pyth BTC/USD is only a +-10% sanity band, enforced while it is valid and at most 3,900 s old (Pyth is
-///   pushed hourly). A breach reverts `PythDeviation`.
+/// - Band: Pyth BTC/USD is only a +-10% sanity band (both directions), enforced while it is valid and at most 600 s
+///   old (`PYTH_BTC_BAND_MAX_AGE`). A breach reverts `PythDeviation`. Pyth is pushed about hourly, so the band is on
+///   for the first 10 minutes after a push; a stalled or lagging Pyth stops gating within 10 minutes, so in a fast
+///   crash liquidations are frozen for at most that long (round-2 audit R2X-2; it was 3,900 s, about 65 min).
 /// - MUSD leg: Pyth MUSD/USD clamped to [1.00, 1.02] while valid and at most 3,900 s old, else 1.00. BTC is therefore
 ///   never valued above its USD price in MUSD terms.
 /// Pyth is read with a gas-capped, return-size-checked `staticcall` and never causes a revert by itself: a failed,
@@ -25,17 +27,20 @@ import {IBtcMusdOracle} from "./IBtcMusdOracle.sol";
 /// - Discount: while MUSD trades below 1.00 (0.989 at deployment) the clamp undervalues collateral by about 1.1%
 ///   against the true BTC/MUSD price, so borrowers are liquidated slightly earlier. This is deliberately conservative.
 /// - Liveness: `price()` reverts when Skip is down or stale, or when Skip and a fresh Pyth diverge by more than 10%.
-///   Morpho then freezes borrows, withdrawals with debt and liquidations. A divergence freeze lasts at most about
-///   65 min (until Pyth updates or ages past 3,900 s); a Skip outage is unbounded. Repay and full withdrawal never
-///   call the oracle, so the exit stays open.
+///   Morpho then freezes borrows, withdrawals with debt and liquidations. A divergence freeze lasts at most 10 min
+///   (until Pyth updates or ages past 600 s); a Skip outage is unbounded. Repay and full withdrawal never call the
+///   oracle, so the exit stays open.
 /// - Precompile budget: one Skip call per `price()`, `btcUsd()` or `status()`.
 contract BtcMusdOracle is IOracle, IBtcMusdOracle {
     /// @notice Skip BTC/USD precompile, at the same address on Mezo testnet and mainnet (18 decimals).
     address public constant SKIP = 0x7b7c000000000000000000000000000000000015;
     /// @notice Maximum Skip age in seconds, the same bound Mezo's MUSD PriceFeed uses.
     uint256 public constant SKIP_MAX_AGE = 60;
-    /// @notice Maximum Pyth age in seconds for the band and the MUSD leg (hourly pushes plus 5 minutes of slack).
+    /// @notice Maximum Pyth MUSD/USD age in seconds for the MUSD leg (hourly pushes plus 5 minutes of slack).
     uint256 public constant PYTH_MAX_AGE = 3900;
+    /// @notice Maximum Pyth BTC/USD age in seconds for the +-10% band. Kept short so a lagging Pyth cannot freeze
+    /// liquidations through a fast crash for longer than this.
+    uint256 public constant PYTH_BTC_BAND_MAX_AGE = 600;
     /// @notice Maximum Skip-vs-Pyth BTC deviation, in bps of the Pyth price.
     uint256 public constant MAX_DEV_BPS = 1000;
     /// @notice Lower clamp (and stale default) of the MUSD/USD leg.
@@ -77,7 +82,9 @@ contract BtcMusdOracle is IOracle, IBtcMusdOracle {
     function price() external view returns (uint256) {
         (uint256 btc,) = _btcUsd();
         (bool pythValid, uint256 pythPx, uint256 pythAge) = _readPyth(BTC_FEED);
-        if (pythValid && pythAge <= PYTH_MAX_AGE && _breachesBand(btc, pythPx)) revert PythDeviation(btc, pythPx);
+        if (pythValid && pythAge <= PYTH_BTC_BAND_MAX_AGE && _breachesBand(btc, pythPx)) {
+            revert PythDeviation(btc, pythPx);
+        }
         (uint256 musd,) = _musdUsd();
         // btc <= MAX_SKIP_ANSWER, so the product cannot overflow; musd >= 1e18.
         return btc * PRICE_SCALE / musd;
@@ -91,7 +98,7 @@ contract BtcMusdOracle is IOracle, IBtcMusdOracle {
     /// @inheritdoc IBtcMusdOracle
     function pythBtc() external view returns (uint256 px18, bool fresh) {
         (bool valid, uint256 px, uint256 age) = _readPyth(BTC_FEED);
-        return (px, valid && age <= PYTH_MAX_AGE);
+        return (px, valid && age <= PYTH_BTC_BAND_MAX_AGE);
     }
 
     /// @inheritdoc IBtcMusdOracle
@@ -109,7 +116,7 @@ contract BtcMusdOracle is IOracle, IBtcMusdOracle {
 
         bool btcValid;
         (btcValid, s.pythBtcPrice, s.pythBtcAge) = _readPyth(BTC_FEED);
-        s.pythBtcFresh = btcValid && s.pythBtcAge <= PYTH_MAX_AGE;
+        s.pythBtcFresh = btcValid && s.pythBtcAge <= PYTH_BTC_BAND_MAX_AGE;
 
         bool musdValid;
         (musdValid, s.musdPrice, s.musdAge) = _readPyth(MUSD_FEED);
@@ -215,7 +222,7 @@ contract BtcMusdOracle is IOracle, IBtcMusdOracle {
     }
 
     /// @dev Seconds since `timestamp`; a future timestamp counts as age 0. Validator skew of a few seconds is
-    /// irrelevant against 60 s and 3,900 s bounds.
+    /// irrelevant against 60 s, 600 s and 3,900 s bounds.
     function _age(uint256 timestamp) internal view returns (uint256) {
         // forge-lint: disable-next-line(block-timestamp)
         return timestamp >= block.timestamp ? 0 : block.timestamp - timestamp;

@@ -23,9 +23,13 @@ import {MezoAddresses, MezoNetwork} from "./config/MezoAddresses.sol";
 /// - `SENTINEL` (env): the backstop's deposit-pause role. Required on mainnet (the script reverts without it, since
 ///   `Backstop.SENTINEL` is immutable); optional elsewhere, defaulting to the deployer;
 /// - `MAX_KEEPER_SALE` (env, optional): BTC per keeper sale, default 0.05 BTC.
-/// `MAX_IMPACT_BPS` is the break-even impact `1 - 1/LIF` (419 bps at LLTV 0.86, 689 bps at 0.77). If the deployer
-/// holds at least 1 MUSD, 1 MUSD of dead shares seeds the backstop (hygiene; the vesting already defeats the
-/// donation attack). No precompile is called, so a local simulation is faithful.
+/// `MAX_IMPACT_BPS` is the break-even impact `1 - 1/LIF` (419 bps at LLTV 0.86, 689 bps at 0.77). The deployer must
+/// hold 1 MUSD: it seeds the backstop with 1 MUSD of dead shares, and the script reverts before deploying anything
+/// without it. The seed is load-bearing, not hygiene: deposits are priced at gross (book + unvested), which a direct
+/// MUSD transfer raises at once, so on an unseeded backstop a donation after a 1-wei first deposit would price every
+/// later deposit (the ERC-4626 inflation attack); vesting does not help, since deposits pay the unvested gains too.
+/// With 1e18 dead shares a donation is shared with them and moves a deposit by at most one share-wei of value.
+/// No precompile is called, so a local simulation is faithful.
 ///
 /// Simulate (no broadcast):
 ///   forge script script/DeployLiquidation.s.sol --rpc-url mezo_testnet \
@@ -45,7 +49,6 @@ contract DeployLiquidation is Script {
         address sentinel;
         uint256 maxImpactBps;
         uint256 maxKeeperSale;
-        bool seeded;
     }
 
     function run() external returns (address backstop, address liquidator) {
@@ -61,6 +64,7 @@ contract DeployLiquidation is Script {
 
         vm.startBroadcast();
         (, address deployer,) = vm.readCallers();
+        _requireSeedFunds(params.loanToken, deployer);
         Deployed memory d;
         d.sentinel = _sentinel(deployer);
         d.maxKeeperSale = vm.envOr("MAX_KEEPER_SALE", DEFAULT_MAX_KEEPER_SALE);
@@ -82,11 +86,7 @@ contract DeployLiquidation is Script {
         d.liquidator = new FlashLiquidator(net.morpho, params, address(d.backstop), d.maxImpactBps, venues);
         require(address(d.liquidator) == predicted, "DeployLiquidation: liquidator address");
 
-        if (IERC20(params.loanToken).balanceOf(deployer) >= BACKSTOP_SEED) {
-            IERC20(params.loanToken).approve(address(d.backstop), BACKSTOP_SEED);
-            d.backstop.deposit(BACKSTOP_SEED, DEAD);
-            d.seeded = true;
-        }
+        _seed(d.backstop, params.loanToken);
         vm.stopBroadcast();
 
         _check(d, params, net);
@@ -94,15 +94,39 @@ contract DeployLiquidation is Script {
         return (address(d.backstop), address(d.liquidator));
     }
 
+    /// @dev The 1 MUSD dead-share seed is mandatory (see the contract notes): checked before anything is deployed.
+    function _requireSeedFunds(address musd, address deployer) internal view {
+        require(
+            IERC20(musd).balanceOf(deployer) >= BACKSTOP_SEED,
+            "DeployLiquidation: deployer must hold 1 MUSD to seed the backstop"
+        );
+    }
+
+    /// @dev Deposits `BACKSTOP_SEED` from the broadcaster into `backstop` for dead shares.
+    function _seed(Backstop backstop, address musd) internal {
+        IERC20(musd).approve(address(backstop), BACKSTOP_SEED);
+        backstop.deposit(BACKSTOP_SEED, DEAD);
+    }
+
     /// @dev `Backstop.SENTINEL` is immutable, so mainnet takes no default: `SENTINEL` must be set explicitly.
-    function _sentinel(address deployer) internal view returns (address sentinel) {
-        if (block.chainid == MezoAddresses.MAINNET_CHAIN_ID) {
-            require(vm.envExists("SENTINEL"), "DeployLiquidation: set SENTINEL on mainnet");
-            sentinel = vm.envAddress("SENTINEL");
-            require(sentinel != address(0), "DeployLiquidation: SENTINEL is zero");
-        } else {
-            sentinel = vm.envOr("SENTINEL", deployer);
+    function _sentinel(address deployer) internal view returns (address) {
+        bool set = vm.envExists("SENTINEL");
+        return _pickSentinel(block.chainid, deployer, set, set ? vm.envAddress("SENTINEL") : address(0));
+    }
+
+    /// @dev The sentinel for `chainId` given the `SENTINEL` env (`set`, `fromEnv`): required and nonzero on mainnet,
+    /// defaulting to the deployer elsewhere.
+    function _pickSentinel(uint256 chainId, address deployer, bool set, address fromEnv)
+        internal
+        pure
+        returns (address)
+    {
+        if (chainId == MezoAddresses.MAINNET_CHAIN_ID) {
+            require(set, "DeployLiquidation: set SENTINEL on mainnet");
+            require(fromEnv != address(0), "DeployLiquidation: SENTINEL is zero");
+            return fromEnv;
         }
+        return set ? fromEnv : deployer;
     }
 
     /// @dev The registry's market must be the factory's and exist on Morpho.
@@ -121,6 +145,7 @@ contract DeployLiquidation is Script {
         require(Id.unwrap(d.liquidator.MARKET_ID()) == Id.unwrap(params.id()), "DeployLiquidation: market");
         require(d.liquidator.MAX_IMPACT_BPS() >= d.backstop.DISCOUNT() * 1e4 / 1e18, "DeployLiquidation: impact");
         require(d.liquidator.CL_ROUTER() == net.clSwapRouter, "DeployLiquidation: CL router");
+        require(d.backstop.balanceOf(DEAD) == BACKSTOP_SEED, "DeployLiquidation: seed");
         console2.log("Backstop (bMUSD)", address(d.backstop));
         console2.log("FlashLiquidator", address(d.liquidator));
         console2.log("sentinel", d.sentinel);
@@ -128,7 +153,7 @@ contract DeployLiquidation is Script {
         console2.log("max impact (bps)", d.maxImpactBps);
         console2.log("backstop discount (WAD)", d.backstop.DISCOUNT());
         console2.log("CL200 venue enabled", net.clSwapRouter != address(0));
-        console2.log("backstop seeded", d.seeded);
+        console2.log("backstop dead-share seed (MUSD wei)", BACKSTOP_SEED);
     }
 
     /// @dev Merges the new addresses into the existing registry, keeping every existing key.

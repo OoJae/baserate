@@ -58,7 +58,8 @@ contract BtcMusdOracleTest is BtcMusdOracleBase {
         assertEq(oracle.BTC_FEED(), BTC_FEED, "btc feed");
         assertEq(oracle.MUSD_FEED(), MUSD_FEED, "musd feed");
         assertEq(oracle.SKIP_MAX_AGE(), 60, "skip age");
-        assertEq(oracle.PYTH_MAX_AGE(), 3900, "pyth age");
+        assertEq(oracle.PYTH_MAX_AGE(), 3900, "pyth MUSD age");
+        assertEq(oracle.PYTH_BTC_BAND_MAX_AGE(), 600, "pyth BTC band age");
         assertEq(oracle.MAX_DEV_BPS(), 1000, "band");
         assertEq(oracle.MUSD_MIN(), 1e18, "musd min");
         assertEq(oracle.MUSD_MAX(), 1.02e18, "musd max");
@@ -222,10 +223,35 @@ contract BtcMusdOracleTest is BtcMusdOracleBase {
         assertFalse(fresh);
     }
 
-    function test_price_bandStillEnforcedAt3900s() public {
-        pyth.setPrice(BTC_FEED, 40_000e8, -8, NOW - 3900);
+    function test_price_bandEnforcedAt600s() public {
+        pyth.setPrice(BTC_FEED, 40_000e8, -8, NOW - 600);
+        (, bool fresh) = oracle.pythBtc();
+        assertTrue(fresh, "600 s: band on");
         vm.expectRevert(abi.encodeWithSelector(IBtcMusdOracle.PythDeviation.selector, SKIP_PX, 40_000e18));
         oracle.price();
+    }
+
+    /// @notice R2X-2: a Pyth BTC print more than 600 s old stops gating, so a lagging Pyth can freeze liquidations
+    /// through a fast crash for at most 10 minutes after its last push (it was 3,900 s, about 65 minutes).
+    function test_price_bandOffAt601s() public {
+        pyth.setPrice(BTC_FEED, 40_000e8, -8, NOW - 601);
+        assertEq(oracle.price(), SKIP_PX * 1e18, "601 s: band off");
+        (uint256 px, bool fresh) = oracle.pythBtc();
+        assertEq(px, 40_000e18, "still reported");
+        assertFalse(fresh);
+    }
+
+    /// @dev The MUSD leg keeps its own 3,900 s bound (hourly pushes): a Pyth MUSD print too old for the BTC band is
+    /// still used.
+    function test_price_musdLegOutlivesTheBand() public {
+        pyth.setPrice(BTC_FEED, 40_000e8, -8, NOW - 3900);
+        pyth.setPrice(MUSD_FEED, 1.015e8, -8, NOW - 3900);
+        assertEq(oracle.price(), SKIP_PX * 1e36 / 1.015e18, "band off, MUSD leg used");
+        (, bool btcFresh) = oracle.pythBtc();
+        (uint256 leg, bool musdFresh) = oracle.musdUsd();
+        assertFalse(btcFresh);
+        assertTrue(musdFresh);
+        assertEq(leg, 1.015e18);
     }
 
     function test_price_futurePythPublishTimeIsFresh() public {
@@ -408,6 +434,24 @@ contract BtcMusdOracleTest is BtcMusdOracleBase {
         assertEq(s.pythBtcAge, 4000);
         assertEq(s.deviationBps, 10_000);
         assertEq(s.price, SKIP_PX * 1e18);
+    }
+
+    function test_status_bandAgeBoundary() public {
+        pyth.setPrice(BTC_FEED, 40_000e8, -8, NOW - 600);
+        BtcMusdOracle.Status memory s = oracle.status();
+        assertEq(s.pythBtcAge, 600);
+        assertTrue(s.pythBtcFresh, "600 s: band on");
+        assertFalse(s.ok, "band trips");
+        assertEq(s.price, 0);
+
+        pyth.setPrice(BTC_FEED, 40_000e8, -8, NOW - 601);
+        s = oracle.status();
+        assertEq(s.pythBtcAge, 601);
+        assertFalse(s.pythBtcFresh, "601 s: band off");
+        assertTrue(s.ok, "prices on Skip alone");
+        assertEq(s.price, SKIP_PX * 1e18);
+        assertEq(s.deviationBps, 10_000, "deviation still reported");
+        assertTrue(s.musdFresh, "the MUSD leg keeps its own 3,900 s bound");
     }
 
     function test_status_invalidPyth() public {

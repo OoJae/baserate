@@ -49,8 +49,14 @@ import {TigrisVenues} from "./TigrisVenues.sol";
 ///   rata. A depositor can neither capture gains realised before they arrived nor hide behind them, and the
 ///   recognised share price (book / supply) is unchanged by the deposit. Exits stay at the book, so whoever exits
 ///   before the gains vest forfeits them to the pool.
+/// - Deposits and mints are closed (`HoldingInventory`; `maxDeposit` and `maxMint` are 0) while the backstop holds at
+///   least `DUST_INVENTORY` of BTC. Held BTC sits at the 0.95 mark, below the >= 0.95 x oracle every sale clears at,
+///   so a deposit between a purchase and its sale would buy into the mark-up the incumbents paid the mark-down for.
+///   Inventory normally clears within the 6 h auction; requests, claims, sales and syncs stay open meanwhile. Below
+///   `DUST_INVENTORY` deposits need no oracle.
 /// - Consequently no action raises the share price instantly; a just-in-time deposit around a liquidation gets
-///   nothing, and a holder cannot exit ahead of a loss.
+///   nothing (before the purchase it shares the instant mark-down and forfeits the vesting mark-up if it leaves
+///   early; between the purchase and the sale it is refused), and a holder cannot exit ahead of a loss.
 ///
 /// Exits: instant `withdraw`/`redeem` are disabled. `requestRedeem` escrows shares and records their NAV; after
 /// `REDEEM_DELAY` anyone may `claimRedeem`, which pays min(NAV at request, NAV at claim) and burns the shares. When
@@ -59,6 +65,13 @@ import {TigrisVenues} from "./TigrisVenues.sol";
 /// the owner may `claimRedeemWithoutOracle` instead, which values the inventory at 0 for that claim only (it can only
 /// lower their own payout). The escrowed shares keep bearing losses during the wait but forfeit gains, which return
 /// to the pool as vesting gains.
+///
+/// Cash: payments use idle MUSD first and withdraw the rest from wsMUSD. If that withdraw reverts (a broken sMUSD
+/// withdraw), a claim is paid in kind: all the idle MUSD plus the wsMUSD shares worth the rest, rounded down
+/// (`PaidInKind`; wsMUSD's `redeemInKind` turns them into sMUSD without calling sMUSD's withdraw), so exits never
+/// freeze while the value is there. A purchase reverts `CashUnavailable` instead (the FlashLiquidator then sells on a
+/// DEX). Paying in kind also pauses parking for `PARK_PAUSE`, or until a wsMUSD withdraw succeeds again, so sale
+/// proceeds and deposits stay idle and keep the BACKSTOP venue funded; `quoteBuy` then counts only idle MUSD.
 ///
 /// Selling: a permissionless Dutch auction (`takeAuction`) sells inventory at oracle x factor, factor decaying from
 /// 1.00 to 0.95 over 6 h from `auctionStart` (pulled back pro rata to the new BTC when more arrives, so a dust
@@ -69,9 +82,10 @@ import {TigrisVenues} from "./TigrisVenues.sol";
 /// Roles: the sentinel can pause deposits and mints, nothing else. Nobody can pause buys, sales, requests or claims.
 /// Oracle: every mutation that needs NAV while at least `DUST_INVENTORY` of BTC is held reads the M1 oracle and
 /// reverts `OracleUnavailable` if it is down; views never revert and value inventory at 0 while the oracle is down.
-/// Precompile cost: 1 Skip read per mutation while inventory >= `DUST_INVENTORY` (`claimRedeemWithoutOracle` only
-/// tries it), 0 below it; buys and sales always read it once; `sellInventory` adds the venue's BTC precompile calls
-/// (4 on CL200, 5 on the vAMM, plus 1 after a CL partial fill; see TigrisVenues).
+/// Precompile cost: 1 Skip read per request, claim or sync while inventory >= `DUST_INVENTORY`
+/// (`claimRedeemWithoutOracle` only tries it), 0 below it; deposits and mints never read it; buys and sales always
+/// read it once; `sellInventory` adds the venue's BTC precompile calls (4 on CL200, 5 on the vAMM, plus 1 after a CL
+/// partial fill; see TigrisVenues).
 contract Backstop is IBackstop, ERC4626, TigrisVenues, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
     using Math for uint256;
@@ -88,6 +102,8 @@ contract Backstop is IBackstop, ERC4626, TigrisVenues, ReentrancyGuardTransient 
     uint256 public constant AUCTION_FLOOR = 0.95e18;
     /// @inheritdoc IBackstop
     uint256 public constant DUST_INVENTORY = 1e13;
+    /// @inheritdoc IBackstop
+    uint256 public constant PARK_PAUSE = 1 days;
 
     uint256 internal constant WAD = 1e18;
     /// @dev Idle MUSD below this stays idle instead of being parked in wsMUSD.
@@ -114,6 +130,8 @@ contract Backstop is IBackstop, ERC4626, TigrisVenues, ReentrancyGuardTransient 
     uint64 public auctionStart;
     uint64 internal _lastSync;
     uint64 internal _periodEnd;
+    /// @inheritdoc IBackstop
+    uint48 public parkingPausedUntil;
     uint256 internal _book;
     uint256 internal _unvested;
     /// @inheritdoc IBackstop
@@ -170,14 +188,14 @@ contract Backstop is IBackstop, ERC4626, TigrisVenues, ReentrancyGuardTransient 
         return gross < recognised ? gross : recognised;
     }
 
-    /// @notice 0 while deposits are paused, otherwise unlimited.
+    /// @notice 0 while deposits are paused or the backstop holds at least `DUST_INVENTORY` of BTC, otherwise unlimited.
     function maxDeposit(address) public view override(ERC4626, IERC4626) returns (uint256) {
-        return depositsPaused ? 0 : type(uint256).max;
+        return _depositsOpen() ? type(uint256).max : 0;
     }
 
-    /// @notice 0 while deposits are paused, otherwise unlimited.
+    /// @notice 0 while deposits are paused or the backstop holds at least `DUST_INVENTORY` of BTC, otherwise unlimited.
     function maxMint(address) public view override(ERC4626, IERC4626) returns (uint256) {
-        return depositsPaused ? 0 : type(uint256).max;
+        return _depositsOpen() ? type(uint256).max : 0;
     }
 
     /// @notice Always 0: exits go through `requestRedeem`/`claimRedeem`.
@@ -190,28 +208,33 @@ contract Backstop is IBackstop, ERC4626, TigrisVenues, ReentrancyGuardTransient 
         return 0;
     }
 
-    /// @notice Shares a deposit of `assets` mints now, priced at book + unvested (gross), not at `totalAssets`.
+    /// @notice Shares a deposit of `assets` would mint now, priced at book + unvested (gross), not at `totalAssets`.
+    /// @dev Like ERC-4626 requires, it ignores the deposit limits (`maxDeposit`), so it still quotes (with the BTC at
+    /// the 0.95 mark) while deposits are closed by held inventory.
     function previewDeposit(uint256 assets) public view override(ERC4626, IERC4626) returns (uint256) {
         return _sharesFor(assets, _depositBasis());
     }
 
-    /// @notice MUSD a mint of `shares` costs now, priced at book + unvested (gross), not at `totalAssets`.
+    /// @notice MUSD a mint of `shares` would cost now, priced at book + unvested (gross), not at `totalAssets`.
+    /// @dev Ignores the mint limits (`maxMint`), like `previewDeposit`.
     function previewMint(uint256 shares) public view override(ERC4626, IERC4626) returns (uint256) {
         return _assetsFor(shares, _depositBasis());
     }
 
     /// @inheritdoc IERC4626
-    /// @dev Priced at book + unvested right after a checkpoint (see the contract notes); reverts `ZeroAmount` when
-    /// `assets` buys no share.
+    /// @dev Priced at book + unvested right after a checkpoint (see the contract notes); reverts `HoldingInventory`
+    /// while at least `DUST_INVENTORY` of BTC is held and `ZeroAmount` when `assets` buys no share.
     function deposit(uint256 assets, address receiver)
         public
         override(ERC4626, IERC4626)
         nonReentrant
         returns (uint256 shares)
     {
+        _checkNotHolding();
         uint256 maxAssets = maxDeposit(receiver);
         if (assets > maxAssets) revert ERC4626ExceededMaxDeposit(receiver, assets, maxAssets);
-        _checkpoint(_priceIfHolding());
+        // Below `DUST_INVENTORY` NAV needs no price.
+        _checkpoint(0);
         shares = _sharesFor(assets, _book + _unvested);
         if (shares == 0) revert ZeroAmount();
         _deposit(msg.sender, receiver, assets, shares);
@@ -219,17 +242,19 @@ contract Backstop is IBackstop, ERC4626, TigrisVenues, ReentrancyGuardTransient 
     }
 
     /// @inheritdoc IERC4626
-    /// @dev Priced at book + unvested right after a checkpoint (see the contract notes).
+    /// @dev Priced at book + unvested right after a checkpoint (see the contract notes); reverts `HoldingInventory`
+    /// while at least `DUST_INVENTORY` of BTC is held.
     function mint(uint256 shares, address receiver)
         public
         override(ERC4626, IERC4626)
         nonReentrant
         returns (uint256 assets)
     {
+        _checkNotHolding();
         uint256 maxShares = maxMint(receiver);
         if (shares > maxShares) revert ERC4626ExceededMaxMint(receiver, shares, maxShares);
         if (shares == 0) revert ZeroAmount();
-        _checkpoint(_priceIfHolding());
+        _checkpoint(0);
         assets = _assetsFor(shares, _book + _unvested);
         _deposit(msg.sender, receiver, assets, shares);
         _emitCheckpoint();
@@ -262,7 +287,7 @@ contract Backstop is IBackstop, ERC4626, TigrisVenues, ReentrancyGuardTransient 
         if (musdOut > free) revert InsufficientCash(musdOut, free);
 
         _addInventory(btcIn);
-        _payOut(msg.sender, musdOut);
+        _payOut(msg.sender, musdOut, false);
         // Recognises the mark-down from cost to 0.95 x oracle instantly (or vests a gain if DISCOUNT > 5%).
         _checkpoint(price);
         emit CollateralBought(msg.sender, btcIn, musdOut, price);
@@ -273,7 +298,10 @@ contract Backstop is IBackstop, ERC4626, TigrisVenues, ReentrancyGuardTransient 
         (bool ok, uint256 price) = _tryOracle();
         if (!ok || btcIn == 0) return 0;
         musdOut = _buyQuote(btcIn, price);
-        if (musdOut > _free(_cash())) return 0;
+        uint256 liquid = _free(_cash());
+        // After a reverting wsMUSD withdraw, only idle MUSD is sure to be payable.
+        if (block.timestamp < parkingPausedUntil) liquid = Math.min(liquid, _MUSD.balanceOf(address(this)));
+        if (musdOut > liquid) return 0;
     }
 
     // ---------------------------------------------------------------- exits
@@ -561,6 +589,16 @@ contract Backstop is IBackstop, ERC4626, TigrisVenues, ReentrancyGuardTransient 
         if (left != 0 && left < DUST_INVENTORY) revert DustRemainder(left);
     }
 
+    /// @dev Deposits and mints are closed between a purchase and its sale (see the contract notes).
+    function _checkNotHolding() internal view {
+        uint256 inv = inventory;
+        if (inv >= DUST_INVENTORY) revert HoldingInventory(inv);
+    }
+
+    function _depositsOpen() internal view returns (bool) {
+        return !depositsPaused && inventory < DUST_INVENTORY;
+    }
+
     // ---------------------------------------------------------------- internal: exits
 
     /// @dev The pending request `id`, once its delay has elapsed.
@@ -573,7 +611,8 @@ contract Backstop is IBackstop, ERC4626, TigrisVenues, ReentrancyGuardTransient 
     /// @dev Pays request `id` min(its request NAV, `value`) from cash. When cash is short it pays all the cash, burns
     /// the matching fraction of the shares (rounded up) and keeps the rest queued at the same request NAV per share.
     /// Burned shares leave the book at full book value: the forfeited part (book value - paid) stays in gross and the
-    /// next checkpoint vests it for the remaining holders, so a claim never lifts the share price instantly.
+    /// next checkpoint vests it for the remaining holders, so a claim never lifts the share price instantly. The
+    /// payment falls back to wsMUSD shares when wsMUSD cannot pay out MUSD (see `_payOut`).
     function _settle(uint256 id, RedeemRequest memory r, uint256 value)
         internal
         returns (uint256 paid, uint256 burned)
@@ -602,7 +641,7 @@ contract Backstop is IBackstop, ERC4626, TigrisVenues, ReentrancyGuardTransient 
         reservedAssets -= released;
         _book -= _bookValue(burned);
         _burn(address(this), burned);
-        if (paid != 0) _payOut(r.receiver, paid);
+        if (paid != 0) _payOut(r.receiver, paid, true);
     }
 
     function _emitClaim(uint256 id, address receiver, uint256 burned, uint256 paid) internal {
@@ -625,23 +664,42 @@ contract Backstop is IBackstop, ERC4626, TigrisVenues, ReentrancyGuardTransient 
         _park();
     }
 
-    /// @dev Parks idle MUSD in wsMUSD up to its deposit cap; a failing wsMUSD leaves the MUSD idle.
+    /// @dev Parks idle MUSD in wsMUSD up to its deposit cap, unless parking is paused; a reverting wsMUSD deposit
+    /// leaves the MUSD idle.
     function _park() internal {
+        if (block.timestamp < parkingPausedUntil) return;
         uint256 idle = _MUSD.balanceOf(address(this));
         if (idle < MIN_PARK) return;
         uint256 room = IERC4626(WSMUSD).maxDeposit(address(this));
         uint256 amount = idle < room ? idle : room;
         if (amount < MIN_PARK) return;
+        // Every caller holds the reentrancy lock.
         try IERC4626(WSMUSD).deposit(amount, address(this)) {} catch {}
     }
 
-    /// @dev Pays `amount` MUSD to `to`, from idle MUSD first and then from wsMUSD.
-    function _payOut(address to, uint256 amount) internal {
+    /// @dev Pays `amount` MUSD to `to`, from idle MUSD first and then from wsMUSD; callers have checked that cash
+    /// covers it. If the wsMUSD withdraw reverts, a purchase reverts `CashUnavailable`, while an exit (`inKind`) is
+    /// paid all the idle MUSD plus the wsMUSD shares worth the rest, rounded down (in the backstop's favour), and
+    /// parking pauses for `PARK_PAUSE`. A caller cannot force the fallback by limiting gas: what runs after the catch
+    /// costs far more than the 1/64 of the gas that a withdraw running out of gas leaves behind.
+    function _payOut(address to, uint256 amount, bool inKind) internal {
         uint256 idle = _MUSD.balanceOf(address(this));
         if (idle < amount) {
-            uint256 available = _cash();
-            if (available < amount) revert InsufficientCash(amount, available);
-            IERC4626(WSMUSD).withdraw(amount - idle, address(this), address(this));
+            uint256 rest = amount - idle;
+            // Every caller holds the reentrancy lock and has settled its accounting first.
+            try IERC4626(WSMUSD).withdraw(rest, address(this), address(this)) {
+                if (parkingPausedUntil != 0) parkingPausedUntil = 0;
+            } catch {
+                if (!inKind) revert CashUnavailable(amount, idle);
+                uint256 until = block.timestamp + PARK_PAUSE;
+                parkingPausedUntil = SafeCast.toUint48(until);
+                emit ParkingPaused(until);
+                uint256 shares = IERC4626(WSMUSD).convertToShares(rest);
+                if (idle != 0) _MUSD.safeTransfer(to, idle);
+                IERC20(WSMUSD).safeTransfer(to, shares);
+                emit PaidInKind(to, amount, idle, shares);
+                return;
+            }
         }
         _MUSD.safeTransfer(to, amount);
     }
