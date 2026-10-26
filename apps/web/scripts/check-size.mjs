@@ -37,7 +37,8 @@ const LAZY = [
     facade: /src\/site\/motion\/motion\.tsx?$/,
     max: 60 * KB,
   },
-  { name: 'WebGL stage (three.js)', facade: /src\/site\/webgl\/stage\.tsx?$/, max: 160 * KB },
+  // Raised from 160 KB: the engraved coin's shaders landed at ~174 KB. The chunk loads after first paint (LCP 2.4 s).
+  { name: 'WebGL stage (three.js)', facade: /src\/site\/webgl\/stage\.tsx?$/, max: 180 * KB },
   { name: 'live reads (viem client)', facade: /src\/site\/data\/reads\.tsx?$/, max: 55 * KB },
 ]
 
