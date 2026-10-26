@@ -54,4 +54,4 @@ Open **[Evidence](https://baserate-mezo.vercel.app/evidence)**. Every recorded t
 
 ## What is built and what is next
 
-See [BUILT_VS_PLANNED.md](BUILT_VS_PLANNED.md). The sidebar's "Coming in the next release" items (credit lines and the come-back flow) are designed and scheduled, and are not presented as working features. The keeper is live on Railway; the subgraph and mainnet proof mode are planned.
+See [BUILT_VS_PLANNED.md](BUILT_VS_PLANNED.md). The sidebar's "Coming in the next release" items (credit lines and the come-back flow) are designed and scheduled, and are not presented as working features. The keeper is live on Railway and the subgraph on Goldsky; mainnet proof mode is planned.
