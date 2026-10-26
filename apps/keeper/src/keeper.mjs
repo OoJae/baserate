@@ -11,6 +11,7 @@
 //   caps.depth    every 10 min liquidation depth vs the borrow cap; cuts on mainnet (SENTINEL), dry run on testnet
 //   smusd.watch   every 5 min  sMUSD implementation/strategy/pcv/vaultGauge against pins; alert, freeze on mainnet
 //   health        every 1 min  oracle freshness, key and dispenser balances
+//   pyth.push     every 1 min  push the latest Pyth BTC/USD print once the stored one is over 4 min old (needs a Hermes key)
 //
 // HTTP: /healthz, /status, /v1/status, /v1/evidence (see server.mjs). Alerts go to Telegram when configured.
 
@@ -19,6 +20,7 @@ import { CADENCE, IS_TESTNET, RPC_URL, registry, SWITCHES } from './config.mjs'
 import { canaryJob, capsDepthJob, healthJob, smusdWatchJob } from './jobs/guards.mjs'
 import { liquidationsJob } from './jobs/liquidations.mjs'
 import { backstopJob, feeFlushJob, yieldSimJob } from './jobs/money.mjs'
+import { PYTH_API_KEY, pythPushJob } from './jobs/pyth.mjs'
 import { allocatorJob, wsmusdSyncJob } from './jobs/vault.mjs'
 import { log } from './log.mjs'
 import { every } from './scheduler.mjs'
@@ -59,4 +61,11 @@ every('canary', CADENCE.canary, canaryJob, {
 every('caps.depth', CADENCE.capsDepth, capsDepthJob)
 every('smusd.watch', CADENCE.smusdWatch, smusdWatchJob, {
   off: registry.smusdPins ? undefined : 'no sMUSD pins for this chain',
+})
+every('pyth.push', CADENCE.pythPush, pythPushJob, {
+  off: !registry.pyth
+    ? 'no Pyth address for this chain'
+    : !PYTH_API_KEY
+      ? 'PYTH_API_KEY not set (Hermes needs one)'
+      : undefined,
 })

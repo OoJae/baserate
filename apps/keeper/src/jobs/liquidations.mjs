@@ -2,8 +2,10 @@ import { abi, events, PROFILE, VENUE } from '../abis.mjs'
 import { alert } from '../alerts.mjs'
 import { addressOf, pub, send } from '../chain.mjs'
 import { LIMITS, registry, WAD } from '../config.mjs'
+import { log } from '../log.mjs'
 import { readings } from '../scheduler.mjs'
 import { getKv, setKv } from '../store.mjs'
+import { PYTH_API_KEY, pushPyth } from './pyth.mjs'
 
 /** Every BorrowAccount clone, from the factory's AccountCreated logs (re-read from the deploy block on boot). */
 export const accounts = new Map()
@@ -87,6 +89,13 @@ export async function liquidationsJob() {
     ) {
       continue
     }
+    // A current Pyth print first, so the oracle's band can't hold a liquidation on an old (or replayed) one.
+    if (PYTH_API_KEY && registry.pyth)
+      await pushPyth(LIMITS.pythBeforeLiquidationS).catch((err) =>
+        log('warn', 'liquidations: Pyth push failed', {
+          reason: String(err?.message ?? err).slice(0, 200),
+        }),
+      )
     for (const venue of [VENUE.VAMM, VENUE.BACKSTOP]) {
       // Simulate first so the real call can demand 90% of the expected profit: a sandwich can't take the incentive.
       const request = {

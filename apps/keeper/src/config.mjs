@@ -32,6 +32,7 @@ export const CADENCE = {
   canary: seconds('CANARY_EVERY_S', 10 * 60),
   smusdWatch: seconds('SMUSD_WATCH_EVERY_S', 5 * 60),
   feeFlush: seconds('FEE_FLUSH_EVERY_S', 15 * 60),
+  pythPush: seconds('PYTH_PUSH_EVERY_S', 60),
 }
 
 export const WAD = 10n ** 18n
@@ -70,6 +71,13 @@ export const LIMITS = {
   /** 0.0001 BTC: at Mezo's ~146 wei gas price that is still ~300 sends of 2M gas. */
   lowGasWei: BigInt(env('LOW_GAS_WEI', '100000000000000')),
   lowDispenserMusd: MUSD(env('LOW_DISPENSER_MUSD', '100')),
+  /**
+   * Pyth BTC/USD is pushed once the stored print is older than this, so the oracle's band (on while Pyth is at most
+   * 600 s old) never lapses between Mezo's hourly pushes; and again right before a liquidation if it is older than
+   * `pythBeforeLiquidationS`, so the band compares Skip with a current price.
+   */
+  pythMaxAgeS: Number(env('PYTH_MAX_AGE_S', '240')),
+  pythBeforeLiquidationS: Number(env('PYTH_BEFORE_LIQUIDATION_S', '30')),
 }
 
 /** Opt-in switches for jobs that spend or that change protocol limits. */
