@@ -22,7 +22,16 @@
             "description": "31611 Mezo testnet, 31612 Mezo mainnet"
           },
           "area": {
-            "enum": ["core", "judge-journey", "lend", "liquidations", "fees", "risk"],
+            "enum": [
+              "core",
+              "judge-journey",
+              "lend",
+              "liquidations",
+              "fees",
+              "risk",
+              "keeper",
+              "v1"
+            ],
             "description": "Groups rows on the Evidence page"
           },
           "kind": {

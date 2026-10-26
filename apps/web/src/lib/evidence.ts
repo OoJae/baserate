@@ -23,6 +23,8 @@ export const EVIDENCE_AREAS = [
   'liquidations',
   'fees',
   'risk',
+  'keeper',
+  'v1',
 ] as const
 export type EvidenceArea = (typeof EVIDENCE_AREAS)[number]
 

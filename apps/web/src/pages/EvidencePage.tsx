@@ -54,6 +54,14 @@ const AREA_TITLE: Record<EvidenceArea, { title: string; blurb: string }> = {
     blurb: 'FeeRouter, the first distribution, the fee switch',
   },
   risk: { title: 'Risk', blurb: 'RiskLens' },
+  keeper: {
+    title: 'Keeper',
+    blurb: 'Autonomous upkeep by the Railway keeper: liquidations, the canary, vault and yield',
+  },
+  v1: {
+    title: 'v1 (pre-audit) deployment',
+    blurb: 'Live activity on the first deployment, retired after the audit fixes',
+  },
 }
 
 export function EvidencePage() {
