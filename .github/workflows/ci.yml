@@ -63,7 +63,7 @@ jobs:
       - run: pnpm --filter @baserate/sdk test
       - run: pnpm --filter web build
       - name: No secrets in the web bundle
-        run: node scripts/check-bundle.mjs
+        run: pnpm --filter web check-bundle
 
   gitleaks:
     name: Secret scan
