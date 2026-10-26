@@ -189,7 +189,7 @@ Fee distributions with their bribes and carries, and vault share prices:
     bribeCarries { gauge amount reason }
   }
   vaults { kind totalSupply totalAssets sharePrice }
-  sharePricePoints(where: { vault: "0x92aa0306c3af1e02d776ea05857653a3839debeb" }, orderBy: blockNumber, first: 1000) {
+  sharePricePoints(where: { vault: "0xdafcb2cd3e722f6fee7f70150be612f1d7af8124" }, orderBy: blockNumber, first: 1000) {
     sharePrice source timestamp
   }
 }

@@ -105,13 +105,13 @@ import {
 
 // Emitting addresses: any address works (the mappings key vaults by event.address). M1, wsMUSD and the M1 adapter
 // come from src/config.ts, which the mappings compare against.
-const FACTORY = '0xa3a03cd439b4ccb7292ef21a23bb6bb36a4b86fe'
+const FACTORY = '0x0ef62f97130fe4d1d22de4acc4163154f82890b1'
 const MORPHO = '0xce1da828ca15cb1fdafa84c366a53c8106655a73'
-const FLASH = '0x8259050ff9976c9154042ec9d955db8face929c8'
-const FEE_ROUTER = '0x8266d915fb60ac45998bb919a815c8013b9bf1bc'
-const BACKSTOP = '0xc06239d0cb52e51cc0edcf4b181da7ccacd1ac01'
-const VMUSD = '0x00890f9e2367acf6ac26cc06d8bf6c4270da7440'
-const ALLOCATOR = '0x5a28c3f024aecddc4828f2e5841038f647d8a067'
+const FLASH = '0x291868f26639bc619bac1e87b7a19ee84988e973'
+const FEE_ROUTER = '0x2de420d13d808aeba11ab743abe630d0dd48c13b'
+const BACKSTOP = '0x64fe4cc966e55a0081913a8bf72a22b007946c2b'
+const VMUSD = '0x76a62ffefb0b9a5980750fb106df05ceff6b941a'
+const ALLOCATOR = '0x8b1314d983973342da53a6e30cd5586d5d92d20f'
 const M1 = M1_MARKET_ID
 const OTHER_MARKET = '0x1111111111111111111111111111111111111111111111111111111111111111'
 const OWNER = '0x0000000000000000000000000000000000000a11'
