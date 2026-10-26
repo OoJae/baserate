@@ -138,6 +138,60 @@
     },
     {
       "chainId": 31611,
+      "area": "judge-journey",
+      "kind": "borrow",
+      "tx": "0x9c1c879d7edf748e0a25444739a44451a3412dba7a9f937df362c7a28dae4057",
+      "block": 16380781,
+      "summary": "Judge journey: openAndBorrow with BTC sent as msg.value; MUSD borrowed in one transaction on M1 v2.",
+      "proves": "The core flow works end to end on the audited contracts through the real UI."
+    },
+    {
+      "chainId": 31611,
+      "area": "judge-journey",
+      "kind": "dispenser-claim",
+      "tx": "0x59c4c9099b01c5e9eb549c8cd7a056b0b6c3045f4df24a0db1b9c3e925999944",
+      "block": 16380790,
+      "summary": "Judge journey (e2e harness, real signing wallet): claimed test MUSD from the dispenser.",
+      "proves": "A judge can top up interest with test MUSD from inside the app."
+    },
+    {
+      "chainId": 31611,
+      "area": "judge-journey",
+      "kind": "wsmusd-deposit",
+      "tx": "0x6a896f06e607ba7364aa8cd001f5afff62b7ee7babf09134c0c9a4997ae1b82b",
+      "block": 16380798,
+      "summary": "Judge journey: one MUSD permit signature, then depositWithPermit into wsMUSD v2.",
+      "proves": "Saving in wsMUSD takes one signature and one transaction."
+    },
+    {
+      "chainId": 31611,
+      "area": "judge-journey",
+      "kind": "wsmusd-redeem",
+      "tx": "0x42fb795faf1a911c123c626c00a278dfcd121a88dee3056b9a491d8ac43af7bf",
+      "block": 16380805,
+      "summary": "Judge journey: redeemed wsMUSD for MUSD.",
+      "proves": "wsMUSD exits pay MUSD at the previewed amount."
+    },
+    {
+      "chainId": 31611,
+      "area": "judge-journey",
+      "kind": "wsmusd-redeem-in-kind",
+      "tx": "0xfc602d4aeb4726664041b4039a4ca8ec64c542f8bed1d9fbf1d52a3e21e08bcc",
+      "block": 16380816,
+      "summary": "Judge journey: redeemInKind paid sMUSD straight to the wallet.",
+      "proves": "The in-kind exit works without touching sMUSD’s withdraw."
+    },
+    {
+      "chainId": 31611,
+      "area": "judge-journey",
+      "kind": "repay-exit",
+      "tx": "0x2d6d2323ac85a428734d03b9edf76981699d6bd4975ee2f3905e04234b5f2804",
+      "block": 16380825,
+      "summary": "Judge journey: one permit, then repayAndWithdrawWithPermit repaid the exact debt and returned native BTC.",
+      "proves": "The oracle-free exit closes a position in one transaction."
+    },
+    {
+      "chainId": 31611,
       "area": "lend",
       "kind": "vmusd-sentinel",
       "tx": "0xb2d6e38868ce6cfe7238f594018bcaed262b6d867fa2791d39aec9ad3fe2f682",
