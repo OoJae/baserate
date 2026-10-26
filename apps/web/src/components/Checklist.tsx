@@ -95,13 +95,15 @@ export function Checklist() {
         title="Your walkthrough"
         subtitle={`${done} of ${steps.length} done · read from chain state`}
       />
-      <ol className="space-y-2.5">
+      <ol className="space-y-3">
         {steps.map((s, i) => (
           <li key={s.label} className="flex items-center gap-3">
             <span
               className={cx(
-                'num inline-flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold',
-                s.done ? 'bg-good text-white' : 'border border-line-strong text-muted',
+                'num inline-flex size-7 shrink-0 items-center justify-center rounded-full font-mono text-[11px] font-medium',
+                s.done
+                  ? 'bg-good text-on-good shadow-[0_0_0_2px_var(--surface),0_0_0_3px_var(--good)]'
+                  : 'border border-line-strong text-muted',
               )}
             >
               {s.done ? <IconCheck className="size-3.5" /> : i + 1}

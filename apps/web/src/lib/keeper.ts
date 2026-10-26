@@ -55,3 +55,34 @@ export async function fetchKeeperStatus(signal?: AbortSignal): Promise<KeeperSta
     jobs: body.jobs && typeof body.jobs === 'object' ? body.jobs : undefined,
   }
 }
+
+/** A liquidation scan younger than this means the keeper is running. */
+export const KEEPER_RUNNING_MAX_AGE_S = 180
+
+export type KeeperHealthState = 'running' | 'stalled' | 'unreachable' | 'checking'
+
+export interface KeeperHealth {
+  state: KeeperHealthState
+  /** The word to show: "Running", "Stalled", "Unreachable" or "Checking". */
+  label: 'Running' | 'Stalled' | 'Unreachable' | 'Checking'
+  /** Seconds since the last liquidation scan, when the keeper reported one. */
+  scanAgeS?: number
+}
+
+/**
+ * The keeper's health from its status, the rule the Evidence page shows: "Running" while the last liquidation scan
+ * is under 180 s old, "Stalled" after that, "Unreachable" when the status request failed, "Checking" before the
+ * first answer. Pure (no viem), so eagerly loaded code can import it; pass the status query's result.
+ */
+export function keeperHealth(
+  status: KeeperStatus | undefined,
+  { isError = false, now = Date.now() }: { isError?: boolean; now?: number } = {},
+): KeeperHealth {
+  if (isError) return { state: 'unreachable', label: 'Unreachable' }
+  if (!status) return { state: 'checking', label: 'Checking' }
+  const last = status.lastRun.liquidations
+  const scanAgeS = last ? Math.max(0, (now - Date.parse(last)) / 1_000) : undefined
+  return scanAgeS !== undefined && scanAgeS < KEEPER_RUNNING_MAX_AGE_S
+    ? { state: 'running', label: 'Running', scanAgeS }
+    : { state: 'stalled', label: 'Stalled', scanAgeS }
+}

@@ -494,7 +494,7 @@ function Redeem({ ws, wallet }: { ws: WsMusdView; wallet: ReturnType<typeof useW
             : undefined
         }
       />
-      <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line p-3 text-sm">
+      <label className="flex cursor-pointer items-start gap-3 rounded-[4px] border border-line p-3 text-sm transition-colors hover:border-line-strong">
         <input
           type="checkbox"
           className="mt-0.5 size-4 accent-[var(--brand)]"

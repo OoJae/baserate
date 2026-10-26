@@ -84,16 +84,16 @@ export function GetTestFunds() {
       />
 
       {isConnected && address ? (
-        <div className="mb-4 grid grid-cols-2 gap-3 rounded-xl bg-raised p-3">
+        <div className="mb-4 grid grid-cols-2 gap-3 rounded-[3px] border border-line bg-raised/60 p-3">
           <div>
-            <p className="text-xs text-muted">Wallet BTC</p>
-            <p className="num font-semibold text-btc">
+            <p className="serial text-[10px] text-muted">Wallet BTC</p>
+            <p className="num mt-1 font-semibold text-btc">
               {btcBalance === undefined ? <Skeleton /> : formatBtc(btcBalance)}
             </p>
           </div>
           <div>
-            <p className="text-xs text-muted">Wallet MUSD</p>
-            <p className="num font-semibold text-ink">
+            <p className="serial text-[10px] text-muted">Wallet MUSD</p>
+            <p className="num mt-1 font-semibold text-ink">
               {musdBalance === undefined ? <Skeleton /> : formatMusd(musdBalance)}
             </p>
           </div>
@@ -110,8 +110,10 @@ export function GetTestFunds() {
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {address ? (
-                <span className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface pl-2.5 text-sm">
-                  <span className="num font-mono text-xs">{shortAddress(address, 6)}</span>
+                <span className="inline-flex items-center gap-1 rounded-[3px] border border-line bg-surface pl-2.5 text-sm">
+                  <span className="num font-mono text-xs tracking-[0.02em]">
+                    {shortAddress(address, 6)}
+                  </span>
                   <CopyButton value={address} label="Copy your address" />
                 </span>
               ) : null}
@@ -161,7 +163,7 @@ function Step({ n }: { n: number }) {
   return (
     <span
       aria-hidden
-      className="num mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-bold text-brand"
+      className="num mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-brand/50 bg-brand-soft font-mono text-[11px] font-medium text-brand"
     >
       {n}
     </span>

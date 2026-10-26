@@ -2,10 +2,7 @@ import {
   type AllocatorActionId,
   baserateAllocatorAbi,
   erc20PermitAbi,
-  vaultAdapterCapId,
-  vaultCollateralCapId,
   vaultDepositRoom,
-  vaultMarketCapId,
   vaultV2Abi,
   WAD,
   wsMusdLiquidityAdapterAbi,
@@ -15,20 +12,15 @@ import { type Address, type Hex, type PublicClient, zeroAddress } from 'viem'
 import { usePublicClient, useReadContracts } from 'wagmi'
 import { getEventsChunked } from '../lib/logs'
 import { indexedTo, META, querySubgraph, readHistory } from '../lib/subgraph'
+import { VAULT_IDS } from '../lib/vaultIds'
 import { appChain, deployed, registry } from '../wagmi'
+
+/** Vault V2 cap ids vMUSD uses (moved to lib/vaultIds so the landing can read them without wagmi). */
+export { VAULT_IDS }
 
 const VAULT = registry.contracts.vMusd.address
 const ALLOCATOR = registry.contracts.allocator.address
 const WS_ADAPTER = registry.contracts.wsMusdAdapter.address
-const M1_ADAPTER = registry.contracts.m1Adapter.address
-
-/** Vault V2 cap ids vMUSD uses: the wsMUSD adapter's, and the three a M1 allocation touches. */
-export const VAULT_IDS = {
-  liquidity: vaultAdapterCapId(WS_ADAPTER),
-  m1Adapter: vaultAdapterCapId(M1_ADAPTER),
-  collateral: vaultCollateralCapId(registry.contracts.collateral.address),
-  m1Market: vaultMarketCapId(M1_ADAPTER, registry.markets.M1.params),
-} as const
 
 export interface CapView {
   absolute: bigint

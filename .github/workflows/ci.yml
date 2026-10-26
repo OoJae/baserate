@@ -66,6 +66,8 @@ jobs:
       - run: pnpm --filter web build
       - name: No secrets in the web bundle
         run: pnpm --filter web check-bundle
+      - name: Bundle size budgets (landing, lazy chunks, /borrow)
+        run: pnpm --filter web exec node scripts/check-size.mjs
 
   gitleaks:
     name: Secret scan

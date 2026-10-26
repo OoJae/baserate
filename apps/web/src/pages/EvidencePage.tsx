@@ -9,7 +9,6 @@ import {
   shortAddress,
 } from '@baserate/sdk'
 import { useQuery } from '@tanstack/react-query'
-import type { Address } from 'viem'
 import { IconCheck, IconClock, IconEvidence } from '../components/icons'
 import {
   AddressLink,
@@ -25,16 +24,16 @@ import {
   type Tone,
 } from '../components/ui'
 import { env } from '../env'
+import { type ContractRow, contractRows } from '../lib/contracts'
 import {
   EVIDENCE_AREAS,
   type EvidenceArea,
   type EvidenceEntry,
   evidence,
-  fetchAddressInfo,
   type TxVerification,
-  verifyTx,
 } from '../lib/evidence'
-import { fetchKeeperStatus, type KeeperJob } from '../lib/keeper'
+import { addressInfoQuery, evidenceTxQuery, keeperStatusQuery } from '../lib/evidenceQueries'
+import { type KeeperHealthState, type KeeperJob, keeperHealth } from '../lib/keeper'
 import { NEXT_RELEASE, PLANNED_INFRA } from '../lib/roadmap'
 import { useNow } from '../lib/useNow'
 import { appChain, registry } from '../wagmi'
@@ -105,7 +104,7 @@ function EvidenceList() {
         </Notice>
       ) : null}
       {entries.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-line-strong p-6 text-center">
+        <div className="rounded-[4px] border border-dashed border-line-strong p-6 text-center">
           <p className="font-medium text-ink">No evidence recorded yet</p>
           <p className="mx-auto mt-1 max-w-md text-sm text-muted">
             The team’s first testnet borrow (BTC sent as msg.value to openAndBorrow) is recorded
@@ -119,8 +118,8 @@ function EvidenceList() {
             if (rows.length === 0) return null
             return (
               <section key={area} aria-labelledby={`area-${area}`}>
-                <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 border-b border-line pb-2">
-                  <h3 id={`area-${area}`} className="text-sm font-semibold text-ink">
+                <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 border-b-[3px] border-double border-line-strong/50 pb-2">
+                  <h3 id={`area-${area}`} className="serial text-[11px] text-ink">
                     {AREA_TITLE[area].title}
                   </h3>
                   <p className="text-xs text-muted">{AREA_TITLE[area].blurb}</p>
@@ -148,18 +147,15 @@ const VERDICT: Record<TxVerification['state'], { tone: Tone; label: string }> = 
 }
 
 function EvidenceRow({ entry }: { entry: EvidenceEntry }) {
-  const q = useQuery({
-    queryKey: ['evidence', entry.chainId, entry.tx, entry.block],
-    queryFn: ({ signal }) => verifyTx(entry, signal),
-    staleTime: 5 * 60_000,
-    retry: 1,
-  })
+  const q = useQuery(evidenceTxQuery(entry))
   const v = q.data
   const verdict = v ? VERDICT[v.state] : undefined
   return (
     <li className="py-4 first:pt-2 last:pb-0">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone="brand">{entry.kind}</Badge>
+        <Badge tone="brand" className="normal-case">
+          {entry.kind}
+        </Badge>
         <Badge>{CHAIN_NAME[entry.chainId]}</Badge>
         {q.isLoading ? (
           <Skeleton className="h-5 w-24" />
@@ -180,7 +176,7 @@ function EvidenceRow({ entry }: { entry: EvidenceEntry }) {
           <span className="num font-mono">{shortAddress(entry.tx, 6)}</span>
         </ExternalLink>
         <a
-          className="hover:underline"
+          className="underline-offset-[3px] hover:underline"
           href={explorerBlockUrl(entry.chainId, entry.block)}
           target="_blank"
           rel="noreferrer noopener"
@@ -219,24 +215,23 @@ function cadenceLabel(seconds: number): string {
   return seconds === 3_600 ? 'hourly' : `every ${Math.round(seconds / 3_600)} h`
 }
 
+const KEEPER_TONE: Record<KeeperHealthState, Tone> = {
+  running: 'good',
+  stalled: 'warn',
+  unreachable: 'warn',
+  checking: 'neutral',
+}
+
 function KeeperCard() {
   const now = useNow(1_000)
-  const q = useQuery({
-    queryKey: ['keeper-status', env.keeperUrl],
-    queryFn: ({ signal }) => fetchKeeperStatus(signal),
-    refetchInterval: 30_000,
-    retry: 1,
-  })
+  const q = useQuery(keeperStatusQuery())
   const s = q.data
   const ageS = (iso?: string) => (iso ? Math.max(0, (now - Date.parse(iso)) / 1_000) : undefined)
-  const scanAge = ageS(s?.lastRun.liquidations)
-  const status: { tone: Tone; label: string } = q.isError
-    ? { tone: 'warn', label: 'Unreachable' }
-    : !s
-      ? { tone: 'neutral', label: 'Checking' }
-      : scanAge !== undefined && scanAge < 180
-        ? { tone: 'good', label: 'Running' }
-        : { tone: 'warn', label: 'Stalled' }
+  const health = keeperHealth(s, { isError: q.isError, now })
+  const status: { tone: Tone; label: string } = {
+    tone: KEEPER_TONE[health.state],
+    label: health.label,
+  }
 
   return (
     <Card aria-labelledby="keeper-title">
@@ -280,9 +275,7 @@ function KeeperCard() {
           </div>
 
           <div>
-            <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted">
-              Jobs
-            </h3>
+            <h3 className="serial mb-1 text-[10.5px] text-muted">Jobs</h3>
             <ul className="divide-y divide-line text-sm">
               {KEEPER_JOBS.filter((j) => s.jobs?.[j.job] ?? j.job in s.lastRun).map((j) => {
                 const state = s.jobs?.[j.job]
@@ -321,7 +314,7 @@ function KeeperCard() {
           </div>
 
           <div>
-            <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+            <h3 className="serial mb-1 text-[10.5px] text-muted">
               Positions it watches (liquidation above {formatPercentWad(registry.lltv, 0)} LTV)
             </h3>
             {s.accounts.length === 0 ? (
@@ -349,9 +342,7 @@ function KeeperCard() {
           </div>
 
           <div>
-            <h3 className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted">
-              Recent keeper transactions
-            </h3>
+            <h3 className="serial mb-1 text-[10.5px] text-muted">Recent keeper transactions</h3>
             {s.actions.length === 0 ? (
               <p className="py-2 text-sm text-muted">
                 None since the last restart: nothing has needed doing (calls that would revert are
@@ -365,7 +356,9 @@ function KeeperCard() {
                     className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2"
                   >
                     <span className="flex items-center gap-2">
-                      <Badge tone="brand">{a.job}</Badge>
+                      <Badge tone="brand" className="normal-case">
+                        {a.job}
+                      </Badge>
                       <span className="font-mono text-xs text-ink">{a.fn}()</span>
                     </span>
                     <span className="flex items-center gap-3 text-xs text-muted">
@@ -386,111 +379,9 @@ function KeeperCard() {
   )
 }
 
-interface ContractRow {
-  name: string
-  role: string
-  address: Address
-  ours: boolean
-  precompile?: boolean
-}
-
-function contractRows(): ContractRow[] {
-  const c = registry.contracts
-  const x = registry.external
-  return [
-    {
-      name: 'BorrowAccountFactory',
-      role: 'Opens accounts, enforces caps',
-      address: c.factory.address,
-      ours: true,
-    },
-    {
-      name: 'BorrowAccount (impl)',
-      role: 'Per-user clone logic',
-      address: c.borrowAccountImpl.address,
-      ours: true,
-    },
-    {
-      name: 'CollateralBTC (bcBTC)',
-      role: 'Gated 1:1 BTC receipt',
-      address: c.collateral.address,
-      ours: true,
-    },
-    {
-      name: 'BtcMusdOracle',
-      role: 'Skip price, Pyth band, MUSD clamp',
-      address: c.oracle.address,
-      ours: true,
-    },
-    { name: 'WsMUSD', role: 'ERC-4626 over sMUSD', address: c.wsMusd.address, ours: true },
-    { name: 'MusdDispenser', role: 'Test MUSD faucet', address: c.dispenser.address, ours: true },
-    {
-      name: 'vMUSD (Vault V2)',
-      role: 'MUSD lending vault, created by Mezo’s VaultV2Factory',
-      address: c.vMusd.address,
-      ours: true,
-    },
-    {
-      name: 'WsMusdLiquidityAdapter',
-      role: 'Parks vMUSD’s idle MUSD in wsMUSD',
-      address: c.wsMusdAdapter.address,
-      ours: true,
-    },
-    {
-      name: 'MorphoMarketV1AdapterV2',
-      role: 'Holds vMUSD’s M1 supply',
-      address: c.m1Adapter.address,
-      ours: true,
-    },
-    {
-      name: 'BaserateAllocator',
-      role: 'Permissionless buffer and APY allocator',
-      address: c.allocator.address,
-      ours: true,
-    },
-    {
-      name: 'FlashLiquidator',
-      role: 'Zero-capital M1 liquidations',
-      address: c.flashLiquidator.address,
-      ours: true,
-    },
-    { name: 'Backstop (bMUSD)', role: 'Buys seized BTC', address: c.backstop.address, ours: true },
-    { name: 'FeeRouter', role: '40/40/20 fee splitter', address: c.feeRouter.address, ours: true },
-    { name: 'RiskLens', role: 'One-call risk snapshot', address: c.riskLens.address, ours: true },
-    { name: 'Morpho Blue', role: 'Mezo’s official lending core', address: x.morpho, ours: false },
-    {
-      name: 'VaultV2Factory',
-      role: 'Mezo’s Morpho Vault V2 factory',
-      address: x.vaultV2Factory,
-      ours: false,
-    },
-    { name: 'AdaptiveCurveIrm', role: 'Interest rate model', address: x.irm, ours: false },
-    { name: 'MUSD', role: 'Loan token', address: x.musd, ours: false },
-    { name: 'sMUSD', role: 'MUSD savings rate', address: x.smusd, ours: false },
-    {
-      name: 'Skip BTC/USD',
-      role: 'Primary price (precompile)',
-      address: x.skipBtcUsd,
-      ours: false,
-      precompile: true,
-    },
-    { name: 'Pyth', role: 'Sanity band and MUSD price', address: x.pyth, ours: false },
-    { name: 'SortedTroves', role: 'MUSD redemption queue', address: x.sortedTroves, ours: false },
-    { name: 'TroveManager', role: 'Trove ratios', address: x.troveManager, ours: false },
-    { name: 'PoolsVoter', role: 'Mezo Earn gauges and bribes', address: x.poolsVoter, ours: false },
-  ]
-}
-
 function VerifiedBadge({ row }: { row: ContractRow }) {
   const deployedHere = isDeployed(row.address)
-  const q = useQuery({
-    queryKey: ['blockscout-address', appChain.id, row.address],
-    queryFn: () => fetchAddressInfo(appChain.id, row.address),
-    enabled: deployedHere && !row.precompile,
-    staleTime: 10 * 60_000,
-    // Blockscout and Sourcify both rate-limit bursts (this table fires one lookup per row); back off and retry.
-    retry: 3,
-  })
+  const q = useQuery(addressInfoQuery(row.address, { enabled: deployedHere && !row.precompile }))
   if (!deployedHere) return <Badge>Not deployed yet</Badge>
   if (row.precompile) return <Badge tone="brand">Precompile</Badge>
   if (q.isLoading) return <Skeleton className="h-5 w-16" />
@@ -520,21 +411,21 @@ function ContractsTable() {
         subtitle={`${appChain.name} · source-verification status read live from Blockscout and Sourcify (a partial match reproduces the bytecode but not the metadata hash)`}
       />
       <div className="-mx-4 overflow-x-auto sm:mx-0">
-        <table className="w-full min-w-[560px] text-left text-sm">
+        <table className="ledger w-full min-w-[560px] text-left text-sm">
           <thead>
-            <tr className="border-b border-line text-xs text-muted">
-              <th scope="col" className="px-4 py-2 font-medium sm:pl-0">
+            <tr>
+              <th scope="col" className="px-4 pt-1 pb-2 sm:pl-0">
                 Contract
               </th>
-              <th scope="col" className="px-2 py-2 font-medium">
+              <th scope="col" className="px-2 pt-1 pb-2">
                 Address
               </th>
-              <th scope="col" className="px-4 py-2 font-medium sm:pr-0">
+              <th scope="col" className="px-4 pt-1 pb-2 sm:pr-0">
                 Status
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-line">
+          <tbody>
             {rows.map((r) => (
               <tr key={r.name}>
                 <td className="px-4 py-2.5 sm:pl-0">
@@ -590,9 +481,7 @@ function BuiltVsPlanned() {
       />
       <div className="grid gap-5 md:grid-cols-2">
         <div>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-good">
-            In this release
-          </h3>
+          <h3 className="serial mb-2 text-[10.5px] text-good">In this release</h3>
           <ul className="space-y-2 text-sm">
             {built.map((b) => (
               <li key={b} className="flex gap-2">
@@ -603,9 +492,7 @@ function BuiltVsPlanned() {
           </ul>
         </div>
         <div>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted">
-            Coming in the next release
-          </h3>
+          <h3 className="serial mb-2 text-[10.5px] text-muted">Coming in the next release</h3>
           <ul className="space-y-2 text-sm">
             {[...NEXT_RELEASE, ...PLANNED_INFRA].map((n) => (
               <li key={n.label}>

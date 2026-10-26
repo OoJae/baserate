@@ -1,61 +1,149 @@
 @import "tailwindcss";
 
 /*
- * Baserate design tokens. Calm paper-and-ink palette with a deep sea-green brand; amber marks BTC.
- * Every token flips for dark mode, so components only use semantic names (bg-surface, text-ink, …).
+ * App tokens, art direction Intaglio (docs/brand/BRAND.md). Components keep the semantic names (bg-surface,
+ * text-ink, border-line, text-btc, …); only the values moved to the brand. The palette, type, motion and shape
+ * tokens are defined once, in src/brand/tokens.css (main.tsx loads it first): this file refers to them and adds only
+ * the hues the palette does not carry.
+ *
+ * Grounds: the semantic tokens follow the colour scheme (paper in light mode, Intaglio in dark mode) and, like the
+ * brand roles, the nearest data-ground: "intaglio" (the site, dark sections) or "note" (paper sections). The site
+ * marks <html> data-ground="intaglio" (RootLayout's useZone), so the whole site reads as ink.
+ *
+ * Contrast (WCAG 2.2): text ≥ 4.5:1 on canvas, surface and raised in both schemes. Fixed rules:
+ * - BTC text on paper is --btc (#96550C, 5.0:1); Satoshi Amber (--btc-accent) is for fills and ink only.
+ * - Seal Red text is --bad (#A3392A on paper); --seal (#B8432F) is for fills, strokes and large type.
+ * - Dark-mode brand is Guilloche (Mint on Intaglio is 3.0:1).
+ * - Red and green are never the only signal: badges keep their words.
  */
+
+/* App-only hues, defined once and picked per ground below. */
 :root {
-  --canvas: #f6f5f1;
-  --surface: #ffffff;
-  --raised: #f0eee8;
-  --line: #e3e0d7;
-  --line-strong: #cfcbc0;
-  --ink: #14181d;
-  --muted: #565d68;
-  --faint: #676e78;
-  --brand: #0b6e5f;
-  --brand-strong: #07574b;
-  --brand-soft: #e2f0ec;
-  --on-brand: #ffffff;
-  --btc: #a65f0f;
-  --btc-soft: #fbf0e1;
-  --good: #11704f;
-  --good-soft: #e3f3eb;
-  --warn: #8f5200;
-  --warn-soft: #fdf1dc;
-  --bad: #b42318;
-  --bad-soft: #fde8e6;
-  --focus: #1d7fd6;
-  --shadow: 0 1px 2px rgb(20 24 29 / 0.05), 0 4px 16px rgb(20 24 29 / 0.04);
-  color-scheme: light;
+  --mint-strong: #085a4e; /* primary hover on paper (Note on it 7.0:1) */
+  --mint-soft: #dceae4; /* brand tint on paper */
+  --guilloche-strong: #a6d2c3; /* primary hover on ink */
+  --guilloche-soft: #143029; /* brand tint on ink */
+  --intaglio-lift: #18261f; /* raised (wells, hover) on ink */
+  --amber-text: #96550c; /* BTC text on paper: 5.0:1 on Note, 4.6:1 on raised */
+  --amber-tint-paper: #f6e7cc;
+  --amber-tint-ink: #33250f;
+  --good-paper: #1d6b45;
+  --good-ink: #7ccb9c;
+  --warn-paper: #7a5b00; /* ochre */
+  --warn-ink: #ddbe5a;
+  --seal-text: #a3392a; /* Seal Red text on paper: 5.7:1 on Note */
+  --bad-ink: #ec7a64;
+
+  /* Type roles (tokens.css faces with their metric-matched fallbacks), mapped to font-sans/display/mono below. */
+  --font-body: var(--face-body);
+  --font-display-face: var(--face-display);
+  --font-code: var(--face-mono);
+
+  /* Motion (tokens.css has --ease-out, --ease-in-out, --dur-micro/reveal/hero and --stagger). */
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --dur-press: 120ms;
+  --dur-ring: 420ms;
+  --dur-seal: 500ms;
+  --dur-page: 560ms;
 }
 
+/* Paper: light mode, and any data-ground="note" section. */
+:root,
+[data-ground="note"] {
+  --canvas: var(--note);
+  --surface: var(--note-raised);
+  --raised: var(--note-sunken);
+  --line: var(--rule-on-note);
+  --line-strong: var(--rule-strong);
+  --ink: var(--intaglio);
+  --muted: var(--ink-muted);
+  --faint: var(--ink-faint);
+  --brand: var(--mint);
+  --brand-strong: var(--mint-strong);
+  --brand-soft: var(--mint-soft);
+  --on-brand: var(--note);
+  --btc: var(--amber-text);
+  --btc-accent: var(--amber);
+  --btc-soft: var(--amber-tint-paper);
+  --good: var(--good-paper);
+  --warn: var(--warn-paper);
+  --bad: var(--seal-text);
+  --on-good: var(--note-raised);
+  --focus: var(--mint);
+  --engrave-faint: color-mix(in srgb, var(--mint) 16%, transparent);
+  --shadow:
+    0 1px 2px color-mix(in srgb, var(--intaglio) 6%, transparent),
+    0 4px 16px color-mix(in srgb, var(--intaglio) 5%, transparent);
+}
+
+/* Ink: dark mode … */
 @media (prefers-color-scheme: dark) {
   :root {
-    --canvas: #0d1013;
-    --surface: #14191e;
-    --raised: #1a2027;
-    --line: #262e37;
-    --line-strong: #36404b;
-    --ink: #e9edf0;
-    --muted: #a3acb6;
-    --faint: #7f8994;
-    --brand: #3cc2a6;
-    --brand-strong: #6dd6c0;
-    --brand-soft: #10302a;
-    --on-brand: #04201a;
-    --btc: #f0a54a;
-    --btc-soft: #34230d;
-    --good: #4cc792;
-    --good-soft: #0f2c21;
-    --warn: #f2b54f;
-    --warn-soft: #33250c;
-    --bad: #ff7a6e;
-    --bad-soft: #3a1513;
-    --focus: #6cb6ff;
+    --canvas: var(--intaglio);
+    --surface: var(--intaglio-raised);
+    --raised: var(--intaglio-lift);
+    --line: var(--rule-on-intaglio);
+    --line-strong: var(--rule-strong);
+    --ink: var(--note);
+    --muted: var(--paper-muted);
+    --faint: var(--paper-faint);
+    --brand: var(--guilloche);
+    --brand-strong: var(--guilloche-strong);
+    --brand-soft: var(--guilloche-soft);
+    --on-brand: var(--intaglio);
+    --btc: var(--amber);
+    --btc-accent: var(--amber);
+    --btc-soft: var(--amber-tint-ink);
+    --good: var(--good-ink);
+    --warn: var(--warn-ink);
+    --bad: var(--bad-ink);
+    --on-good: var(--intaglio);
+    --focus: var(--guilloche);
+    --engrave-faint: color-mix(in srgb, var(--guilloche) 22%, transparent);
     --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 20px rgb(0 0 0 / 0.25);
-    color-scheme: dark;
   }
+}
+
+/* … and any data-ground="intaglio" section, in either scheme. */
+[data-ground="intaglio"] {
+  --canvas: var(--intaglio);
+  --surface: var(--intaglio-raised);
+  --raised: var(--intaglio-lift);
+  --line: var(--rule-on-intaglio);
+  --line-strong: var(--rule-strong);
+  --ink: var(--note);
+  --muted: var(--paper-muted);
+  --faint: var(--paper-faint);
+  --brand: var(--guilloche);
+  --brand-strong: var(--guilloche-strong);
+  --brand-soft: var(--guilloche-soft);
+  --on-brand: var(--intaglio);
+  --btc: var(--amber);
+  --btc-accent: var(--amber);
+  --btc-soft: var(--amber-tint-ink);
+  --good: var(--good-ink);
+  --warn: var(--warn-ink);
+  --bad: var(--bad-ink);
+  --on-good: var(--intaglio);
+  --focus: var(--guilloche);
+  --engrave-faint: color-mix(in srgb, var(--guilloche) 22%, transparent);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 20px rgb(0 0 0 / 0.25);
+}
+
+/* Composites, recomputed on every ground from that ground's values. */
+:root,
+[data-ground] {
+  --good-soft: color-mix(in srgb, var(--good) 12%, var(--surface));
+  --warn-soft: color-mix(in srgb, var(--warn) 14%, var(--surface));
+  --bad-soft: color-mix(in srgb, var(--bad) 12%, var(--surface));
+  /* Labels on Seal Red fills (bg-seal text-on-bad): Note, 4.67:1 in both schemes. Never set text on bg-bad. */
+  --on-bad: var(--note);
+}
+
+/* The page ground. Unlayered and on :root, so it beats the HTML files' pre-paint `html {}` rule once CSS loads. */
+:root {
+  background-color: var(--canvas);
+  color: var(--ink);
 }
 
 @theme inline {
@@ -72,6 +160,7 @@
   --color-brand-soft: var(--brand-soft);
   --color-on-brand: var(--on-brand);
   --color-btc: var(--btc);
+  --color-btc-accent: var(--btc-accent);
   --color-btc-soft: var(--btc-soft);
   --color-good: var(--good);
   --color-good-soft: var(--good-soft);
@@ -79,17 +168,32 @@
   --color-warn-soft: var(--warn-soft);
   --color-bad: var(--bad);
   --color-bad-soft: var(--bad-soft);
+  --color-seal: var(--seal);
+  --color-on-bad: var(--on-bad);
+  --color-on-good: var(--on-good);
   --color-focus: var(--focus);
+  --color-engrave: var(--engrave-faint);
   --shadow-card: var(--shadow);
+
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display-face);
+  --font-mono: var(--font-code);
+
+  /* The fluid scale (tokens.css): text-hero, text-section, text-lead, text-serial. */
+  --text-hero: var(--hero-size);
+  --text-hero--line-height: var(--hero-lh);
+  --text-hero--letter-spacing: var(--hero-tracking);
+  --text-section: var(--section-size);
+  --text-section--line-height: var(--section-lh);
+  --text-section--letter-spacing: var(--section-tracking);
+  --text-lead: var(--lead-size);
+  --text-lead--line-height: var(--lead-lh);
+  --text-serial: var(--serial-size);
+  --text-serial--line-height: var(--serial-lh);
+  --text-serial--letter-spacing: var(--serial-tracking);
 }
 
 @theme {
-  --font-sans:
-    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    sans-serif;
-  --font-display:
-    "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, ui-serif, serif;
-  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   --breakpoint-xs: 22.5rem;
 }
 
@@ -100,10 +204,7 @@
   }
 
   body {
-    background: var(--canvas);
-    color: var(--ink);
-    font-family: var(--font-sans);
-    font-feature-settings: "cv11", "ss01";
+    font-family: var(--font-body);
     -webkit-font-smoothing: antialiased;
     min-height: 100dvh;
   }
@@ -111,17 +212,40 @@
   :focus-visible {
     outline: 2px solid var(--focus);
     outline-offset: 2px;
-    border-radius: 6px;
+  }
+
+  /* Headings and landmarks focused by the router after a navigation are not controls: no ring. */
+  :where(h1, h2, h3, main)[tabindex="-1"]:focus {
+    outline: none;
   }
 
   ::selection {
     background: var(--brand-soft);
+    color: var(--ink);
   }
 }
 
+/* Tabular, lining figures for every number in the UI. */
 @utility num {
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum";
+  font-variant-numeric: var(--figures);
+}
+
+/* Big Bodoni numerals (24 px and up): lining, tabular, optical size following the font size. */
+@utility numeral {
+  font-family: var(--font-display-face);
+  font-variant-numeric: lining-nums tabular-nums;
+  font-optical-sizing: auto;
+}
+
+/* Serial strips (Plex Mono caps): addresses, blocks, tx hashes, rates. Never sentences. */
+@utility serial {
+  font-family: var(--font-code);
+  font-size: var(--serial-size);
+  line-height: var(--serial-lh);
+  letter-spacing: var(--serial-tracking);
+  font-weight: var(--serial-weight);
+  text-transform: uppercase;
+  font-variant-numeric: var(--figures);
 }
 
 /* Range input styled as a risk track. */
@@ -165,6 +289,24 @@
   box-shadow: 0 1px 4px rgb(0 0 0 / 0.2);
 }
 
+/* A 28 px thumb on touch. */
+@media (pointer: coarse) {
+  .ltv-range {
+    height: 36px;
+  }
+
+  .ltv-range::-webkit-slider-thumb {
+    width: 28px;
+    height: 28px;
+    margin-top: -11px;
+  }
+
+  .ltv-range::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
+  }
+}
+
 .ltv-range:focus-visible {
   outline: none;
 }
@@ -186,7 +328,7 @@
 }
 
 .toast-in {
-  animation: toast-in 180ms ease-out;
+  animation: toast-in 180ms var(--ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {

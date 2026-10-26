@@ -1,12 +1,4 @@
-import {
-  type BaserateRegistry,
-  getRegistry,
-  isDeployed,
-  isMarketKnown,
-  mezoLocalFork,
-  mezoTestnet,
-  transportFor,
-} from '@baserate/sdk'
+import { mezoLocalFork, mezoTestnet, transportFor } from '@baserate/sdk'
 import { connectorsForWallets, type WalletList } from '@rainbow-me/rainbowkit'
 import {
   injectedWallet,
@@ -15,34 +7,18 @@ import {
   rabbyWallet,
   walletConnectWallet,
 } from '@rainbow-me/rainbowkit/wallets'
-import { QueryClient } from '@tanstack/react-query'
 import { createPublicClient } from 'viem'
 import { createConfig } from 'wagmi'
-import { hashFn } from 'wagmi/query'
+import { appChain } from './chain'
 import { env } from './env'
 
-/** Wave 1 runs on Mezo testnet only (or a local fork of it for development). */
-export const appChain = env.localFork ? mezoLocalFork : mezoTestnet
-export type AppChain = typeof appChain
-
-export const registry: BaserateRegistry = getRegistry(appChain.id)
-
-/** Which Baserate contracts are live on the app chain. */
-export const deployed = {
-  oracle: isDeployed(registry.contracts.oracle.address),
-  factory: isDeployed(registry.contracts.factory.address),
-  wsMusd: isDeployed(registry.contracts.wsMusd.address),
-  dispenser: isDeployed(registry.contracts.dispenser.address),
-  market: isMarketKnown(registry.markets.M1.id),
-  backstop: isDeployed(registry.contracts.backstop.address),
-  flashLiquidator: isDeployed(registry.contracts.flashLiquidator.address),
-  feeRouter: isDeployed(registry.contracts.feeRouter.address),
-  riskLens: isDeployed(registry.contracts.riskLens.address),
-  vault:
-    isDeployed(registry.contracts.vMusd.address) &&
-    isDeployed(registry.contracts.allocator.address) &&
-    isDeployed(registry.contracts.wsMusdAdapter.address),
-} as const
+/*
+ * Wallet wiring (wagmi + RainbowKit connectors). Only the lazily loaded app imports this module, so the landing never
+ * downloads wallet code. The chain, the registry and the QueryClient live in light modules of their own and are
+ * re-exported here, so app imports from './wagmi' keep working.
+ */
+export { type AppChain, appChain, deployed, registry } from './chain'
+export { queryClient } from './queryClient'
 
 const appInfo = {
   appName: 'Baserate',
@@ -87,17 +63,6 @@ export const directClient = createPublicClient({
   chain: appChain,
   transport: transportFor(appChain),
   batch: { multicall: false },
-})
-
-export const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      queryKeyHashFn: hashFn,
-      staleTime: 4_000,
-      retry: 2,
-      refetchOnWindowFocus: true,
-    },
-  },
 })
 
 declare module 'wagmi' {

@@ -6,6 +6,7 @@ import type { Abi, Address, StateOverride, TransactionReceipt } from 'viem'
 import { useAccount, useConfig, usePublicClient, useSwitchChain } from 'wagmi'
 import { waitForTransactionReceipt, writeContract } from 'wagmi/actions'
 import { appChain } from '../wagmi'
+import type { SealTone } from './brand/Seal'
 import { IconAlert } from './icons'
 import { useToast } from './Toaster'
 import { Button, cx, Spinner } from './ui'
@@ -34,8 +35,11 @@ export interface TxButtonProps {
   successTitle?: string
   successMessage?: (receipt: TransactionReceipt) => string
   onConfirmed?: (receipt: TransactionReceipt) => void
-  variant?: 'primary' | 'secondary'
+  /** `danger` is Seal Red: liquidation only (BRAND.md). */
+  variant?: 'primary' | 'secondary' | 'danger'
   size?: 'md' | 'lg'
+  /** The seal the success toast stamps: mint for every success, Seal Red (`seal`) for a liquidation. */
+  sealTone?: SealTone
   className?: string
   /** Pins the button to the bottom of the viewport on small screens. */
   sticky?: boolean
@@ -81,6 +85,7 @@ export function TxButton({
   size = 'lg',
   className,
   sticky,
+  sealTone = 'mint',
 }: TxButtonProps) {
   const { address, isConnected, chainId } = useAccount()
   const config = useConfig()
@@ -174,6 +179,7 @@ export function TxButton({
           tone: 'success',
           title: successTitle ?? 'Confirmed',
           message: successMessage?.(receipt) ?? `Included in block ${receipt.blockNumber}.`,
+          seal: sealTone,
         })
         onConfirmed?.(receipt)
       } else {
@@ -230,8 +236,9 @@ export function TxButton({
   return (
     <div
       className={cx(
+        // On phones the action rides above the tab bar on a strip of paper with a top hairline.
         sticky &&
-          'sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 -mx-1 bg-surface/95 px-1 pt-2 pb-1 backdrop-blur lg:static lg:mx-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none',
+          'sticky bottom-[calc(var(--tabbar-h,4rem)+0.5rem+env(safe-area-inset-bottom))] z-10 -mx-2 border-t border-line bg-surface/95 px-2 pt-3 pb-1 backdrop-blur-sm lg:static lg:mx-0 lg:border-t-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none',
         className,
       )}
     >
@@ -245,13 +252,14 @@ export function TxButton({
       >
         {content}
       </Button>
+      {phase === 'pending' ? <span aria-hidden="true" className="tx-progress mt-2 block" /> : null}
       {isConnected && onAppChain && !busy ? (
         disabledReason ? (
           <p className="mt-2 text-center text-xs text-muted">{disabledReason}</p>
         ) : shownError ? (
           <div
             role="alert"
-            className="mt-2 flex gap-2 rounded-lg bg-bad-soft p-2.5 text-xs text-ink"
+            className="mt-2 flex gap-2 rounded-[3px] border-l-2 border-l-seal bg-bad-soft p-2.5 text-xs leading-relaxed text-ink"
           >
             <IconAlert className="mt-px size-4 shrink-0 text-bad" />
             <p>

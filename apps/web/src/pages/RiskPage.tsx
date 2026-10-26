@@ -87,7 +87,7 @@ export function RiskPage() {
           }
         />
         {s ? (
-          <ul className="flex flex-wrap gap-2">
+          <ul className="flex flex-wrap gap-1.5">
             {riskSourceStates(s.failed, s.skipped).map((src) => (
               <li key={src.name}>
                 <Badge tone={STATE_TONE[src.state]}>
@@ -149,33 +149,33 @@ function DepthCard({ s }: Props) {
       {s ? (
         <>
           <div className="-mx-4 overflow-x-auto sm:mx-0">
-            <table className="w-full min-w-[560px] text-left text-sm">
+            <table className="ledger w-full min-w-[560px] text-left text-sm">
               <thead>
-                <tr className="border-b border-line text-xs text-muted">
-                  <th scope="col" className="px-4 py-2 font-medium sm:pl-0">
+                <tr>
+                  <th scope="col" className="px-4 pt-1 pb-2 sm:pl-0">
                     BTC sold
                   </th>
-                  <th scope="col" className="px-2 py-2 text-right font-medium">
+                  <th scope="col" className="px-2 pt-1 pb-2 text-right">
                     Oracle value
                   </th>
-                  <th scope="col" className="px-2 py-2 text-right font-medium">
+                  <th scope="col" className="px-2 pt-1 pb-2 text-right">
                     vAMM pays
                   </th>
-                  <th scope="col" className="px-2 py-2 text-right font-medium">
+                  <th scope="col" className="px-2 pt-1 pb-2 text-right">
                     CL200 pays
                   </th>
-                  <th scope="col" className="px-2 py-2 text-right font-medium">
+                  <th scope="col" className="px-2 pt-1 pb-2 text-right">
                     Impact
                   </th>
-                  <th scope="col" className="px-4 py-2 text-right font-medium sm:pr-0">
+                  <th scope="col" className="px-4 pt-1 pb-2 text-right sm:pr-0">
                     Clean
                   </th>
                 </tr>
               </thead>
-              <tbody className="num divide-y divide-line">
+              <tbody className="num">
                 {s.depth.map((d) => (
                   <tr key={d.btcIn.toString()}>
-                    <td className="px-4 py-2 text-btc sm:pl-0">
+                    <td className="px-4 py-2.5 text-btc sm:pl-0">
                       {formatBtc(d.btcIn, { minDp: 3 })}
                     </td>
                     <td className="px-2 py-2 text-right text-ink">{formatMusd(d.referenceOut)}</td>
@@ -251,36 +251,36 @@ function TroveCard({ s }: Props) {
             <Stat label="BTC price" value={formatUsd(t.price, 0)} sub="Skip, used for ICR" />
           </div>
           <div className="-mx-4 overflow-x-auto sm:mx-0">
-            <table className="w-full min-w-[560px] text-left text-sm">
+            <table className="ledger w-full min-w-[560px] text-left text-sm">
               <thead>
-                <tr className="border-b border-line text-xs text-muted">
-                  <th scope="col" className="px-4 py-2 font-medium sm:pl-0">
+                <tr>
+                  <th scope="col" className="px-4 pt-1 pb-2 sm:pl-0">
                     #
                   </th>
-                  <th scope="col" className="px-2 py-2 font-medium">
+                  <th scope="col" className="px-2 pt-1 pb-2">
                     Trove
                   </th>
-                  <th scope="col" className="px-2 py-2 text-right font-medium">
+                  <th scope="col" className="px-2 pt-1 pb-2 text-right">
                     ICR
                   </th>
-                  <th scope="col" className="px-2 py-2 text-right font-medium">
+                  <th scope="col" className="px-2 pt-1 pb-2 text-right">
                     Collateral
                   </th>
-                  <th scope="col" className="px-2 py-2 text-right font-medium">
+                  <th scope="col" className="px-2 pt-1 pb-2 text-right">
                     Debt
                   </th>
-                  <th scope="col" className="px-4 py-2 text-right font-medium sm:pr-0">
+                  <th scope="col" className="px-4 pt-1 pb-2 text-right sm:pr-0">
                     Debt ahead
                   </th>
                 </tr>
               </thead>
-              <tbody className="num divide-y divide-line">
+              <tbody className="num">
                 {t.entries.map((e, i) => (
                   <tr key={e.borrower} className={skipped(e.icr) ? 'bg-warn-soft/40' : undefined}>
-                    <td className="px-4 py-2 text-muted sm:pl-0">{i + 1}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs text-muted sm:pl-0">{i + 1}</td>
                     <td className="px-2 py-2">
                       <a
-                        className="font-mono text-xs whitespace-nowrap text-brand hover:underline"
+                        className="font-mono text-xs whitespace-nowrap text-brand underline-offset-[3px] hover:underline"
                         href={explorerAddressUrl(appChain.id, e.borrower)}
                         target="_blank"
                         rel="noreferrer noopener"
@@ -297,7 +297,7 @@ function TroveCard({ s }: Props) {
                     <td className="px-2 py-2 text-right whitespace-nowrap text-btc">
                       {formatBtc(e.coll, { minDp: 4, maxDp: 4 })} BTC
                     </td>
-                    <td className="px-2 py-2 text-right text-ink">
+                    <td className="px-2 py-2 text-right whitespace-nowrap text-ink">
                       {formatMusd(e.principal + e.interest, { dp: 0 })} MUSD
                     </td>
                     <td className="px-4 py-2 text-right text-muted sm:pr-0">
@@ -532,7 +532,7 @@ function CapsCard({ s }: Props) {
               <>
                 to{' '}
                 <a
-                  className="font-mono text-brand hover:underline"
+                  className="font-mono text-brand underline-offset-[3px] hover:underline"
                   href={explorerAddressUrl(appChain.id, f.feeRecipient)}
                   target="_blank"
                   rel="noreferrer noopener"

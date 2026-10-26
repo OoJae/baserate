@@ -1,0 +1,188 @@
+/*
+ * Page transitions (the router starts typed view transitions; see src/RootLayout.tsx) and their fallbacks.
+ * Transform and opacity only. Types:
+ *   rate-wipe    app → app: the chrome holds still, the content crossfades, the base-rate line draws (560 ms)
+ *   layout-swap  site ↔ app: a 300 ms crossfade of the whole page
+ *   site-wipe    site → site: a 320 ms crossfade by default; the landing work may restyle it from its own CSS
+ * Without typed view transitions, RootLayout draws the line with the Web Animations API and plays .page-enter on
+ * <main>. Under reduced motion there are no transitions at all (and the safety rule at the end clamps anything left).
+ */
+
+/* The base-rate line: a hairline on the bottom rule of the app's topbar (AppShell), invisible until a navigation. */
+.rate-sweep {
+  position: absolute;
+  inset-inline: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--brand);
+  transform-origin: 0 50%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* rate-wipe: the chrome is lifted into groups of its own (only for this type) and holds still. */
+html:active-view-transition-type(rate-wipe) [data-vt-name="sidebar"] {
+  view-transition-name: app-sidebar;
+}
+
+html:active-view-transition-type(rate-wipe) [data-vt-name="topbar"] {
+  view-transition-name: app-topbar;
+}
+
+html:active-view-transition-type(rate-wipe) [data-vt-name="tabbar"] {
+  view-transition-name: app-tabbar;
+}
+
+html:active-view-transition-type(rate-wipe) [data-vt-name="toasts"] {
+  view-transition-name: app-toasts;
+}
+
+html:active-view-transition-type(rate-wipe) .rate-sweep {
+  opacity: 1;
+  view-transition-name: rate-line;
+}
+
+html:active-view-transition-type(rate-wipe)::view-transition-group(app-sidebar),
+html:active-view-transition-type(rate-wipe)::view-transition-group(app-topbar),
+html:active-view-transition-type(rate-wipe)::view-transition-group(app-tabbar),
+html:active-view-transition-type(rate-wipe)::view-transition-group(app-toasts),
+html:active-view-transition-type(rate-wipe)::view-transition-new(app-sidebar),
+html:active-view-transition-type(rate-wipe)::view-transition-new(app-topbar),
+html:active-view-transition-type(rate-wipe)::view-transition-new(app-tabbar),
+html:active-view-transition-type(rate-wipe)::view-transition-new(app-toasts) {
+  animation: none;
+}
+
+html:active-view-transition-type(rate-wipe)::view-transition-old(app-sidebar),
+html:active-view-transition-type(rate-wipe)::view-transition-old(app-topbar),
+html:active-view-transition-type(rate-wipe)::view-transition-old(app-tabbar),
+html:active-view-transition-type(rate-wipe)::view-transition-old(app-toasts),
+html:active-view-transition-type(rate-wipe)::view-transition-old(rate-line) {
+  animation: none;
+  opacity: 0;
+}
+
+/* Explicit z-order: the content under the chrome, the toasts above it, the line on top. */
+html:active-view-transition-type(rate-wipe)::view-transition-group(app-sidebar),
+html:active-view-transition-type(rate-wipe)::view-transition-group(app-topbar),
+html:active-view-transition-type(rate-wipe)::view-transition-group(app-tabbar) {
+  z-index: 1;
+}
+
+html:active-view-transition-type(rate-wipe)::view-transition-group(app-toasts) {
+  z-index: 2;
+}
+
+html:active-view-transition-type(rate-wipe)::view-transition-group(rate-line) {
+  z-index: 3;
+  animation: none;
+}
+
+/* The content: the old page leaves first (180 ms, up 4 px), the new one arrives after 140 ms (380 ms, up from 8 px). */
+html:active-view-transition-type(rate-wipe)::view-transition-group(root) {
+  animation: none;
+}
+
+html:active-view-transition-type(rate-wipe)::view-transition-image-pair(root) {
+  background: var(--canvas);
+}
+
+html:active-view-transition-type(rate-wipe)::view-transition-old(root) {
+  mix-blend-mode: normal;
+  animation: vt-content-out 180ms var(--ease-in) both;
+}
+
+html:active-view-transition-type(rate-wipe)::view-transition-new(root) {
+  mix-blend-mode: normal;
+  animation: vt-content-in 380ms var(--ease-out) 140ms both;
+}
+
+/* The line draws left to right over the first 55 %, then fades out by 560 ms. */
+html:active-view-transition-type(rate-wipe)::view-transition-new(rate-line) {
+  transform-origin: 0 50%;
+  animation: rate-line-draw 560ms var(--ease-out) both;
+}
+
+@keyframes vt-content-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes vt-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes rate-line-draw {
+  0% {
+    transform: scaleX(0);
+    opacity: 1;
+  }
+  55% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 0;
+  }
+}
+
+/* layout-swap: between the site and the app, the whole page crossfades. */
+html:active-view-transition-type(layout-swap)::view-transition-group(root) {
+  animation-duration: 300ms;
+  animation-timing-function: var(--ease-in-out);
+}
+
+/* site-wipe: between site pages, a plain crossfade unless the landing work restyles it. */
+html:active-view-transition-type(site-wipe)::view-transition-group(root) {
+  animation-duration: 320ms;
+  animation-timing-function: var(--ease-in-out);
+}
+
+/* The page-enter fallback (no typed view transitions): RootLayout adds it to <main> after a client navigation. */
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.page-enter {
+  animation: page-enter 380ms var(--ease-out) both;
+}
+
+/*
+ * Reduced motion: no view transitions (the router starts none; this covers one already running when the setting
+ * flips), and a global safety rule that clamps every CSS animation and transition to an instant. An element whose
+ * animation is a plain opacity fade can opt out with data-motion-safe.
+ */
+/* biome-ignore-start lint/complexity/noImportantStyles: the safety rule has to beat every animation on the page */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-image-pair(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+
+  .page-enter {
+    animation: none;
+  }
+
+  *:not([data-motion-safe]),
+  *:not([data-motion-safe])::before,
+  *:not([data-motion-safe])::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+/* biome-ignore-end lint/complexity/noImportantStyles: the safety rule has to beat every animation on the page */

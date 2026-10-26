@@ -446,7 +446,7 @@ function AllocatorCard({ vault }: { vault: VaultView }) {
       </dl>
       {moves.data && moves.data.length > 0 ? (
         <div className="mt-3 border-t border-line pt-3">
-          <p className="mb-1.5 text-xs font-medium text-muted">Recent moves</p>
+          <p className="serial mb-1.5 text-[10.5px] text-muted">Recent moves</p>
           <ul className="space-y-1.5 text-sm">
             {moves.data.map((m) => (
               <li key={m.tx} className="flex flex-wrap items-baseline justify-between gap-x-3">

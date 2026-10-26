@@ -367,7 +367,7 @@ function BackstopExit({ b, wallet, now }: { b: BackstopView; wallet: Wallet; now
       />
       {pending.length > 0 ? (
         <div>
-          <p className="mb-1.5 text-xs font-medium text-muted">Your queued exits</p>
+          <p className="serial mb-1.5 text-[10.5px] text-muted">Your queued exits</p>
           <ul className="space-y-2">
             {pending.map((r) => (
               <QueuedExit
@@ -431,7 +431,7 @@ function QueuedExit({
       'The backstop has no cash right now: its value is held as BTC. Claim again once an auction or a keeper sale refills cash.'
 
   return (
-    <li className="rounded-xl border border-line p-3 text-sm">
+    <li className="rounded-[4px] border border-line p-3 text-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span className="num text-ink">
           #{r.id.toString()} · {formatMusd(r.shares, { dp: 4 })} bMUSD

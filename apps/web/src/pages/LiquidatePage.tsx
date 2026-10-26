@@ -185,7 +185,7 @@ export function LiquidatePage() {
                 <Skeleton className="h-14 w-full" />
               </div>
             ) : shown.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-line-strong p-5 text-center text-sm text-muted">
+              <p className="rounded-[4px] border border-dashed border-line-strong p-5 text-center text-sm text-muted">
                 No open positions right now.
               </p>
             ) : (
@@ -205,7 +205,7 @@ export function LiquidatePage() {
             {closedRows.length > 0 ? (
               <button
                 type="button"
-                className="mt-3 text-sm font-medium text-brand hover:underline"
+                className="mt-3 rounded-[2px] text-sm font-medium text-brand underline-offset-[3px] hover:underline"
                 onClick={() => setShowClosed((s) => !s)}
               >
                 {showClosed ? 'Hide' : 'Show'} {closedRows.length} closed position
@@ -331,12 +331,16 @@ function PositionRow({
         onClick={onSelect}
         aria-pressed={active}
         className={cx(
-          'w-full rounded-xl border p-3 text-left transition-colors',
-          active ? 'border-brand bg-brand-soft/40' : 'border-line hover:bg-raised',
+          'w-full rounded-[4px] border p-3 text-left transition-colors',
+          active
+            ? 'border-brand bg-brand-soft/45 shadow-[inset_3px_0_0_var(--brand)]'
+            : 'border-line hover:border-line-strong hover:bg-raised/60',
         )}
       >
         <div className="flex flex-wrap items-center gap-2">
-          <span className="num font-mono text-sm text-ink">{shortAddress(row.account, 5)}</span>
+          <span className="num font-mono text-[13px] tracking-[0.02em] text-ink">
+            {shortAddress(row.account, 5)}
+          </span>
           {row.canary ? <Badge tone="btc">Canary</Badge> : null}
           {me && isAddressEqual(me, row.owner) ? <Badge tone="brand">Yours</Badge> : null}
           <span className="ml-auto">
@@ -353,26 +357,26 @@ function PositionRow({
             )}
           </span>
         </div>
-        <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
+        <dl className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
           <div>
-            <dt className="text-xs text-muted">Collateral</dt>
+            <dt className="serial text-[10px] text-muted">Collateral</dt>
             <dd className="num text-btc">{formatBtc(row.collateral)} BTC</dd>
           </div>
           <div>
-            <dt className="text-xs text-muted">Debt</dt>
+            <dt className="serial text-[10px] text-muted">Debt</dt>
             <dd className="num text-ink">
               {row.debt !== undefined ? `${formatMusd(row.debt, { mode: 'up' })} MUSD` : '—'}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-muted">LTV · health</dt>
+            <dt className="serial text-[10px] text-muted">LTV · health</dt>
             <dd className={cx('num', TONE_TEXT[healthTone(row.health, liquidatable)])}>
               {row.ltv !== undefined ? formatPercentWad(row.ltv) : '—'}
               {row.health ? ` · ${formatWad(row.health, 3)}` : ''}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-muted">Liquidatable if BTC ≤</dt>
+            <dt className="serial text-[10px] text-muted">Liquidatable if BTC ≤</dt>
             <dd className="num text-ink">
               {row.liqBtcUsd ? formatUsd(row.liqBtcUsd, 0) : '—'}
               {drop !== null ? (
@@ -524,8 +528,10 @@ function LiquidationCard({ row, skip }: { row: Row_; skip: bigint | undefined })
               <label
                 key={v}
                 className={cx(
-                  'flex cursor-pointer flex-col rounded-xl border p-3 text-sm',
-                  venue === v ? 'border-brand bg-brand-soft/40' : 'border-line',
+                  'flex cursor-pointer flex-col rounded-[4px] border p-3 text-sm transition-colors',
+                  venue === v
+                    ? 'border-brand bg-brand-soft/45'
+                    : 'border-line hover:border-line-strong',
                   disabled && 'cursor-not-allowed opacity-60',
                 )}
               >
@@ -563,6 +569,8 @@ function LiquidationCard({ row, skip }: { row: Row_; skip: bigint | undefined })
 
       <div className="mt-4">
         <TxButton
+          variant="danger"
+          sealTone="seal"
           label={
             p?.liquidatable && quote?.ok
               ? `Liquidate for ≈ ${formatMusd(quote.profit, { dp: 4 })} MUSD profit`
@@ -603,7 +611,7 @@ function HowItWorks({ lltv }: { lltv: bigint }) {
   return (
     <Card aria-labelledby="how-liq-title">
       <CardHeader id="how-liq-title" title="How a liquidation pays" />
-      <ol className="list-decimal space-y-2 pl-5 text-sm text-ink/90">
+      <ol className="list-decimal space-y-2 pl-5 text-sm leading-relaxed text-ink/90 marker:font-mono marker:text-xs marker:text-muted">
         <li>
           Morpho seizes BTC worth the debt plus a{' '}
           <span className="num font-medium">{formatPercentWad(incentive)}</span> incentive, once LTV

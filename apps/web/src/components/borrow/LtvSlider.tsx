@@ -36,7 +36,7 @@ export function LtvSlider({
         </label>
         <span className="num text-sm">
           <span className="font-semibold text-ink">{formatBps(value, 1)}</span>
-          <span className="ml-2 text-xs text-muted">{risk}</span>
+          <span className="serial ml-2 text-[10px] text-muted">{risk}</span>
         </span>
       </div>
       <div
@@ -59,21 +59,22 @@ export function LtvSlider({
           onChange={(e) => onChange(Number(e.target.value))}
         />
       </div>
-      <div className="relative mt-1 h-2 rounded-full bg-raised" aria-hidden>
+      {/* The scale 0 → LLTV: the target as an engraved hatch, the opening limit in ink, liquidation in Seal Red. */}
+      <div className="relative mt-1 h-2 rounded-[1px] bg-raised" aria-hidden>
         <div
-          className="absolute inset-y-0 left-0 rounded-full"
-          style={{ width: `${pctOfLltv(value)}%`, background: tone, opacity: 0.35 }}
+          className="hatch-tone absolute inset-y-0 left-0"
+          style={{ width: `${pctOfLltv(value)}%`, ['--hatch' as string]: tone }}
         />
         <div
-          className="absolute inset-y-[-3px] w-0.5 bg-ink/60"
+          className="absolute inset-y-[-4px] w-px bg-ink/70"
           style={{ left: `${pctOfLltv(ceilingBps)}%` }}
         />
-        <div className="absolute inset-y-[-3px] right-0 w-0.5 bg-bad" />
+        <div className="absolute inset-y-[-5px] right-0 w-[3px] rounded-[1px] bg-seal" />
       </div>
       <div className="num mt-1.5 flex justify-between text-[11px] text-muted">
         <span>0%</span>
         <span>Opening limit {formatBps(ceilingBps, 0)}</span>
-        <span className="text-bad">Liquidation {formatBps(lltvBps, 0)}</span>
+        <span className="font-medium text-bad">Liquidation {formatBps(lltvBps, 0)}</span>
       </div>
     </div>
   )

@@ -1,0 +1,232 @@
+/*
+ * App components, art direction Intaglio (docs/brand/BRAND.md): the rules utilities cannot express. Pseudo-element
+ * rings, the ledger table, the woven band, the skeleton hatch and the few keyframes the app chrome uses. Colours are
+ * the semantic tokens of src/styles.css, so every rule follows the colour scheme. Transform and opacity only; under
+ * reduced motion src/styles/motion.css clamps every animation to an instant (opacity-only fades opt out with
+ * data-motion-safe).
+ *
+ * Every pseudo-element here has empty `content`: the e2e reads accessible names, which include pseudo content.
+ */
+
+@layer theme, base, components, utilities;
+
+@layer components {
+  /* ------------------------------------------------------------------------------------------------------------
+   * Buttons: a press scale, and one guilloche ring that presses in from the pointer (from the centre for a key).
+   * ui.tsx sets --ring-x, --ring-y, --ring-size and --ring-mask, then restarts .is-ringing.
+   * ---------------------------------------------------------------------------------------------------------- */
+  .btn {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    transition:
+      background-color 160ms var(--ease-out),
+      border-color 160ms var(--ease-out),
+      color 160ms var(--ease-out),
+      transform var(--dur-press) var(--ease-out);
+  }
+
+  .btn:not(:disabled):active {
+    transform: scale(0.98);
+  }
+
+  .btn::after {
+    content: "";
+    position: absolute;
+    left: var(--ring-x, 50%);
+    top: var(--ring-y, 50%);
+    z-index: -1;
+    width: var(--ring-size, 96px);
+    height: var(--ring-size, 96px);
+    margin: calc(var(--ring-size, 96px) / -2) 0 0 calc(var(--ring-size, 96px) / -2);
+    background-color: currentColor;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .btn.is-ringing::after {
+    -webkit-mask: var(--ring-mask) center / contain no-repeat;
+    mask: var(--ring-mask) center / contain no-repeat;
+    animation: btn-ring var(--dur-ring) var(--ease-out) both;
+  }
+
+  @keyframes btn-ring {
+    from {
+      opacity: 0.55;
+      transform: scale(0.3) rotate(-18deg);
+    }
+    to {
+      opacity: 0;
+      transform: scale(1) rotate(0deg);
+    }
+  }
+
+  /* ------------------------------------------------------------------------------------------------------------
+   * Segmented tabs: a 2 px rule under the selected tab, drawn from the centre.
+   * ---------------------------------------------------------------------------------------------------------- */
+  .tab-rule::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0.75rem;
+    bottom: -1px;
+    height: 2px;
+    background-color: var(--brand);
+    transform: scaleX(0);
+    transition: transform 240ms var(--ease-out);
+  }
+
+  .tab-rule[aria-selected="true"]::after {
+    transform: scaleX(1);
+  }
+
+  /* ------------------------------------------------------------------------------------------------------------
+   * Engraving: the skeleton's hatch, hatched (soft) bar segments, and the woven band (BRAND.md: "The band on any
+   * ground", a mask painted with --engrave; 28 px tall keeps its lines at 0.55 px).
+   * ---------------------------------------------------------------------------------------------------------- */
+  .hatch {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      var(--engrave-faint) 0 1px,
+      transparent 1px 5px
+    );
+  }
+
+  .hatch-tone {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      var(--hatch, var(--brand)) 0 1.25px,
+      transparent 1.25px 4px
+    );
+  }
+
+  .band {
+    height: 28px;
+    background-color: var(--engrave);
+    -webkit-mask: url("/brand/band.svg") repeat-x 0 50% / auto 100%;
+    mask: url("/brand/band.svg") repeat-x 0 50% / auto 100%;
+  }
+
+  /* The double rule of a note's frame, inside a card's hairline border. */
+  .frame {
+    box-shadow:
+      inset 0 0 0 3px var(--surface),
+      inset 0 0 0 4px color-mix(in srgb, var(--line) 75%, transparent);
+  }
+
+  /* ------------------------------------------------------------------------------------------------------------
+   * Ledger tables: Plex Mono caps headers over a double rule, hairlines between rows. Under 640 px the first column
+   * stays put while the rest scrolls (the wrapper scrolls; it is not a region).
+   * ---------------------------------------------------------------------------------------------------------- */
+  .ledger {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .ledger thead th {
+    font-family: var(--font-code);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    line-height: 1.2;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: var(--muted);
+    border-bottom: 3px double var(--line-strong);
+  }
+
+  .ledger tbody td {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .ledger tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  @media (max-width: 639.98px) {
+    .ledger th:first-child,
+    .ledger td:first-child {
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      background-color: var(--surface);
+      box-shadow: inset -1px 0 0 var(--line);
+    }
+  }
+
+  /* ------------------------------------------------------------------------------------------------------------
+   * Motion: the serial strip's block tick (opacity only), the pending hairline under a TxButton, the More sheet.
+   * ---------------------------------------------------------------------------------------------------------- */
+  .serial-tick {
+    animation: serial-tick 300ms var(--ease-out);
+  }
+
+  @keyframes serial-tick {
+    from {
+      opacity: 0.25;
+    }
+  }
+
+  .tx-progress {
+    position: relative;
+    overflow: hidden;
+    height: 1px;
+    background-color: color-mix(in srgb, var(--brand) 28%, transparent);
+  }
+
+  .tx-progress::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    width: 40%;
+    background-color: var(--brand);
+    animation: tx-progress 1400ms var(--ease-in-out) infinite;
+  }
+
+  @keyframes tx-progress {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(250%);
+    }
+  }
+
+  .sheet-in {
+    animation: sheet-in 320ms var(--ease-out) both;
+  }
+
+  .sheet-fade {
+    animation: sheet-fade 240ms var(--ease-out) both;
+  }
+
+  @keyframes sheet-in {
+    from {
+      transform: translateY(100%);
+    }
+  }
+
+  @keyframes sheet-fade {
+    from {
+      opacity: 0;
+    }
+  }
+}
+
+/* The range thumb sits on the paper like a punched hole: a ring of paper, no drop shadow. Unlayered, because the
+   track and thumb rules in src/styles.css are. */
+.ltv-range.ltv-range::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--surface);
+}
+
+.ltv-range.ltv-range::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--surface);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tx-progress::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.6;
+  }
+}

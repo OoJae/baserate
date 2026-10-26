@@ -173,14 +173,16 @@ export function BorrowForm({
 
         <LtvSlider value={target} onChange={setLtv} ceilingBps={ceiling} lltvBps={lltvBps} />
 
-        <div className="rounded-xl bg-raised p-3 sm:p-4">
-          <div className="mb-2 flex items-baseline justify-between gap-3">
-            <span className="text-sm text-muted">You receive</span>
-            <span className="num text-2xl font-semibold text-ink">
+        <div className="rounded-[3px] border border-line bg-raised/60 p-3 sm:p-4">
+          <div className="mb-2 flex items-baseline justify-between gap-3 border-b-[3px] border-double border-line-strong/50 pb-3">
+            <span className="serial text-[10.5px] text-muted">You receive</span>
+            <span className="numeral text-[30px] leading-none font-medium text-ink sm:text-[34px]">
               <Value loading={!quote && oracle.isLoading}>
                 {quote ? formatMusd(quote.musdOut) : null}
               </Value>{' '}
-              <span className="text-base font-medium text-muted">MUSD</span>
+              <span className="font-sans text-sm font-semibold tracking-[0.04em] text-muted">
+                MUSD
+              </span>
             </span>
           </div>
           <dl className="divide-y divide-line/70">
@@ -234,7 +236,7 @@ export function BorrowForm({
             />
           </dl>
           {quote && quote.musdOut > 0n && deployed.factory ? (
-            <p className="mt-2 text-xs text-muted">
+            <p className="mt-2 text-xs leading-relaxed text-muted">
               Reverts instead of borrowing if the price moves enough to push LTV past{' '}
               {formatBps(quote.maxLtvBps, 1)} before it lands.
             </p>

@@ -1,20 +1,86 @@
 <!doctype html>
-<html lang="en">
+<!--
+  SITE shell: /, /how-it-works, /security and /brand (vercel.json rewrites; vite.config.ts mirrors them in dev and
+  preview). It paints the Intaglio ground before any CSS arrives, so the landing never flashes paper. Every other
+  path is served app.html. Both load the same entry; the router decides what renders.
+-->
+<html lang="en" data-zone="site" data-ground="intaglio">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Baserate · Dollars against your bitcoin, at the base rate</title>
     <meta
       name="description"
-      content="Baserate: borrow MUSD against BTC with no redemption queue, and save in wsMUSD. Built on Mezo's Morpho."
+      content="Borrow dollars (MUSD) against your bitcoin with no redemption queue, save in wsMUSD, or lend through the vMUSD vault. Built on Mezo's own Morpho Blue."
     />
-    <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0d1013" media="(prefers-color-scheme: dark)" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>Baserate · BTC-backed MUSD credit</title>
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0C1512" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0C1512" media="(prefers-color-scheme: dark)" />
+    <!-- Pre-paint: the Intaglio ground and Note ink (src/brand/tokens.css), until the stylesheet takes over. -->
+    <style>
+      html {
+        background: #0c1512;
+        color: #f2eee3;
+        color-scheme: dark;
+      }
+    </style>
+
+    <link rel="icon" href="/brand/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+    <link rel="manifest" href="/brand/site.webmanifest" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Baserate" />
+    <meta property="og:title" content="Baserate · Dollars against your bitcoin, at the base rate" />
+    <meta
+      property="og:description"
+      content="Borrow dollars against your bitcoin on Mezo with no redemption queue. Save in wsMUSD, lend through the vMUSD vault."
+    />
+    <meta property="og:url" content="https://baserate-mezo.vercel.app/" />
+    <meta property="og:image" content="https://baserate-mezo.vercel.app/brand/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Dollars against your bitcoin. At the base rate. An engraved coin with an amber bitcoin centre."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Baserate · Dollars against your bitcoin, at the base rate" />
+    <meta
+      name="twitter:description"
+      content="Borrow dollars against your bitcoin on Mezo with no redemption queue. Save in wsMUSD, lend through the vMUSD vault."
+    />
+    <meta name="twitter:image" content="https://baserate-mezo.vercel.app/brand/og.png" />
+    <meta
+      name="twitter:image:alt"
+      content="Dollars against your bitcoin. At the base rate. An engraved coin with an amber bitcoin centre."
+    />
+
+    <!--
+      Fonts (src/brand/tokens.css): preload only the two faces the first screen sets, Bodoni Moda roman and Public
+      Sans roman, latin subset. Vite fingerprints these to the same /assets URLs the stylesheet asks for. Italics and
+      IBM Plex Mono load on first use; every face swaps in over a metric-matched fallback.
+    -->
+    <link
+      rel="preload"
+      href="/node_modules/@fontsource-variable/bodoni-moda/files/bodoni-moda-latin-opsz-normal.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/node_modules/@fontsource-variable/public-sans/files/public-sans-latin-wght-normal.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
   </head>
   <body>
     <div id="root"></div>
-    <noscript>Baserate needs JavaScript to talk to your wallet and the Mezo network.</noscript>
+    <noscript>Baserate needs JavaScript to read live data from the Mezo network.</noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,0 +1,371 @@
+/*
+ * The landing (src/site): the base-rate line's geometry, the headline reveal, the line primitives, the stations and
+ * the banknotes. Colours are the brand roles (tokens.css, styles.css), so every rule follows the section's ground:
+ * Guilloche line work on ink, Mint on paper.
+ *
+ * The line: one 1 px line drawn in three media (WebGL in the hero, these HTML rails through the sections, the mark in
+ * the footer), all on --rail-x. On desktop it is the coin's centre column (72 % of the page, held under the 90rem
+ * frame on wide screens) with the copy to its left; below 64rem it runs 16 px from the left edge and the copy is
+ * inset past it. Percentages resolve against the full-width section, so every rule below agrees on where it is.
+ *
+ * Motion: src/site/motion/motion.ts scrubs the rails and stations. Without it (reduced motion, no JS motion yet)
+ * everything here is drawn complete, so nothing is ever gated behind an animation.
+ */
+
+@layer components {
+  .landing {
+    --gutter: 1rem;
+    --inset: 2.5rem;
+    --rail-x: 1rem;
+    --rail-ink: var(--engrave);
+    --rail-gap: 1.5rem;
+    --hero-scroll: 90svh;
+    overflow-x: clip;
+  }
+
+  @media (min-width: 40rem) {
+    .landing {
+      --gutter: 1.5rem;
+      --inset: 3.5rem;
+      --rail-x: 1.5rem;
+    }
+  }
+
+  @media (min-width: 64rem) {
+    .landing {
+      --gutter: max(2.5rem, 50% - 42.5rem);
+      --inset: var(--gutter);
+      --rail-x: min(72%, 50% + 19.8rem);
+      --rail-gap: 4rem;
+      --hero-scroll: 140svh;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .landing {
+      --hero-scroll: 0px;
+    }
+  }
+
+  .landing[data-still] {
+    --hero-scroll: 0px;
+  }
+
+  /* The hero's scroll length: the WebGL unwind takes the whole --hero-scroll; the 2D poster scene (no WebGL) needs
+     less than half of it. */
+  [data-hero] {
+    --scene: 1;
+    height: calc(100svh + var(--hero-scroll) * var(--scene));
+  }
+
+  [data-hero][data-scene="2d"] {
+    --scene: 0.45;
+  }
+
+  /* Type over engraving clears it, as on a note: a hard knockout in the ground colour, invisible on bare ground. */
+  .knockout {
+    text-shadow:
+      0.05em 0 var(--canvas),
+      -0.05em 0 var(--canvas),
+      0 0.05em var(--canvas),
+      0 -0.05em var(--canvas),
+      0.035em 0.035em var(--canvas),
+      -0.035em 0.035em var(--canvas),
+      0.035em -0.035em var(--canvas),
+      -0.035em -0.035em var(--canvas);
+  }
+
+  /* Rows that hang off the line: copy left of it, a figure on it. One column below 64rem. */
+  .rail-grid {
+    display: grid;
+    grid-template-columns: var(--inset) minmax(0, 1fr) var(--gutter);
+  }
+
+  .rail-grid > * {
+    grid-column: 2;
+    min-width: 0;
+  }
+
+  @media (min-width: 64rem) {
+    .rail-grid {
+      grid-template-columns:
+        var(--inset) calc(var(--rail-x) - var(--inset) - var(--rail-gap)) var(--rail-gap)
+        minmax(0, 1fr) var(--gutter);
+    }
+
+    .rail-grid > .at-rail {
+      grid-column: 4;
+    }
+
+    .rail-grid > .span-rail {
+      grid-column: 2 / 5;
+    }
+  }
+
+  /* The rail: a section's stretch of the line. Drawn complete unless motion takes it over. */
+  .rail {
+    position: absolute;
+    inset-block: 0;
+    left: var(--rail-x);
+    width: 1px;
+    background: var(--engrave);
+    transform-origin: 50% 0;
+    pointer-events: none;
+  }
+
+  /* Line primitive: 1 px, transform and opacity only. */
+  .ln {
+    position: absolute;
+    display: block;
+    background: var(--engrave);
+    pointer-events: none;
+  }
+
+  /* Like the rail, a stroke's coordinate is its left (or top) edge: --rail-x is the line's left edge everywhere,
+     the WebGL stage included. */
+  .ln-y {
+    width: 1px;
+    transform-origin: 50% 0;
+  }
+
+  .ln-x {
+    height: 1px;
+    transform-origin: 0 50%;
+  }
+
+  /* Paper sections: Note with its fibre grain. */
+  .paper {
+    background-color: var(--canvas);
+    background-image: var(--grain);
+    background-size: var(--grain-size) var(--grain-size);
+  }
+
+  /* The woven band, painted in the ground's engraving colour (BRAND.md: the band on any ground). */
+  .band {
+    height: 14px;
+    background: var(--engrave);
+    mask: url("/brand/band.svg") repeat-x 0 50% / auto 100%;
+  }
+
+  /* The headline: three lines, each a mask its words rise into (0.9 s expo.out, 80 ms apart). */
+  .hl {
+    display: block;
+    overflow-x: visible;
+    overflow-y: clip;
+    padding-block: 0.06em 0.16em;
+    margin-block: -0.06em -0.16em;
+  }
+
+  .hl > span {
+    display: block;
+    animation: hl-rise 0.9s var(--ease-out) both;
+    animation-delay: calc(120ms + var(--i, 0) * 80ms);
+  }
+
+  @keyframes hl-rise {
+    from {
+      transform: translateY(112%);
+    }
+  }
+
+  /* Reduced motion: a 300 ms fade in place (data-motion-safe opts these out of the global clamp). */
+  @keyframes hl-fade {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hl > span {
+      animation: hl-fade 0.3s linear both;
+    }
+  }
+
+  .landing[data-still] .hl > span {
+    animation: none;
+  }
+
+  /* The hero coin, poster or canvas: sized and placed on its anchor. */
+  .coin-anchor {
+    position: absolute;
+    width: var(--coin-d);
+    height: var(--coin-d);
+    left: calc(var(--coin-x) - var(--coin-d) / 2);
+    top: calc(var(--coin-y) - var(--coin-d) / 2);
+    pointer-events: none;
+  }
+
+  .fade-in {
+    animation: fade-in 0.6s var(--ease-out) both;
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fade-in {
+      animation-duration: 0.3s;
+      animation-timing-function: linear;
+    }
+  }
+
+  /* Live values: fixed-width tabular slots, so a value arriving never moves its neighbours. */
+  .slot {
+    display: inline-block;
+    min-width: var(--w, 4ch);
+    font-variant-numeric: var(--figures);
+  }
+
+  /* Banknotes. A hairline frame inside a hairline frame (--frame), the woven band top and bottom. */
+  .note {
+    position: relative;
+    isolation: isolate;
+    display: grid;
+    background: var(--ground-raised);
+    box-shadow: var(--frame);
+    border-radius: 2px;
+    color: var(--fg);
+    transition: box-shadow var(--dur-micro) var(--ease-out);
+  }
+
+  .note:hover,
+  .note:focus-within {
+    box-shadow:
+      0 0 0 1px var(--engrave),
+      0 0 0 4px var(--ground),
+      0 0 0 5px var(--rule);
+  }
+
+  .note .note-rosette {
+    transition: transform 1.2s var(--ease-in-out);
+  }
+
+  .note:hover .note-rosette {
+    transform: rotate(6deg);
+  }
+
+  /* The note's link covers the note, so the whole note is the target and the link's name stays short. */
+  .note-link::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: 2px;
+  }
+
+  .note-link:focus-visible {
+    outline: none;
+  }
+
+  .note-link:focus-visible::after {
+    outline: 2px solid var(--focus);
+    outline-offset: 6px;
+  }
+
+  /* Tally marks for the evidence: four uprights and a slash per five. */
+  .tally {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+  }
+
+  .tally-group {
+    position: relative;
+    display: flex;
+    gap: 6px;
+    height: 28px;
+  }
+
+  .tally-mark {
+    display: block;
+    width: 1px;
+    height: 100%;
+    background: var(--engrave);
+    transform-origin: 50% 100%;
+    transition:
+      transform 0.5s var(--ease-out),
+      opacity 0.5s var(--ease-out);
+  }
+
+  .tally-mark[data-state="pending"] {
+    opacity: 0.28;
+    transform: scaleY(0.35);
+  }
+
+  /* A failed check: the stroke broken into dashes, never red (Seal Red is for liquidation only). */
+  .tally-mark[data-state="failed"] {
+    background: repeating-linear-gradient(to bottom, var(--engrave) 0 3px, transparent 3px 6px);
+  }
+
+  .tally-slash {
+    position: absolute;
+    left: -3px;
+    right: -3px;
+    top: 50%;
+    height: 1px;
+    background: var(--engrave);
+    transform: rotate(-24deg);
+    transform-origin: 50% 50%;
+  }
+
+  @media (prefers-contrast: more) {
+    .rail,
+    .ln,
+    .tally-mark,
+    .tally-slash {
+      background: var(--fg);
+    }
+  }
+}
+
+/*
+ * The landing's first paint uses only the two preloaded faces (Bodoni roman, Public Sans): until it is on screen
+ * (LandingPage sets html[data-fonts="early"]), mono serials and italics use system faces, so those font files never
+ * compete with that paint; the brand faces swap in right after. The mono advances match, so nothing reflows, and the
+ * hero's "base rate" is still rising into its mask then. Unlayered, to win over the `serial` utility.
+ */
+html[data-fonts="early"] .serial {
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html[data-fonts="early"] em {
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+/*
+ * The WebGL stage (src/site/webgl) takes over from the HTML when it is live.
+ * Hero: the poster crossfades out over the stage's 600 ms while the canvas fades in; the 2D scene's line stands down.
+ * Footer: the canvas winds the line into the emblem, so the section's own rail and turn stand down, and the crisp
+ * SVG mark fades in over the spool's last stretch (motion.ts scrubs [data-mark-live]). In HTML mode the mark simply
+ * stands at the end of the rail.
+ */
+[data-coin-poster] {
+  transition: opacity 600ms var(--ease-out);
+}
+
+[data-hero][data-coin="live"] [data-coin-poster],
+[data-hero][data-coin="pending"] [data-coin-poster] {
+  opacity: 0;
+}
+
+[data-hero][data-coin="live"] [data-hero-line] {
+  display: none;
+}
+
+[data-spool="live"] [data-footer-line] {
+  visibility: hidden;
+}
+
+/* biome-ignore-start lint/complexity/noImportantStyles: these settle which of two scrubbed layers shows, over GSAP's inline styles */
+[data-spool="html"] [data-mark-live] {
+  opacity: 1 !important;
+}
+
+[data-spool="live"] [data-mark-html] {
+  opacity: 1 !important;
+  transform: none !important;
+}
+/* biome-ignore-end lint/complexity/noImportantStyles: these settle which of two scrubbed layers shows, over GSAP's inline styles */

@@ -17,7 +17,8 @@ import { defineConfig } from '@playwright/test'
  */
 export default defineConfig({
   testDir: './e2e',
-  testIgnore: '**/.output/**',
+  // e2e/site (playwright.site.config.ts) and e2e/ui (the wallet-free UI checks) have configs of their own.
+  testIgnore: ['**/.output/**', '**/site/**', '**/ui/**'],
   outputDir: './e2e/.output/test-results',
   timeout: 10 * 60_000,
   expect: { timeout: 30_000 },

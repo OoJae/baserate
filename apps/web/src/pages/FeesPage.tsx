@@ -375,19 +375,19 @@ function HistoryCard() {
               </div>
               <dl className="num mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-sm sm:grid-cols-4">
                 <div>
-                  <dt className="text-xs text-muted">sMUSD</dt>
+                  <dt className="serial text-[10px] text-muted">sMUSD</dt>
                   <dd className="text-ink">{formatMusd(d.toSmusd)} MUSD</dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted">Bribes</dt>
+                  <dt className="serial text-[10px] text-muted">Bribes</dt>
                   <dd className="text-ink">{formatMusd(d.toBribes)} MUSD</dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted">Treasury</dt>
+                  <dt className="serial text-[10px] text-muted">Treasury</dt>
                   <dd className="text-ink">{formatMusd(d.toTreasury)} MUSD</dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted">Epoch</dt>
+                  <dt className="serial text-[10px] text-muted">Epoch</dt>
                   <dd className="text-ink">
                     {formatUtc(Number(d.epochStart), { dateOnly: true })}
                   </dd>
@@ -413,7 +413,7 @@ function HistoryCard() {
           ))}
         </ul>
       ) : (
-        <p className="rounded-xl border border-dashed border-line-strong p-5 text-center text-sm text-muted">
+        <p className="rounded-[4px] border border-dashed border-line-strong p-5 text-center text-sm text-muted">
           No distributions yet.
         </p>
       )}
@@ -492,8 +492,8 @@ function FeeSwitchCard({ fr }: { fr: FeeRouterView }) {
         action={<Badge tone={status.tone}>{status.label}</Badge>}
       />
       {at !== undefined && at > 0 && !done ? (
-        <div className="mb-3 rounded-xl bg-raised p-3 text-center">
-          <p className="num font-display text-2xl text-ink">
+        <div className="mb-3 rounded-[3px] border border-line bg-raised/60 p-3 text-center">
+          <p className="numeral text-[28px] leading-tight font-medium text-ink">
             {left > 0 ? formatDuration(left) : 'Ready'}
           </p>
           <p className="num text-xs text-muted">

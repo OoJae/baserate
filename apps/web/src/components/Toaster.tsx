@@ -1,5 +1,6 @@
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from 'react'
-import { IconAlert, IconCheck, IconExternal, IconX } from './icons'
+import { Seal, type SealTone } from './brand/Seal'
+import { IconAlert, IconExternal, IconInfo, IconX } from './icons'
 import { cx, Spinner } from './ui'
 
 export type ToastTone = 'pending' | 'success' | 'error' | 'info'
@@ -11,6 +12,8 @@ export interface Toast {
   message?: string
   href?: string
   hrefLabel?: string
+  /** The seal a success stamps: mint (default), or Seal Red for a liquidation. */
+  seal?: SealTone
 }
 
 interface ToastApi {
@@ -79,9 +82,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
+      {/* A dismissed toast leaves at once: no exit animation, so a leaving toast is never still read. */}
       <section
         aria-label="Notifications"
         aria-live="polite"
+        data-vt-name="toasts"
         className="pointer-events-none fixed inset-x-0 top-3 z-50 flex flex-col items-center gap-2 px-3 sm:top-auto sm:right-4 sm:bottom-4 sm:left-auto sm:items-end"
       >
         {toasts.map((t) => (
@@ -93,34 +98,39 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 function ToastView({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
+  // A fixed 32 px slot, so the text never moves when a pending toast turns into a success.
   const icon =
     toast.tone === 'pending' ? (
-      <Spinner className="text-brand" />
+      <Spinner className="size-5 text-brand" />
     ) : toast.tone === 'success' ? (
-      <IconCheck className="size-4 text-good" />
+      <Seal key="success" tone={toast.seal ?? 'mint'} className="size-8" />
     ) : toast.tone === 'error' ? (
-      <IconAlert className="size-4 text-bad" />
+      <IconAlert className="size-5 text-bad" />
     ) : (
-      <IconCheck className="size-4 text-brand" />
+      <IconInfo className="size-5 text-brand" />
     )
   return (
     <div
       role={toast.tone === 'error' ? 'alert' : 'status'}
       className={cx(
-        'toast-in pointer-events-auto flex w-full max-w-sm gap-3 rounded-xl border bg-surface p-3 shadow-card',
-        toast.tone === 'error' ? 'border-bad/40' : 'border-line',
+        'toast-in frame pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-[6px] border bg-surface py-3 pr-2 pl-3',
+        toast.tone === 'error' ? 'border-bad/60' : 'border-line-strong/70',
       )}
     >
-      <span className="mt-0.5 shrink-0">{icon}</span>
-      <div className="min-w-0 flex-1 text-sm">
+      <span aria-hidden="true" className="grid size-8 shrink-0 place-items-center">
+        {icon}
+      </span>
+      <div className="min-w-0 flex-1 pt-1 text-sm">
         <p className="font-semibold text-ink">{toast.title}</p>
-        {toast.message ? <p className="mt-0.5 text-muted">{toast.message}</p> : null}
+        {toast.message ? (
+          <p className="mt-0.5 leading-snug break-words text-muted">{toast.message}</p>
+        ) : null}
         {toast.href ? (
           <a
             href={toast.href}
             target="_blank"
             rel="noreferrer noopener"
-            className="mt-1 inline-flex items-center gap-1 font-medium text-brand hover:underline"
+            className="mt-1.5 inline-flex items-center gap-1 font-medium text-brand underline-offset-[3px] hover:underline"
           >
             {toast.hrefLabel ?? 'View on explorer'}
             <IconExternal className="size-3.5" />
@@ -131,7 +141,7 @@ function ToastView({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
         type="button"
         onClick={onDismiss}
         aria-label="Dismiss notification"
-        className="-m-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted hover:bg-raised hover:text-ink"
+        className="inline-flex size-8 shrink-0 items-center justify-center rounded-[3px] text-muted transition-colors hover:bg-raised hover:text-ink"
       >
         <IconX className="size-4" />
       </button>
