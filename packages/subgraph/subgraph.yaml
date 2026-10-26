@@ -10,9 +10,9 @@ dataSources:
     name: BorrowAccountFactory
     network: mezo-testnet
     source:
-      address: "0xa3a03CD439B4cCB7292Ef21a23bb6BB36a4b86fE"
+      address: "0x0EF62F97130fe4D1D22DE4ACc4163154F82890b1"
       abi: BorrowAccountFactory
-      startBlock: 16364338
+      startBlock: 16380364
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -68,7 +68,7 @@ dataSources:
     source:
       address: "0xCe1da828cA15cb1FDAfa84C366A53C8106655a73"
       abi: Morpho
-      startBlock: 16364340
+      startBlock: 16380365
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -109,9 +109,9 @@ dataSources:
     name: WsMUSD
     network: mezo-testnet
     source:
-      address: "0x92aa0306c3af1e02D776EA05857653A3839DeBEB"
+      address: "0xDAfcB2cD3E722f6FeE7F70150be612F1d7af8124"
       abi: WsMUSD
-      startBlock: 16364313
+      startBlock: 16380361
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -146,9 +146,9 @@ dataSources:
     name: VMUSD
     network: mezo-testnet
     source:
-      address: "0x00890F9e2367acF6aC26CC06d8BF6c4270Da7440"
+      address: "0x76A62fFEFb0b9A5980750Fb106Df05cEff6b941a"
       abi: VaultV2
-      startBlock: 16366237
+      startBlock: 16380419
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -180,9 +180,9 @@ dataSources:
     name: BaserateAllocator
     network: mezo-testnet
     source:
-      address: "0x5a28C3f024aecDdC4828F2E5841038f647d8a067"
+      address: "0x8B1314D983973342DA53A6E30CD5586d5D92d20f"
       abi: BaserateAllocator
-      startBlock: 16366247
+      startBlock: 16380426
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -211,9 +211,9 @@ dataSources:
     name: Backstop
     network: mezo-testnet
     source:
-      address: "0xc06239D0cB52e51cc0Edcf4b181dA7cCAcD1aC01"
+      address: "0x64fE4CC966E55A0081913A8Bf72A22b007946C2B"
       abi: Backstop
-      startBlock: 16365855
+      startBlock: 16380382
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -253,9 +253,9 @@ dataSources:
     name: FlashLiquidator
     network: mezo-testnet
     source:
-      address: "0x8259050FF9976C9154042EC9d955dB8fAcE929C8"
+      address: "0x291868F26639bc619BaC1e87B7a19EE84988E973"
       abi: FlashLiquidator
-      startBlock: 16365856
+      startBlock: 16380383
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -280,9 +280,9 @@ dataSources:
     name: FeeRouter
     network: mezo-testnet
     source:
-      address: "0x8266d915fb60ac45998BB919A815C8013b9Bf1bC"
+      address: "0x2de420D13d808aEBA11AB743abe630D0dD48C13B"
       abi: FeeRouter
-      startBlock: 16365872
+      startBlock: 16380398
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9

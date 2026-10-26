@@ -233,7 +233,11 @@ contract Deploy is Script {
             vm.serializeAddress(k, "sentinel", cfg.sentinel);
             vm.serializeAddress(k, "feeRecipient", cfg.feeRecipient);
         } else {
-            vm.serializeString(k, "governanceNote", "Testnet: the deployer EOA holds governor and sentinel roles.");
+            vm.serializeString(
+                k,
+                "governanceNote",
+                "Testnet: the deployer EOA is governor; the sentinel is SENTINEL (default: the deployer)."
+            );
             vm.serializeAddress(k, "dispenser", address(d.dispenser));
         }
         vm.serializeAddress(k, "oracle", address(d.oracle));

@@ -112,13 +112,13 @@ export async function backstopJob() {
       if (sent?.receipt) notes.push(`sold ${formatUnits(btcIn, 18)} BTC`)
     }
   }
-  if (nowS() - Number(await getKv('backstop:lastSync', '0')) >= 24 * 3600) {
+  if (nowS() - Number(await getKv(`backstop:lastSync:${b}`, '0')) >= 24 * 3600) {
     const sent = await send('keeper', 'backstop', {
       address: b,
       abi: abi.backstop,
       functionName: 'sync',
     })
-    if (sent?.receipt) await setKv('backstop:lastSync', nowS())
+    if (sent?.receipt) await setKv(`backstop:lastSync:${b}`, nowS())
   }
   return notes.length ? notes.join(', ') : `inventory ${formatUnits(inventory, 18)} BTC`
 }
@@ -143,7 +143,7 @@ export async function feeFlushJob() {
   if (intoEpoch >= LIMITS.epochS - 3600) return "last hour of the epoch: next epoch's flush"
   if (balance < LIMITS.feeMinMusd)
     return `router holds ${formatUnits(balance, 18)} MUSD (min ${formatUnits(LIMITS.feeMinMusd, 18)})`
-  const idemKey = `flush:${epochStart}`
+  const idemKey = `flush:${registry.feeRouter}:${epochStart}`
   if (await hasIdem(idemKey)) return 'already flushed this epoch'
   const sent = await send(
     'keeper',

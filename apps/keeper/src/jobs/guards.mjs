@@ -214,11 +214,11 @@ export async function capsDepthJob() {
         functionName: 'setGlobalBorrowCap',
         args: [cap],
       },
-      { idemKey: `capcut:${cap}`, note: `depth ${formatEther(depthBtc)} BTC` },
+      { idemKey: `capcut:${registry.factory}:${cap}`, note: `depth ${formatEther(depthBtc)} BTC` },
     )
     if (sent?.receipt)
       await alert(
-        `capcut:${cap}`,
+        `capcut:${registry.factory}:${cap}`,
         `cut the global borrow cap to ${formatUnits(cap, 18)} MUSD (depth ${formatEther(depthBtc)} BTC)`,
       )
     return `cap cut to ${formatUnits(cap, 18)} MUSD`

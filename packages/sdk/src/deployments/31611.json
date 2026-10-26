@@ -1,8 +1,8 @@
 {
-  "$comment": "Mezo testnet registry. External addresses mirror contracts/script/config/MezoAddresses.sol (zero where testnet lacks one: no Slipstream CL200 pool, QuoterV2 or second gauge). Baserate addresses from contracts/deployments/31611.json, deploy txs and blocks from contracts/broadcast/{Deploy,DeployLiquidation,DeployPeriphery,DeployVault}.s.sol/31611/run-latest.json (vMusd: the VaultV2Factory.createVaultV2 call). The deployer EOA holds governor and sentinel roles, and is vMUSD owner, curator and sentinel, on testnet. canaryOperator is the keeper's canary key (CANARY_OPERATOR in Deploy.s.sol), whose timelocked grant the deployment queues.",
+  "$comment": "Mezo testnet registry. External addresses mirror contracts/script/config/MezoAddresses.sol (zero where testnet lacks one: no Slipstream CL200 pool, QuoterV2 or second gauge). Baserate addresses from contracts/deployments/31611.json, deploy txs and blocks from contracts/broadcast/{Deploy,DeployLiquidation,DeployPeriphery,DeployVault}.s.sol/31611/run-latest.json (vMusd: the VaultV2Factory.createVaultV2 call). On testnet the deployer EOA is governor and vMUSD owner and curator; the keeper's sentinel key 0xb031446A706B8481Aa89Ae2f227BA0d5dE125EAb is the factory sentinel and a vMUSD sentinel (alongside the deployer). canaryOperator is the keeper's canary key (CANARY_OPERATOR in Deploy.s.sol), whose timelocked grant the deployment queues.",
   "chainId": 31611,
   "version": "w2",
-  "startBlock": 16364312,
+  "startBlock": 16380349,
   "external": {
     "musd": "0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503",
     "smusd": "0x6f461c68B2c5492C0F5CCEc5a264d692aA7A8e16",
@@ -43,84 +43,85 @@
   },
   "contracts": {
     "oracle": {
-      "address": "0x99F948b6955Ac7b579b2d8847178911645Ffe77F",
-      "tx": "0x23a5350be0f064cfedeb3c55e84c2d68ee7cef7ad8ac54e437e0a2f742d80055",
-      "block": 16364312
+      "address": "0x83d21Ee5F5eC7D5Ba4b212Ed313244dDaa9608aF",
+      "tx": "0xc140f98329bbe57439c6375cb2c1f98d18bcb3010892c74f2dc344610396b992",
+      "block": 16380359
     },
     "wsMusd": {
-      "address": "0x92aa0306c3af1e02D776EA05857653A3839DeBEB",
-      "tx": "0x77e81ef7a7111bd8b2e3cc42be6f93eebdcf3a05310abaeb4918eae8edc12b70",
-      "block": 16364313
+      "address": "0xDAfcB2cD3E722f6FeE7F70150be612F1d7af8124",
+      "tx": "0xd715d236e36227cea02942112ab6b369688da4daf24dc1ffc640a9f053ce4025",
+      "block": 16380361
     },
     "factory": {
-      "address": "0xa3a03CD439B4cCB7292Ef21a23bb6BB36a4b86fE",
-      "tx": "0xea4778fcafea34da033cd061501f2e2df28c1197fc1d65933dff91171b3b24f4",
-      "block": 16364338
+      "address": "0x0EF62F97130fe4D1D22DE4ACc4163154F82890b1",
+      "tx": "0x4d9d5a218fcc19c881bfef77011871aa77dfd6842c19d95b91c19c870db534a5",
+      "block": 16380364
     },
     "collateral": {
-      "address": "0xd53B0Bf00d8e1b7F06E85cD6f11921fda9Bc27d1",
-      "tx": "0xea4778fcafea34da033cd061501f2e2df28c1197fc1d65933dff91171b3b24f4",
-      "block": 16364338
+      "address": "0x55407a4522338F035f4CE3895c826143501c8a7E",
+      "tx": "0x4d9d5a218fcc19c881bfef77011871aa77dfd6842c19d95b91c19c870db534a5",
+      "block": 16380364
     },
     "borrowAccountImpl": {
-      "address": "0xEF8D999248Dfa1aEDBd9B38b633D565f5751b292",
-      "tx": "0xea4778fcafea34da033cd061501f2e2df28c1197fc1d65933dff91171b3b24f4",
-      "block": 16364338
+      "address": "0x9C2E498b1FC0dD332eC6A26E4B00d2e713f3D7d0",
+      "tx": "0x4d9d5a218fcc19c881bfef77011871aa77dfd6842c19d95b91c19c870db534a5",
+      "block": 16380364
     },
     "dispenser": {
-      "address": "0x92F13D33aF38BbAc45a7E880826a787d895654c8",
-      "tx": "0x7e491445ba9f8e770f78d7df610bc8166aa6fd78e96b6843065d71c4dcb152a2",
-      "block": 16364343
+      "address": "0x08d7e3158D8c687f73c06B250AACe773d800CE69",
+      "tx": "0x8a42c0396147abf1aa07d3f7622ffd600ace41993fa883a006d7130c2a6b4460",
+      "block": 16380370
     },
     "backstop": {
-      "address": "0xc06239D0cB52e51cc0Edcf4b181dA7cCAcD1aC01",
-      "tx": "0xf960a3ee1d0710bf59caf2a845e03963bde5190568cd22a27f9b30b7e29c0746",
-      "block": 16365855
+      "address": "0x64fE4CC966E55A0081913A8Bf72A22b007946C2B",
+      "tx": "0x4831d3e68e15bb0f3272741c76f154fc07dadda19c852214029f377fadbf3043",
+      "block": 16380382
     },
     "flashLiquidator": {
-      "address": "0x8259050FF9976C9154042EC9d955dB8fAcE929C8",
-      "tx": "0x0c31794424f9897d99895b405d8b70056e4af43389e7830b1bfc7c4f6ada317c",
-      "block": 16365856
+      "address": "0x291868F26639bc619BaC1e87B7a19EE84988E973",
+      "tx": "0x1d17ce96e2a05cf510ea1775e6d9bf3aa5da0a9d473879abca4780b9e6b5fb0f",
+      "block": 16380383
     },
     "feeRouter": {
-      "address": "0x8266d915fb60ac45998BB919A815C8013b9Bf1bC",
-      "tx": "0x212946af67ad29cc5853b296da13532972ecf9baef5335a1f8addb6a98c1e7dd",
-      "block": 16365872
+      "address": "0x2de420D13d808aEBA11AB743abe630D0dD48C13B",
+      "tx": "0x260e28615a8da83c392ae3d313508c300ed0c62ebc8ef343a44038a829504cd9",
+      "block": 16380398
     },
     "riskLens": {
-      "address": "0x78ba4aA497887ECFcAE8468ECAcCe95d2c397d68",
-      "tx": "0xe8831351cb771ce905e91dfe494a98f8224c99de3aefe7861fbb6faf914c385c",
-      "block": 16365873
+      "address": "0x21aEB70C84E69c69b7F154CE6B06DdF6744266FF",
+      "tx": "0xfc02fa2bd17b9e8a61a4ee9a1a0127b59f3479ef836c4e7d3e725718eff581dd",
+      "block": 16380399
     },
     "vMusd": {
-      "address": "0x00890F9e2367acF6aC26CC06d8BF6c4270Da7440",
-      "tx": "0x37d5279dd0501dfbac52cb7cf931d151c276c6aaae2023ebe5111b433ed9deef",
-      "block": 16366237
+      "address": "0x76A62fFEFb0b9A5980750Fb106Df05cEff6b941a",
+      "tx": "0xcc1e00cc6f5dc8bb83532c5d8099073afac6938b842375c481ef1a077caa3354",
+      "block": 16380419
     },
     "wsMusdAdapter": {
-      "address": "0x75a44270a2Ca424d3cF4A70BdE4d018fc1Adf24F",
-      "tx": "0xf9a7c7ff104888333c701f3fed71311cdc753e66a2eded5c7039894433861e41",
-      "block": 16366246
+      "address": "0x9897b43c83B3DCC6f574b19ce39Ef85aBf1Dfc29",
+      "tx": "0x4d0582a5f721f219195dd1dd95c1b3540970968dac61ea838a296c0a6def4dde",
+      "block": 16380425
     },
     "m1Adapter": {
-      "address": "0xffbdbe74f1f118Dde2C2Fe09286f3AA9f448B394",
-      "tx": "0x2b3992361c2afbd6eb0b7463957f40e34cb2c38e4c71cb7e839ee7b05ce1832a",
-      "block": 16366244
+      "address": "0xD0E612460e35C646F7617A24ABEB84a842BEb61B",
+      "tx": "0x54da9c8d6cd30c73e3f35ee7abb02c73da7389c50c5b1bed979e5bf906bdf162",
+      "block": 16380424
     },
     "allocator": {
-      "address": "0x5a28C3f024aecDdC4828F2E5841038f647d8a067",
-      "tx": "0x0a1dc51cb3813d28ba2a8267193b4989cd79e4fa31ae3a8102699f92642e562f",
-      "block": 16366247
+      "address": "0x8B1314D983973342DA53A6E30CD5586d5D92d20f",
+      "tx": "0xaadbc9bf7bfea77ada6703cff3a9747ab5968b2b104f60119bdc7fd020afe827",
+      "block": 16380426
     }
   },
   "markets": {
     "M1": {
-      "id": "0xadd5f62435744e4fe91c94212024eba66fe93af38824bf264dee64258aebb13b",
+      "id": "0xa8c1e3b34cb6f3b84f0b20e69af435f315330f47a06422fb7593e4422467bb74",
       "loanToken": "0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503",
-      "collateralToken": "0xd53B0Bf00d8e1b7F06E85cD6f11921fda9Bc27d1",
-      "oracle": "0x99F948b6955Ac7b579b2d8847178911645Ffe77F",
+      "collateralToken": "0x55407a4522338F035f4CE3895c826143501c8a7E",
+      "oracle": "0x83d21Ee5F5eC7D5Ba4b212Ed313244dDaa9608aF",
       "irm": "0x0c97Fe017628636649ff374aD499529F91167441",
-      "lltv": "770000000000000000"
+      "lltv": "770000000000000000",
+      "block": 16380365
     }
   }
 }

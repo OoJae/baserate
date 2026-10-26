@@ -90,7 +90,8 @@ contract DeployVault is Script, VaultSetup {
         cfg.marketCap = IBorrowAccountFactory(accountFactory).globalBorrowCap();
         cfg.liquidityCap = mainnet ? MAINNET_VAULT_CAP : TESTNET_VAULT_CAP;
         cfg.seed = SEED;
-        cfg.salt = SALT;
+        // A redeploy needs a fresh salt: VaultV2Factory's CREATE2 address would collide with the earlier vault.
+        cfg.salt = vm.envOr("VAULT_SALT", SALT);
         if (cfg.liquidityCap < cfg.marketCap) revert SetupCheckFailed("liquidity cap below market cap");
     }
 
