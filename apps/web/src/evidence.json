@@ -192,6 +192,33 @@
     },
     {
       "chainId": 31611,
+      "area": "judge-journey",
+      "kind": "vmusd-approve",
+      "tx": "0x09795e9d36612197991bf4f630c5fb24c610b520f62478a17a131e673db17f18",
+      "block": 16380933,
+      "summary": "Judge journey: approved MUSD for vMUSD (Morpho Vault V2 has no permit deposit).",
+      "proves": "Lending through vMUSD from the real UI."
+    },
+    {
+      "chainId": 31611,
+      "area": "judge-journey",
+      "kind": "vmusd-deposit",
+      "tx": "0xee29948b283c63dd93dde7902ec3267bcb54c96bfe250f4dd26488360d7aea77",
+      "block": 16380937,
+      "summary": "Judge journey: deposited MUSD into vMUSD v2; the liquidity adapter parked it in wsMUSD in the same transaction.",
+      "proves": "Lenders earn at least wsMUSD while the allocator lends to M1 when it pays more."
+    },
+    {
+      "chainId": 31611,
+      "area": "judge-journey",
+      "kind": "vmusd-withdraw",
+      "tx": "0x42c332d6271844ecbaca6a070d15962972d0752dbf531c27bcef162c8891c81c",
+      "block": 16380944,
+      "summary": "Judge journey: withdrew everything from vMUSD v2.",
+      "proves": "Lenders exit with no penalty."
+    },
+    {
+      "chainId": 31611,
       "area": "lend",
       "kind": "vmusd-sentinel",
       "tx": "0xb2d6e38868ce6cfe7238f594018bcaed262b6d867fa2791d39aec9ad3fe2f682",

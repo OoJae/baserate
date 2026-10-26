@@ -52,37 +52,39 @@ origination fees ──▶ FeeRouter.distribute ──▶ 40% sMUSD.receiveProto
 
 ## Live on Mezo testnet (chain 31611)
 
+The audited stack (v2: every round-1 and round-2 fix in [`docs/audit/FINDINGS.md`](docs/audit/FINDINGS.md)) went live on 26 Oct 2026. All 14 contracts are verified on Sourcify (exact match).
+
 | Contract | Address | Source |
 |---|---|---|
-| BorrowAccountFactory | [`0xa3a03CD439B4cCB7292Ef21a23bb6BB36a4b86fE`](https://explorer.test.mezo.org/address/0xa3a03CD439B4cCB7292Ef21a23bb6BB36a4b86fE) | [Sourcify](https://repo.sourcify.dev/31611/0xa3a03CD439B4cCB7292Ef21a23bb6BB36a4b86fE) |
-| BorrowAccount (implementation) | [`0xEF8D999248Dfa1aEDBd9B38b633D565f5751b292`](https://explorer.test.mezo.org/address/0xEF8D999248Dfa1aEDBd9B38b633D565f5751b292) | [Sourcify](https://repo.sourcify.dev/31611/0xEF8D999248Dfa1aEDBd9B38b633D565f5751b292) |
-| CollateralBTC (bcBTC) | [`0xd53B0Bf00d8e1b7F06E85cD6f11921fda9Bc27d1`](https://explorer.test.mezo.org/address/0xd53B0Bf00d8e1b7F06E85cD6f11921fda9Bc27d1) | [Sourcify](https://repo.sourcify.dev/31611/0xd53B0Bf00d8e1b7F06E85cD6f11921fda9Bc27d1) |
-| BtcMusdOracle | [`0x99F948b6955Ac7b579b2d8847178911645Ffe77F`](https://explorer.test.mezo.org/address/0x99F948b6955Ac7b579b2d8847178911645Ffe77F) | [Sourcify](https://repo.sourcify.dev/31611/0x99F948b6955Ac7b579b2d8847178911645Ffe77F) |
-| WsMUSD | [`0x92aa0306c3af1e02D776EA05857653A3839DeBEB`](https://explorer.test.mezo.org/address/0x92aa0306c3af1e02D776EA05857653A3839DeBEB) | [Sourcify](https://repo.sourcify.dev/31611/0x92aa0306c3af1e02D776EA05857653A3839DeBEB) |
-| MusdDispenser (judge top-ups) | [`0x92F13D33aF38BbAc45a7E880826a787d895654c8`](https://explorer.test.mezo.org/address/0x92F13D33aF38BbAc45a7E880826a787d895654c8) | [Sourcify](https://repo.sourcify.dev/31611/0x92F13D33aF38BbAc45a7E880826a787d895654c8) |
-| vMUSD (Morpho Vault V2) | [`0x00890F9e2367acF6aC26CC06d8BF6c4270Da7440`](https://explorer.test.mezo.org/address/0x00890F9e2367acF6aC26CC06d8BF6c4270Da7440) | [Sourcify](https://repo.sourcify.dev/31611/0x00890F9e2367acF6aC26CC06d8BF6c4270Da7440) |
-| WsMusdLiquidityAdapter | [`0x75a44270a2Ca424d3cF4A70BdE4d018fc1Adf24F`](https://explorer.test.mezo.org/address/0x75a44270a2Ca424d3cF4A70BdE4d018fc1Adf24F) | [Sourcify](https://repo.sourcify.dev/31611/0x75a44270a2Ca424d3cF4A70BdE4d018fc1Adf24F) |
-| BaserateAllocator | [`0x5a28C3f024aecDdC4828F2E5841038f647d8a067`](https://explorer.test.mezo.org/address/0x5a28C3f024aecDdC4828F2E5841038f647d8a067) | [Sourcify](https://repo.sourcify.dev/31611/0x5a28C3f024aecDdC4828F2E5841038f647d8a067) |
-| FlashLiquidator | [`0x8259050FF9976C9154042EC9d955dB8fAcE929C8`](https://explorer.test.mezo.org/address/0x8259050FF9976C9154042EC9d955dB8fAcE929C8) | [Sourcify](https://repo.sourcify.dev/31611/0x8259050FF9976C9154042EC9d955dB8fAcE929C8) |
-| Backstop (bMUSD) | [`0xc06239D0cB52e51cc0Edcf4b181dA7cCAcD1aC01`](https://explorer.test.mezo.org/address/0xc06239D0cB52e51cc0Edcf4b181dA7cCAcD1aC01) | [Sourcify](https://repo.sourcify.dev/31611/0xc06239D0cB52e51cc0Edcf4b181dA7cCAcD1aC01) |
-| FeeRouter | [`0x8266d915fb60ac45998BB919A815C8013b9Bf1bC`](https://explorer.test.mezo.org/address/0x8266d915fb60ac45998BB919A815C8013b9Bf1bC) | [Sourcify](https://repo.sourcify.dev/31611/0x8266d915fb60ac45998BB919A815C8013b9Bf1bC) |
-| RiskLens | [`0x78ba4aA497887ECFcAE8468ECAcCe95d2c397d68`](https://explorer.test.mezo.org/address/0x78ba4aA497887ECFcAE8468ECAcCe95d2c397d68) | [Sourcify](https://repo.sourcify.dev/31611/0x78ba4aA497887ECFcAE8468ECAcCe95d2c397d68) |
-| MorphoMarketV1AdapterV2 (vMUSD → M1, Morpho's audited adapter) | [`0xffbdbe74f1f118Dde2C2Fe09286f3AA9f448B394`](https://explorer.test.mezo.org/address/0xffbdbe74f1f118Dde2C2Fe09286f3AA9f448B394) | factory-deployed |
-| Market M1 on Mezo's Morpho Blue [`0xCe1d…5a73`](https://explorer.test.mezo.org/address/0xCe1da828cA15cb1FDAfa84C366A53C8106655a73) | id `0xadd5f62435744e4fe91c94212024eba66fe93af38824bf264dee64258aebb13b` | |
+| BorrowAccountFactory | [`0x0EF62F97130fe4D1D22DE4ACc4163154F82890b1`](https://explorer.test.mezo.org/address/0x0EF62F97130fe4D1D22DE4ACc4163154F82890b1) | [Sourcify](https://repo.sourcify.dev/31611/0x0EF62F97130fe4D1D22DE4ACc4163154F82890b1) |
+| BorrowAccount (implementation) | [`0x9C2E498b1FC0dD332eC6A26E4B00d2e713f3D7d0`](https://explorer.test.mezo.org/address/0x9C2E498b1FC0dD332eC6A26E4B00d2e713f3D7d0) | [Sourcify](https://repo.sourcify.dev/31611/0x9C2E498b1FC0dD332eC6A26E4B00d2e713f3D7d0) |
+| CollateralBTC (bcBTC) | [`0x55407a4522338F035f4CE3895c826143501c8a7E`](https://explorer.test.mezo.org/address/0x55407a4522338F035f4CE3895c826143501c8a7E) | [Sourcify](https://repo.sourcify.dev/31611/0x55407a4522338F035f4CE3895c826143501c8a7E) |
+| BtcMusdOracle | [`0x83d21Ee5F5eC7D5Ba4b212Ed313244dDaa9608aF`](https://explorer.test.mezo.org/address/0x83d21Ee5F5eC7D5Ba4b212Ed313244dDaa9608aF) | [Sourcify](https://repo.sourcify.dev/31611/0x83d21Ee5F5eC7D5Ba4b212Ed313244dDaa9608aF) |
+| WsMUSD | [`0xDAfcB2cD3E722f6FeE7F70150be612F1d7af8124`](https://explorer.test.mezo.org/address/0xDAfcB2cD3E722f6FeE7F70150be612F1d7af8124) | [Sourcify](https://repo.sourcify.dev/31611/0xDAfcB2cD3E722f6FeE7F70150be612F1d7af8124) |
+| MusdDispenser (judge top-ups) | [`0x08d7e3158D8c687f73c06B250AACe773d800CE69`](https://explorer.test.mezo.org/address/0x08d7e3158D8c687f73c06B250AACe773d800CE69) | [Sourcify](https://repo.sourcify.dev/31611/0x08d7e3158D8c687f73c06B250AACe773d800CE69) |
+| vMUSD (Morpho Vault V2) | [`0x76A62fFEFb0b9A5980750Fb106Df05cEff6b941a`](https://explorer.test.mezo.org/address/0x76A62fFEFb0b9A5980750Fb106Df05cEff6b941a) | [Sourcify](https://repo.sourcify.dev/31611/0x76A62fFEFb0b9A5980750Fb106Df05cEff6b941a) |
+| WsMusdLiquidityAdapter | [`0x9897b43c83B3DCC6f574b19ce39Ef85aBf1Dfc29`](https://explorer.test.mezo.org/address/0x9897b43c83B3DCC6f574b19ce39Ef85aBf1Dfc29) | [Sourcify](https://repo.sourcify.dev/31611/0x9897b43c83B3DCC6f574b19ce39Ef85aBf1Dfc29) |
+| BaserateAllocator | [`0x8B1314D983973342DA53A6E30CD5586d5D92d20f`](https://explorer.test.mezo.org/address/0x8B1314D983973342DA53A6E30CD5586d5D92d20f) | [Sourcify](https://repo.sourcify.dev/31611/0x8B1314D983973342DA53A6E30CD5586d5D92d20f) |
+| FlashLiquidator | [`0x291868F26639bc619BaC1e87B7a19EE84988E973`](https://explorer.test.mezo.org/address/0x291868F26639bc619BaC1e87B7a19EE84988E973) | [Sourcify](https://repo.sourcify.dev/31611/0x291868F26639bc619BaC1e87B7a19EE84988E973) |
+| Backstop (bMUSD) | [`0x64fE4CC966E55A0081913A8Bf72A22b007946C2B`](https://explorer.test.mezo.org/address/0x64fE4CC966E55A0081913A8Bf72A22b007946C2B) | [Sourcify](https://repo.sourcify.dev/31611/0x64fE4CC966E55A0081913A8Bf72A22b007946C2B) |
+| FeeRouter | [`0x2de420D13d808aEBA11AB743abe630D0dD48C13B`](https://explorer.test.mezo.org/address/0x2de420D13d808aEBA11AB743abe630D0dD48C13B) | [Sourcify](https://repo.sourcify.dev/31611/0x2de420D13d808aEBA11AB743abe630D0dD48C13B) |
+| RiskLens | [`0x21aEB70C84E69c69b7F154CE6B06DdF6744266FF`](https://explorer.test.mezo.org/address/0x21aEB70C84E69c69b7F154CE6B06DdF6744266FF) | [Sourcify](https://repo.sourcify.dev/31611/0x21aEB70C84E69c69b7F154CE6B06DdF6744266FF) |
+| MorphoMarketV1AdapterV2 (vMUSD → M1, Morpho's audited adapter) | [`0xD0E612460e35C646F7617A24ABEB84a842BEb61B`](https://explorer.test.mezo.org/address/0xD0E612460e35C646F7617A24ABEB84a842BEb61B) | [Sourcify](https://repo.sourcify.dev/31611/0xD0E612460e35C646F7617A24ABEB84a842BEb61B) |
+| Market M1 on Mezo's Morpho Blue [`0xCe1d…5a73`](https://explorer.test.mezo.org/address/0xCe1da828cA15cb1FDAfa84C366A53C8106655a73) | id `0xa8c1e3b34cb6f3b84f0b20e69af435f315330f47a06422fb7593e4422467bb74` | |
 
 Key transactions:
 
-- **Borrow:** [market created](https://explorer.test.mezo.org/tx/0x4810d36183cda01097e07258b1b692477ae07ff1449a7abdac134fab03172da5) · [one-transaction borrow](https://explorer.test.mezo.org/tx/0x4b25c6e57ebec23866fdba5f020bd2d1cb40a745f2c07cb83892ccbafaefa5f6) · [one-transaction repay and exit](https://explorer.test.mezo.org/tx/0x98996d663b29140990502713f1bfb582ae3ceac7fe444dfa0d5ea458ec5adae1)
-- **Lend:** [vMUSD created](https://explorer.test.mezo.org/tx/0x37d5279dd0501dfbac52cb7cf931d151c276c6aaae2023ebe5111b433ed9deef) · [3,000 MUSD deposit](https://explorer.test.mezo.org/tx/0xd89c582ec4b6d30aba3cc556c07cb5bbd46ef9a2bb78034eb434b7f1d1568ddb) · [first rebalance into M1](https://explorer.test.mezo.org/tx/0x46cb78974ec1c5d8471a02b37604d9b75e0d6abad903cdc27fbdbedaf428aa4d)
-- **Liquidations:** [canary opened at ≈76.7% LTV against the 77% LLTV](https://explorer.test.mezo.org/tx/0x3b4bf6885e6d708fcba59ba8b3469e52ab5375f3887e7e3b2ee18d20f8cd1a34)
-- **Fees:** [first distribution: 8 MUSD bribe, 8 MUSD to sMUSD, 4 MUSD treasury](https://explorer.test.mezo.org/tx/0x76fe18e5b6df88d0e7c081d9387882788941691a19a91a1f6c0dcf5b5f8b130a) · [fee switch submitted to the 48-hour timelock](https://explorer.test.mezo.org/tx/0xeedbd310e90a95d9c3d6ecf6223c26b870b53d8ca33f7cb347e21b960fc37575)
+- **Borrow:** [market created](https://explorer.test.mezo.org/tx/0xb6f354953c43a957fc342c28b46cc0a6478c45a526f52945f85968b969dcdd2d) · [M1 seeded with 1,000 MUSD](https://explorer.test.mezo.org/tx/0x5103582f9c36f6b67b03e28a3064bf993bd3710bdb50b39e09bd1287ed7c8600) · judge journey on the audited contracts: [one-transaction borrow](https://explorer.test.mezo.org/tx/0x9c1c879d7edf748e0a25444739a44451a3412dba7a9f937df362c7a28dae4057) · [one-transaction repay and exit](https://explorer.test.mezo.org/tx/0x2d6d2323ac85a428734d03b9edf76981699d6bd4975ee2f3905e04234b5f2804)
+- **Lend:** [vMUSD created](https://explorer.test.mezo.org/tx/0xcc1e00cc6f5dc8bb83532c5d8099073afac6938b842375c481ef1a077caa3354) · [3,000 MUSD deposit](https://explorer.test.mezo.org/tx/0x75deb40f3d7fbb14704ef3674c7e1b5ce0b4a066d201a8d2cf6536ed734e1519) · [keeper's first rebalance into M1](https://explorer.test.mezo.org/tx/0xd72f5453e0c5dacaeac45f7ce6aefd0551bf878b8d885b875408448850ef71f4)
+- **Liquidations:** [keeper liquidated its canary unattended at 77.26% LTV](https://explorer.test.mezo.org/tx/0x44fc007ad4cfca3c8d2bd6d2c1c721d3a9ca54f75f5d68aadc96e3b935a6f43a) and [re-armed it four minutes later](https://explorer.test.mezo.org/tx/0xe0e6c572e5cc9d923009f57bdf50b7d010cd5e5a4b6b21b2ee9674d5108f42ca) (v1 stack; the v2 canary grant matures on 28 Oct)
+- **Fees:** [fee switch to FeeRouter v2 submitted to the 48-hour timelock](https://explorer.test.mezo.org/tx/0x12b3245a344a595fd223ced435e7b51e883266feed59b4dd6a764e1b653d86f9) · on v1, [the first distribution: 8 MUSD bribe, 8 MUSD to sMUSD, 4 MUSD treasury](https://explorer.test.mezo.org/tx/0x76fe18e5b6df88d0e7c081d9387882788941691a19a91a1f6c0dcf5b5f8b130a)
 
-All 25 recorded transactions are re-checked live on the [Evidence page](https://baserate-mezo.vercel.app/evidence). On testnet the deployer holds the governor and sentinel roles; mainnet uses a 2-of-3 Safe.
+All 58 recorded transactions are re-checked live on the [Evidence page](https://baserate-mezo.vercel.app/evidence), with the first deployment's history under "v1 (pre-audit)". On testnet the deployer EOA is governor and the keeper's sentinel key is sentinel; mainnet uses a 2-of-3 Safe.
 
 ## Tests
 
 ```bash
-cd contracts && forge test -j 1   # 560 tests: unit, fuzz, invariant, Mezo mainnet + testnet forks
+cd contracts && forge test -j 1   # 754 tests: unit, fuzz, invariant, audit PoCs, Mezo mainnet + testnet forks
 pnpm install && pnpm test         # SDK unit tests
 pnpm --filter web build && pnpm check-bundle
 pnpm --filter web e2e             # Playwright: the full judge journey with a real signing wallet
