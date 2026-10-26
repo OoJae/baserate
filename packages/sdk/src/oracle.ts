@@ -9,7 +9,9 @@ import { mulDivDown, ORACLE_PRICE_SCALE, WAD } from './math'
 
 /** Skip answers older than this revert `price()`. */
 export const SKIP_MAX_AGE = 60n
-/** Pyth only acts as a band while it is this fresh. */
+/** Pyth BTC only acts as the ±10% band while it is this fresh (round-2 R2X-2: a stalled Pyth stops gating in 10 min). */
+export const PYTH_BTC_BAND_MAX_AGE = 600n
+/** The Pyth MUSD leg counts while it is this fresh; older, MUSD is valued at $1.00. */
 export const PYTH_MAX_AGE = 3_900n
 /** Maximum |Skip − Pyth| / Pyth before the band trips, in bps. */
 export const MAX_DEV_BPS = 1_000n
@@ -81,7 +83,7 @@ export function computeOracleStatus(s: FeedSnapshot): ComputedOracleStatus {
 
   const btc18 = s.pythBtc ? pythTo18(s.pythBtc) : null
   const pythBtcAge = s.pythBtc ? ageOf(s.now, s.pythBtc.publishTime) : 0n
-  const pythBtcFresh = btc18 !== null && pythBtcAge <= PYTH_MAX_AGE
+  const pythBtcFresh = btc18 !== null && pythBtcAge <= PYTH_BTC_BAND_MAX_AGE
 
   const musd18 = s.pythMusd ? pythTo18(s.pythMusd) : null
   const musdAge = s.pythMusd ? ageOf(s.now, s.pythMusd.publishTime) : 0n

@@ -4,7 +4,7 @@ import {
   formatUsd,
   MUSD_MAX,
   MUSD_MIN,
-  PYTH_MAX_AGE,
+  PYTH_BTC_BAND_MAX_AGE,
   SKIP_MAX_AGE,
   skipAgeTone,
   toFixedDecimal,
@@ -86,7 +86,7 @@ export function OraclePanel({ oracle }: { oracle: OracleView }) {
         />
         <Row
           label="Pyth band"
-          tip={`Pyth BTC/USD only acts as a ±10% sanity band, and only while it is under ${PYTH_MAX_AGE.toString()} seconds old.`}
+          tip={`Pyth BTC/USD only acts as a ±10% sanity band, and only while it is under ${PYTH_BTC_BAND_MAX_AGE.toString()} seconds old.`}
           value={
             s ? (
               <span className="inline-flex items-center gap-1.5">

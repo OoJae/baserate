@@ -225,6 +225,13 @@ function BackstopDeposit({ b, wallet }: { b: BackstopView; wallet: Wallet }) {
   let reason: string | null = null
   if (!deployed.backstop) reason = 'The backstop is not deployed on this network.'
   else if (b.depositsPaused) reason = 'The sentinel has paused deposits; exits still work.'
+  else if (
+    b.inventory !== undefined &&
+    b.dustInventory !== undefined &&
+    b.inventory >= b.dustInventory
+  )
+    reason =
+      'Deposits are closed while the backstop holds BTC from a liquidation, so nobody can buy in below the sale price. They reopen once it is sold (usually within the 6-hour auction).'
   else if (amount === 0n) reason = 'Enter an amount of MUSD.'
   else if (balance !== undefined && amount > balance) reason = 'Not enough MUSD in your wallet.'
 

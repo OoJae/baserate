@@ -37,6 +37,24 @@ export async function allocatorJob() {
     if (sent?.receipt) note = `moved ${ACTION[action]} ${formatUnits(amount, 18)} MUSD`
   } else if (action !== 0) {
     note += `, cooling down until ${new Date(Number(readyAt) * 1000).toISOString()}`
+  } else {
+    // Idle MUSD in the vault earns nothing; rebalance() re-parks it in wsMUSD even during the cooldown (round-2
+    // R2X-4). Simulated first: it reverts when there is nothing to park.
+    const idle = await pub.readContract({
+      address: registry.musd,
+      abi: abi.erc20,
+      functionName: 'balanceOf',
+      args: [registry.vMusd],
+    })
+    if (idle >= 10n ** 18n) {
+      const sent = await send(
+        'keeper',
+        'allocator',
+        { address: registry.allocator, abi: abi.allocator, functionName: 'rebalance' },
+        { note: `parked ${formatUnits(idle, 18)} idle MUSD` },
+      )
+      if (sent?.receipt) note = `parked ${formatUnits(idle, 18)} idle MUSD in wsMUSD`
+    }
   }
   if (nowS() - Number(await getKv('allocator:lastCheckpoint', '0')) >= 3600) {
     const sent = await send(
