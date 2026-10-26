@@ -44,7 +44,7 @@ Judges told us to separate what works today from what is coming. Everything unde
 |---|---|
 | `CreditLineModule` | Capped, revocable MUSD credit lines for apps and AI agents, with an x402 agent demo |
 | Come-back flow | Lets borrowers whose troves were redeemed reclaim stranded BTC straight into a redemption-free position |
-| Round-3 fixes | The round-3 Lows in the contracts: the backstop's parking pause follows wsMUSD's health, per-block top-up budgets, liquidity lows that age out, a seed minted in the constructor. The keeper's Pyth pusher for the oracle pair is built and turns on with a Hermes API key |
+| Round-3 fixes | The round-3 Lows in the contracts: the backstop's parking pause follows wsMUSD's health, per-block top-up budgets, liquidity lows that age out, a seed minted in the constructor. The keeper's Pyth pusher for the oracle pair is built but off, because Pyth's Hermes now needs a paid plan |
 | Subgraph deployment | The Goldsky indexer for history (positions, moves, distributions) is built and tested against the v2 addresses (`packages/subgraph`, 18 tests); deploying it needs the Goldsky key |
 | SDK release | `@baserate/sdk` published to npm |
 | Mainnet proof mode | The same contracts on Mezo mainnet with caps of at most 2,000 MUSD, plus recorded evidence transactions |
