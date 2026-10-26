@@ -26,24 +26,24 @@ const src = (path: string) =>
   readFileSync(fileURLToPath(new URL(`../../../contracts/src/${path}`, import.meta.url)), 'utf8')
 
 describe('vMUSD cap ids', () => {
-  // Values read from vMUSD on Mezo testnet (`adapterId()` and caps set by DeployVault).
+  // Values read from vMUSD v2 on Mezo testnet (`adapterId()`, and the ids DeployVault gave non-zero caps).
   const r = getRegistry(MEZO_TESTNET_ID)
 
   it('matches the adapters’ on-chain adapterId()', () => {
     expect(vaultAdapterCapId(r.contracts.wsMusdAdapter.address)).toBe(
-      '0x90e13d669f42fd58d26b186a3b3ff55034dbb83de2bf48b6736c467df1e96edf',
+      '0x8e15d136944de3d7d23dd86e9069e5aa0b2f710f6d89b7959771d33102c06ad8',
     )
     expect(vaultAdapterCapId(r.contracts.m1Adapter.address)).toBe(
-      '0x3f549aeecc05bc59d92da094bfe3c4c80ed704174a3f8366b1daeb006e520c9c',
+      '0xf91fb1c70dbcddf1ca64c3667ba65da881718d7ba359ca1332c31f13637cb85d',
     )
   })
 
   it('matches the collateral and market ids the vault caps', () => {
     expect(vaultCollateralCapId(r.contracts.collateral.address)).toBe(
-      '0x59fdf21f7b30f2305f76edfee750ba5e3730d38f4f82014622a17fc5daf33077',
+      '0x91fcf8658fcf5cc5ee8cb1f8f7bdf23afbf38c9912489abba3d0ace00d465ba1',
     )
     expect(vaultMarketCapId(r.contracts.m1Adapter.address, r.markets.M1.params)).toBe(
-      '0x99fbd4ad7a562714bebc3b429ba116b92bc3fa0131b5ef90ff6ff8a38b213b62',
+      '0x1d036b0dbcfd6613a63437cd934e29bd215050ba8ca900bd4c584073f9756293',
     )
   })
 })
