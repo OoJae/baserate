@@ -41,8 +41,8 @@
       "chainId": 31611,
       "area": "core",
       "kind": "supply",
-      "tx": "0x29d883635a6e485f9ea5c358c1c6142dfab07607e57bf6ca2f9f03bf4d815fae",
-      "block": 16364342,
+      "tx": "0x5103582f9c36f6b67b03e28a3064bf993bd3710bdb50b39e09bd1287ed7c8600",
+      "block": 16380367,
       "summary": "Team supplied MUSD liquidity to M1 v2.",
       "proves": "Borrowers can draw MUSD from the new market from its first block."
     },
@@ -243,6 +243,15 @@
       "block": 16364340,
       "summary": "M1 created on Mezo's official testnet Morpho Blue: MUSD loan, bcBTC collateral, BtcMusdOracle, AdaptiveCurveIrm, LLTV 0.77.",
       "proves": "A redemption-free BTC→MUSD market now exists on Mezo's own Morpho deployment, created permissionlessly."
+    },
+    {
+      "chainId": 31611,
+      "area": "v1",
+      "kind": "supply",
+      "tx": "0x29d883635a6e485f9ea5c358c1c6142dfab07607e57bf6ca2f9f03bf4d815fae",
+      "block": 16364342,
+      "summary": "Team supplied 3,000 MUSD of liquidity to M1.",
+      "proves": "Judges can borrow immediately; vMUSD now tops this liquidity up through its allocator."
     },
     {
       "chainId": 31611,

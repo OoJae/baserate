@@ -46,7 +46,8 @@ for (const script of ['Deploy', 'DeployLiquidation', 'DeployPeriphery', 'DeployV
       (run.receipts ?? []).map((r) => [r.transactionHash, Number(BigInt(r.blockNumber))]),
     )
     for (const t of run.transactions ?? []) {
-      if (!blocks.has(t.hash)) continue
+      // v1's runs sit in the same folders: only transactions from the v2 deploy onwards are v2's.
+      if (!blocks.has(t.hash) || blocks.get(t.hash) < reg.deployBlock) continue
       txs.push({
         script,
         hash: t.hash,
