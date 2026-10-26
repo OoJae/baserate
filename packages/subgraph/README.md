@@ -11,15 +11,15 @@ apiVersion 0.0.9).
 
 | Data source                | Start block | Events                                                                                                                                                                 |
 | -------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BorrowAccountFactory`     | 16364338    | AccountCreated (creates a `BorrowAccount` template per clone), ComeBack, timelock Submitted / Revoked / Accepted / PendingInvalidated, every parameter and role event  |
+| `BorrowAccountFactory`     | 16380364    | AccountCreated (creates a `BorrowAccount` template per clone), ComeBack, timelock Submitted / Revoked / Accepted / PendingInvalidated, every parameter and role event  |
 | `BorrowAccount` (template) | per clone   | Opened, Borrowed (incl. origination fee and LTV), Repaid, Exited, CollateralAdded, CollateralWithdrawn, Swept                                                          |
-| `Morpho` (M1 only)         | 16364340    | CreateMarket, Supply, Withdraw, Borrow, Repay, SupplyCollateral, WithdrawCollateral, Liquidate, AccrueInterest. Mezo's Morpho hosts other markets; handlers skip them. |
-| `WsMUSD`                   | 16364313    | Deposit, Withdraw, RedeemedInKind, Synced, CapRaiseSubmitted / CapRaised / CapRaiseRevoked                                                                             |
-| `VMUSD` (Morpho Vault V2)  | 16366237    | Deposit, Withdraw, AccrueInterest, Allocate, Deallocate, ForceDeallocate                                                                                               |
-| `BaserateAllocator`        | 16366247    | Rebalanced, CheckpointRecorded, IdleAllocated, MarketLiquidityPulled                                                                                                   |
-| `Backstop`                 | 16365855    | Deposit, Checkpoint, CollateralBought, RedeemRequested, RedeemClaimed, RedeemPartiallyClaimed, AuctionTaken, InventorySold, DepositsPausedSet                          |
-| `FlashLiquidator`          | 16365856    | Liquidated (joined to the Morpho Liquidate it follows in the same transaction), NativeKept, NativeSwept                                                                |
-| `FeeRouter`                | 16365872    | Distributed, BribePosted, BribeRedirected, BribeCarried, SmusdYieldDeferred, SmusdYieldFailed, SmusdShareToTreasury                                                    |
+| `Morpho` (M1 only)         | 16380365    | CreateMarket, Supply, Withdraw, Borrow, Repay, SupplyCollateral, WithdrawCollateral, Liquidate, AccrueInterest. Mezo's Morpho hosts other markets; handlers skip them. |
+| `WsMUSD`                   | 16380361    | Deposit, Withdraw, RedeemedInKind, Synced, CapRaiseSubmitted / CapRaised / CapRaiseRevoked                                                                             |
+| `VMUSD` (Morpho Vault V2)  | 16380419    | Deposit, Withdraw, AccrueInterest, Allocate, Deallocate, ForceDeallocate                                                                                               |
+| `BaserateAllocator`        | 16380426    | Rebalanced, CheckpointRecorded, IdleAllocated, MarketLiquidityPulled                                                                                                   |
+| `Backstop`                 | 16380382    | Deposit, Checkpoint, CollateralBought, RedeemRequested, RedeemClaimed, RedeemPartiallyClaimed, AuctionTaken, InventorySold, DepositsPausedSet                          |
+| `FlashLiquidator`          | 16380383    | Liquidated (joined to the Morpho Liquidate it follows in the same transaction), NativeKept, NativeSwept                                                                |
+| `FeeRouter`                | 16380398    | Distributed, BribePosted, BribeRedirected, BribeCarried, SmusdYieldDeferred, SmusdYieldFailed, SmusdShareToTreasury                                                    |
 
 Start blocks are the contracts' deploy blocks (`packages/sdk/src/deployments/31611.json`); Morpho starts at M1's
 CreateMarket block. `pnpm check-config` verifies addresses, start blocks, the network and `src/config.ts` against
@@ -38,7 +38,7 @@ same check:
 pnpm --filter @baserate/subgraph sync-config     # = check-config --write
 ```
 
-Morpho's start block is `markets.M1.block` when the registry has one, 16364340 for today's M1, and otherwise the
+Morpho's start block is `markets.M1.block` when the registry has one, 16380365 for today's M1 (v2), and otherwise the
 factory's deploy block (the deploy script creates M1 right after the factory, in the same broadcast). Then update the
 start blocks in the table above, `pnpm --filter @baserate/subgraph build`, and deploy under a new version (below). The unit tests read M1, wsMUSD and
 the M1 adapter from `src/config.ts`, so they keep passing after a sync.
@@ -120,20 +120,25 @@ looks for `node_modules/assemblyscript/bin/asc` inside this package.
 ## Deploy to Goldsky
 
 ```sh
-pnpm --filter @baserate/subgraph build
-cd packages/subgraph
-goldsky login
-goldsky subgraph deploy baserate-mezo-testnet/1.0.0 --path .
+goldsky login                                          # browser sign-in; saves ~/.goldsky/auth_token
+pnpm --filter @baserate/subgraph deploy:goldsky        # builds, then deploys baserate-mezo-testnet/<package version>
+pnpm --filter @baserate/subgraph tag:prod              # points the stable `prod` tag at that version
 ```
 
-(`pnpm --filter @baserate/subgraph deploy:goldsky` runs the same deploy with the package version.) Goldsky prints the
-public GraphQL endpoint, `https://api.goldsky.com/api/public/<project-id>/subgraphs/baserate-mezo-testnet/1.0.0/gn`.
-Bump the version for each redeploy; a Goldsky tag pointing at the current version gives the web app a URL that does
-not change.
+The Goldsky CLI never builds: it uploads `build/`, so `deploy:goldsky` runs `build` first (a stale `build/` would ship
+old addresses). Goldsky prints the version's endpoint,
+`https://api.goldsky.com/api/public/<project-id>/subgraphs/baserate-mezo-testnet/<version>/gn`. The web app uses the
+tag's URL instead, `.../subgraphs/baserate-mezo-testnet/prod/gn`, which never changes. A deployed version can't be
+overwritten, so bump `version` in `package.json` for each redeploy, deploy, wait until `goldsky subgraph list` shows it
+synced, move `prod` (`tag:prod`), and only then delete the old version (`goldsky subgraph delete
+baserate-mezo-testnet/<old> -f`; Goldsky refuses while a tag points at it). A paused version resumes with
+`goldsky subgraph start baserate-mezo-testnet/<version>`.
 
 ## Web app
 
-Set `BASERATE_PUBLIC_SUBGRAPH_URL` (apps/web, Vercel) to the public endpoint; it is public, never a secret, and
+Set `BASERATE_PUBLIC_SUBGRAPH_URL` to the `prod` tag's endpoint in `apps/web/.env.production.local` (or the shell that
+runs `pnpm --filter web build`): the site is built locally and Vercel only serves the files, so a Vercel dashboard
+variable has no effect. The URL is public, never a secret, and
 `https://api.goldsky.com` is already in the CSP `connect-src`. The history hooks (Lend "Recent moves", Fees
 distributions and fee-switch submission, Liquidate accounts, backstop exit requests, the walkthrough's wsMUSD
 deposit check) then read the subgraph, plus a log read of the few blocks it has not indexed yet. Unset, on a local

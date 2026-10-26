@@ -12,7 +12,8 @@
     "codegen": "graph codegen",
     "build": "node scripts/check-config.mjs && graph codegen && graph build",
     "test:unit": "graph codegen && graph test -v 0.6.0",
-    "deploy:goldsky": "goldsky subgraph deploy baserate-mezo-testnet/$npm_package_version --path ."
+    "deploy:goldsky": "pnpm run build && goldsky subgraph deploy baserate-mezo-testnet/$npm_package_version --path .",
+    "tag:prod": "goldsky subgraph tag create baserate-mezo-testnet/$npm_package_version --tag prod"
   },
   "devDependencies": {
     "@graphprotocol/graph-cli": "0.98.1",
