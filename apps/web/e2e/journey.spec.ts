@@ -857,7 +857,7 @@ test.describe('judge journey on Mezo testnet', () => {
         timeout: 60_000,
       })
     await pause(page, 1_500)
-    await showcase(page, page.getByRole('region', { name: 'Keeper' }), 3_000)
+    await showcase(page, page.getByRole('region', { name: 'Keeper', exact: true }), 3_000)
     await smoothScroll(page)
     await finishStage()
     await photograph(browser, 'evidence', '/evidence', async (page) => {
