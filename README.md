@@ -100,7 +100,7 @@ Mezo's precompiles (Skip BTC/USD, BTC, MEZO) run inside the Go node, so they han
 | `apps/web/` | Vite + React app: Borrow, Save, Lend, Liquidate, Risk, Fees, Evidence; Playwright e2e in `e2e/` |
 | `apps/keeper/` | Keeper on Railway: allocator upkeep, liquidation scan, fee distribution; `/status` endpoint |
 | `packages/sdk/` | `@baserate/sdk`: chains, ABIs generated from the contracts, Morpho math, MUSD permit |
-| `packages/subgraph/` | `@baserate/subgraph`: The Graph subgraph (Goldsky, `mezo-testnet`) for accounts, M1 positions and liquidations, vault flows, allocator moves, backstop exits and fee distributions |
+| `packages/subgraph/` | `@baserate/subgraph`: The Graph subgraph (Goldsky, `mezo-testnet`) for accounts, M1 positions and liquidations, vault flows, allocator moves, backstop exits and fee distributions. Live at [`…/baserate-mezo-testnet/prod/gn`](https://api.goldsky.com/api/public/project_clts5z9ypl0nf01uv385l1oui/subgraphs/baserate-mezo-testnet/prod/gn) |
 | `docs/` | Plan, design specs, research, security, judge guide |
 
 ## Credits and prior art

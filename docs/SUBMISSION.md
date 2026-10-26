@@ -50,7 +50,7 @@ BTC holders on Mezo who want dollars without selling BTC and without redemption 
 Solidity 0.8.28, Foundry, OpenZeppelin v5, Morpho Blue + AdaptiveCurveIrm, Morpho Vault V2, Pyth, Mezo Skip precompile, Tigris pools and gauges; React 19, Vite, wagmi 2, viem 2, RainbowKit, TanStack Router and Query, Tailwind 4, Playwright; Node keeper on Railway; Vercel; Sourcify.
 
 ## Future milestones
-1. Wave 2 (by Nov 15, 2026): credit lines with an x402 agent, come-back flow for redeemed borrowers, subgraph, SDK on npm; mainnet proof deployment with caps ≤2,000 MUSD.
+1. Wave 2 (by Nov 15, 2026): credit lines with an x402 agent, come-back flow for redeemed borrowers, SDK on npm; mainnet proof deployment with caps ≤2,000 MUSD.
 2. Dec 2026: third-party audit; ask Mezo for a vMUSD vault gauge and the Morpho fee switch on M1 paid to sMUSD.
 3. Q1 2027: grow caps with measured liquidation depth; Base phase (MUSD-collateral USDC credit on Base Morpho).
 
