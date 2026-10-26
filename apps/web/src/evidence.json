@@ -4,6 +4,222 @@
     {
       "chainId": 31611,
       "area": "core",
+      "kind": "deploy-oracle",
+      "tx": "0xc140f98329bbe57439c6375cb2c1f98d18bcb3010892c74f2dc344610396b992",
+      "block": 16380359,
+      "summary": "BtcMusdOracle v2 deployed: Skip BTC/USD (≤60 s), a Pyth ±10% band that only gates while Pyth is under 10 minutes old, and the MUSD leg clamped to $1.00–1.02.",
+      "proves": "The audited oracle (round-2 fix R2X-2: a stalled Pyth can no longer freeze liquidations for an hour) prices the new market."
+    },
+    {
+      "chainId": 31611,
+      "area": "core",
+      "kind": "wsmusd-seed",
+      "tx": "0x8f7fa2e05feaeef8eb2e16504d23823e67daa8962478bf81409d69f77f135225",
+      "block": 16380363,
+      "summary": "wsMUSD v2 seeded with 1 MUSD of dead shares, deposited into the real sMUSD.",
+      "proves": "The ERC-4626 wrapper composes with Mezo’s live sMUSD; vesting has no instant part, so its share price never falls (round-1 B-3)."
+    },
+    {
+      "chainId": 31611,
+      "area": "core",
+      "kind": "deploy",
+      "tx": "0x4d9d5a218fcc19c881bfef77011871aa77dfd6842c19d95b91c19c870db534a5",
+      "block": 16380364,
+      "summary": "BorrowAccountFactory v2 deployed with the bcBTC receipt and the BorrowAccount implementation in one transaction.",
+      "proves": "The audited core (top-ups never capped, stale timelock raises invalidated, timelocked canary grants) fits Mezo’s 10M block gas limit."
+    },
+    {
+      "chainId": 31611,
+      "area": "core",
+      "kind": "create-market",
+      "tx": "0xb6f354953c43a957fc342c28b46cc0a6478c45a526f52945f85968b969dcdd2d",
+      "block": 16380365,
+      "summary": "Market M1 v2 created on Mezo’s official testnet Morpho Blue: MUSD loan, bcBTC collateral, BtcMusdOracle v2, AdaptiveCurveIrm, LLTV 0.77.",
+      "proves": "The redemption-free BTC→MUSD market is recreated permissionlessly on Mezo’s own Morpho for the audited contracts."
+    },
+    {
+      "chainId": 31611,
+      "area": "core",
+      "kind": "supply",
+      "tx": "0x29d883635a6e485f9ea5c358c1c6142dfab07607e57bf6ca2f9f03bf4d815fae",
+      "block": 16364342,
+      "summary": "Team supplied MUSD liquidity to M1 v2.",
+      "proves": "Borrowers can draw MUSD from the new market from its first block."
+    },
+    {
+      "chainId": 31611,
+      "area": "core",
+      "kind": "canary-grant-submit",
+      "tx": "0x3ab449962fe9c2f07bb4bbff210d52719e6bc015936e7dc8f0da54cfdda38648",
+      "block": 16380369,
+      "summary": "Governor queued setCanaryOperator for the keeper’s canary key behind the factory’s 48-hour timelock.",
+      "proves": "Granting a canary operator is a timelocked raise since round-1 fix D-7; anyone executes it once due, and the keeper does."
+    },
+    {
+      "chainId": 31611,
+      "area": "lend",
+      "kind": "create-vmusd",
+      "tx": "0xcc1e00cc6f5dc8bb83532c5d8099073afac6938b842375c481ef1a077caa3354",
+      "block": 16380419,
+      "summary": "vMUSD v2 created through Mezo’s own VaultV2Factory (Morpho Vault V2, MUSD asset).",
+      "proves": "The lending vault is a stock Morpho Vault V2 from Mezo’s factory, configured by the audited deploy script."
+    },
+    {
+      "chainId": 31611,
+      "area": "lend",
+      "kind": "deploy-ws-adapter",
+      "tx": "0x4d0582a5f721f219195dd1dd95c1b3540970968dac61ea838a296c0a6def4dde",
+      "block": 16380425,
+      "summary": "WsMusdLiquidityAdapter v2 deployed: parks idle vault MUSD in wsMUSD and refuses free force-deallocation (round-2 R2X-4).",
+      "proves": "Nobody can strip vMUSD’s share of wsMUSD yield by force-deallocating it for free."
+    },
+    {
+      "chainId": 31611,
+      "area": "lend",
+      "kind": "deploy-allocator",
+      "tx": "0xaadbc9bf7bfea77ada6703cff3a9747ab5968b2b104f60119bdc7fd020afe827",
+      "block": 16380426,
+      "summary": "BaserateAllocator v2 deployed: owner-less, trailing-APY decisions with a same-block guard, one buffer top-up per block, idle parked during the cooldown.",
+      "proves": "Round-1 B-1 and round-2 R2V-3/R2X-3 fixes are live: same-block state can no longer steer the vault."
+    },
+    {
+      "chainId": 31611,
+      "area": "lend",
+      "kind": "vmusd-seed",
+      "tx": "0x432d388f6d1c49b133f19ea13da3eaaed4a5c5473a53414a24c235e9de566796",
+      "block": 16380437,
+      "summary": "vMUSD v2 seeded with 100 MUSD of dead shares, allocated straight into wsMUSD.",
+      "proves": "The vault is protected against first-depositor inflation from its first block."
+    },
+    {
+      "chainId": 31611,
+      "area": "liquidations",
+      "kind": "deploy-backstop",
+      "tx": "0x4831d3e68e15bb0f3272741c76f154fc07dadda19c852214029f377fadbf3043",
+      "block": 16380382,
+      "summary": "Backstop v2 (bMUSD) deployed: deposits close while it holds BTC, exits pay partially or in kind, dust never ties exits to the oracle.",
+      "proves": "Round-1 C-1/C-3 and round-2 R2V-1/R2V-7 fixes are live: no buying in below a sale, no frozen exits."
+    },
+    {
+      "chainId": 31611,
+      "area": "liquidations",
+      "kind": "backstop-seed",
+      "tx": "0xabaf94afed8da635f15523cebcaf747b21c09efc23adb37c1a38998a18b9565c",
+      "block": 16380385,
+      "summary": "Backstop v2 seeded with 1 MUSD of dead shares (mandatory since round-2 R2V-2).",
+      "proves": "Gross-priced deposits can’t be skewed by a donation into an empty backstop."
+    },
+    {
+      "chainId": 31611,
+      "area": "liquidations",
+      "kind": "deploy-flash-liquidator",
+      "tx": "0x1d17ce96e2a05cf510ea1775e6d9bf3aa5da0a9d473879abca4780b9e6b5fb0f",
+      "block": 16380383,
+      "summary": "FlashLiquidator v2 deployed, bound to M1 v2 and the backstop, forwarding only each liquidation’s own proceeds (round-1 C-2).",
+      "proves": "Zero-capital liquidations for the new market; a 1-wei donation can’t brick contract liquidators."
+    },
+    {
+      "chainId": 31611,
+      "area": "fees",
+      "kind": "deploy-fee-router",
+      "tx": "0x260e28615a8da83c392ae3d313508c300ed0c62ebc8ef343a44038a829504cd9",
+      "block": 16380398,
+      "summary": "FeeRouter v2 deployed: an ownerless 40/40/20 splitter that survives an sMUSD failure and carries bribes it can’t post (round-1 D-2/D-3).",
+      "proves": "Fees reach sMUSD holders, veBTC voters and the treasury without any admin, even if sMUSD changes."
+    },
+    {
+      "chainId": 31611,
+      "area": "risk",
+      "kind": "deploy-risk-lens",
+      "tx": "0xfc02fa2bd17b9e8a61a4ee9a1a0127b59f3479ef836c4e7d3e725718eff581dd",
+      "block": 16380399,
+      "summary": "RiskLens v2 deployed: one eth_call for oracle, market, caps, backstop solvency (available cash), liquidation depth and the redemption queue.",
+      "proves": "The risk dashboard reads the audited contracts; reserved exit cash is no longer counted as free (round-1 D-5)."
+    },
+    {
+      "chainId": 31611,
+      "area": "lend",
+      "kind": "vmusd-sentinel",
+      "tx": "0xb2d6e38868ce6cfe7238f594018bcaed262b6d867fa2791d39aec9ad3fe2f682",
+      "block": 16380499,
+      "summary": "vMUSD v2 made the keeper’s sentinel key a sentinel: it can only cut allocations and caps, never raise them.",
+      "proves": "Emergency de-risking runs unattended without giving the keeper any power to move lenders’ money into new risk."
+    },
+    {
+      "chainId": 31611,
+      "area": "lend",
+      "kind": "vmusd-deposit",
+      "tx": "0x75deb40f3d7fbb14704ef3674c7e1b5ce0b4a066d201a8d2cf6536ed734e1519",
+      "block": 16380504,
+      "summary": "Team deposited 3,000 MUSD into vMUSD v2; the liquidity adapter parked it in wsMUSD in the same transaction.",
+      "proves": "The audited vault takes deposits and earns at least the wsMUSD rate before the allocator lends any of it to M1."
+    },
+    {
+      "chainId": 31611,
+      "area": "fees",
+      "kind": "fee-switch-submit",
+      "tx": "0x12b3245a344a595fd223ced435e7b51e883266feed59b4dd6a764e1b653d86f9",
+      "block": 16380500,
+      "summary": "Governor queued the fee switch: once the 48-hour timelock passes, origination fees go to FeeRouter v2.",
+      "proves": "Sending fees to sMUSD holders, veBTC voters and the treasury is a timelocked change anyone can execute once due."
+    },
+    {
+      "chainId": 31611,
+      "area": "keeper",
+      "kind": "v2-rebalance",
+      "tx": "0xd72f5453e0c5dacaeac45f7ce6aefd0551bf878b8d885b875408448850ef71f4",
+      "block": 16380602,
+      "summary": "Keeper’s first rebalance on vMUSD v2: moved a 1,000 MUSD buffer into M1 v2 so borrowers can draw from the vault.",
+      "proves": "The owner-less allocator runs on the audited vault from the keeper’s first pass, with no team transaction."
+    },
+    {
+      "chainId": 31611,
+      "area": "keeper",
+      "kind": "liquidate",
+      "tx": "0x44fc007ad4cfca3c8d2bd6d2c1c721d3a9ca54f75f5d68aadc96e3b935a6f43a",
+      "block": 16375908,
+      "summary": "Keeper liquidated its own canary at 77.26% LTV through the FlashLiquidator at 06:38 UTC, unattended (v1 stack).",
+      "proves": "Liquidations run on their own: the keeper found the underwater position, sized gas for Mezo and closed it with zero capital."
+    },
+    {
+      "chainId": 31611,
+      "area": "keeper",
+      "kind": "canary-rearm",
+      "tx": "0xe0e6c572e5cc9d923009f57bdf50b7d010cd5e5a4b6b21b2ee9674d5108f42ca",
+      "block": 16375962,
+      "summary": "Keeper re-armed the canary 4 minutes after its liquidation, borrowing again against the collateral left in it (v1 stack).",
+      "proves": "The canary loop sustains itself: open near the line, drift, get liquidated, reopen. A live liquidation test every cycle."
+    },
+    {
+      "chainId": 31611,
+      "area": "keeper",
+      "kind": "canary-open",
+      "tx": "0xffe1b23e021e7c61141cf283c8a07c6ef00e9e8333f35b90b916c774cf99ad7e",
+      "block": 16369043,
+      "summary": "Keeper opened its own canary at ~76.75% LTV with the canary operator grant (v1 stack).",
+      "proves": "A dedicated, permissioned canary profile lets the keeper keep a real position just under the liquidation line."
+    },
+    {
+      "chainId": 31611,
+      "area": "v1",
+      "kind": "first-liquidation",
+      "tx": "0x61cd894541a3c40d22a3c88800216af1f3363cd65551e3b2eeaab4e32f5cae3c",
+      "block": 16368400,
+      "summary": "First liquidation on the v1 stack: the team canary liquidated through the FlashLiquidator with zero capital (749k gas).",
+      "proves": "Zero-capital liquidation works on Mezo’s Morpho. Mezo estimated 477k gas; the keeper now sends 2× with a 2M floor (finding K-1)."
+    },
+    {
+      "chainId": 31611,
+      "area": "v1",
+      "kind": "keeper-canary-close",
+      "tx": "0x14e88b9fe3e0f4eb4e68ed0a141d617c8d59d3ae31ef9ee12c73d277f546ed53",
+      "block": 16380624,
+      "summary": "Keeper’s v1 canary repaid and closed with one repayAndWithdraw when the keeper moved to the v2 stack.",
+      "proves": "The v1 deployment was retired cleanly: no open keeper position was left behind on the pre-audit contracts."
+    },
+    {
+      "chainId": 31611,
+      "area": "v1",
       "kind": "wsmusd-deposit",
       "tx": "0x947d865b889a996660a6f5f552de38dc8e061093d9b230ef05f0d0d05e730be4",
       "block": 16364336,
@@ -12,7 +228,7 @@
     },
     {
       "chainId": 31611,
-      "area": "core",
+      "area": "v1",
       "kind": "deploy",
       "tx": "0xea4778fcafea34da033cd061501f2e2df28c1197fc1d65933dff91171b3b24f4",
       "block": 16364338,
@@ -21,7 +237,7 @@
     },
     {
       "chainId": 31611,
-      "area": "core",
+      "area": "v1",
       "kind": "create-market",
       "tx": "0x4810d36183cda01097e07258b1b692477ae07ff1449a7abdac134fab03172da5",
       "block": 16364340,
@@ -30,16 +246,7 @@
     },
     {
       "chainId": 31611,
-      "area": "core",
-      "kind": "supply",
-      "tx": "0x29d883635a6e485f9ea5c358c1c6142dfab07607e57bf6ca2f9f03bf4d815fae",
-      "block": 16364342,
-      "summary": "Team supplied 3,000 MUSD of liquidity to M1.",
-      "proves": "Judges can borrow immediately; vMUSD now tops this liquidity up through its allocator."
-    },
-    {
-      "chainId": 31611,
-      "area": "core",
+      "area": "v1",
       "kind": "borrow",
       "tx": "0x4b25c6e57ebec23866fdba5f020bd2d1cb40a745f2c07cb83892ccbafaefa5f6",
       "block": 16364355,
@@ -48,7 +255,7 @@
     },
     {
       "chainId": 31611,
-      "area": "core",
+      "area": "v1",
       "kind": "repay-exit",
       "tx": "0x98996d663b29140990502713f1bfb582ae3ceac7fe444dfa0d5ea458ec5adae1",
       "block": 16364364,
@@ -57,7 +264,7 @@
     },
     {
       "chainId": 31611,
-      "area": "judge-journey",
+      "area": "v1",
       "kind": "dispenser-claim",
       "tx": "0x5175013c14b9fc6bc27ffa348e0b3db02e1b7ba430bcfe753a41fc9028195563",
       "block": 16365846,
@@ -66,7 +273,7 @@
     },
     {
       "chainId": 31611,
-      "area": "judge-journey",
+      "area": "v1",
       "kind": "wsmusd-permit-deposit",
       "tx": "0x64c55972abc591db6bfb989a3196c7ebcaba39c51aa538c4a1794d20bf6ccc7c",
       "block": 16365852,
@@ -75,7 +282,7 @@
     },
     {
       "chainId": 31611,
-      "area": "judge-journey",
+      "area": "v1",
       "kind": "wsmusd-redeem-in-kind",
       "tx": "0xe576fe1bb519ae321fa33e23320c860485a127ea408c9da1b5b10687eb189a7b",
       "block": 16365865,
@@ -84,7 +291,7 @@
     },
     {
       "chainId": 31611,
-      "area": "judge-journey",
+      "area": "v1",
       "kind": "permit-repay-exit",
       "tx": "0xe12a69726cbedd83437e48df9fc862326ffc298ae24930567ed7377105e06e26",
       "block": 16365875,
@@ -93,7 +300,7 @@
     },
     {
       "chainId": 31611,
-      "area": "lend",
+      "area": "v1",
       "kind": "create-vmusd",
       "tx": "0x37d5279dd0501dfbac52cb7cf931d151c276c6aaae2023ebe5111b433ed9deef",
       "block": 16366237,
@@ -102,7 +309,7 @@
     },
     {
       "chainId": 31611,
-      "area": "lend",
+      "area": "v1",
       "kind": "deploy-ws-adapter",
       "tx": "0xf9a7c7ff104888333c701f3fed71311cdc753e66a2eded5c7039894433861e41",
       "block": 16366246,
@@ -111,7 +318,7 @@
     },
     {
       "chainId": 31611,
-      "area": "lend",
+      "area": "v1",
       "kind": "deploy-allocator",
       "tx": "0x0a1dc51cb3813d28ba2a8267193b4989cd79e4fa31ae3a8102699f92642e562f",
       "block": 16366247,
@@ -120,7 +327,7 @@
     },
     {
       "chainId": 31611,
-      "area": "lend",
+      "area": "v1",
       "kind": "vmusd-seed",
       "tx": "0x24fbb3429fa97ab42891dcbeb6b2cfdc267efd661011b5c800b1fe322195d95e",
       "block": 16366262,
@@ -129,7 +336,7 @@
     },
     {
       "chainId": 31611,
-      "area": "lend",
+      "area": "v1",
       "kind": "vmusd-timelocks",
       "tx": "0x3d1674b23d43baca1b74693faad9361eadc4d82666e97d97c94e9c24294b073d",
       "block": 16366263,
@@ -138,7 +345,7 @@
     },
     {
       "chainId": 31611,
-      "area": "lend",
+      "area": "v1",
       "kind": "vmusd-deposit",
       "tx": "0xd89c582ec4b6d30aba3cc556c07cb5bbd46ef9a2bb78034eb434b7f1d1568ddb",
       "block": 16366279,
@@ -147,7 +354,7 @@
     },
     {
       "chainId": 31611,
-      "area": "lend",
+      "area": "v1",
       "kind": "vmusd-rebalance",
       "tx": "0x46cb78974ec1c5d8471a02b37604d9b75e0d6abad903cdc27fbdbedaf428aa4d",
       "block": 16366283,
@@ -156,7 +363,7 @@
     },
     {
       "chainId": 31611,
-      "area": "liquidations",
+      "area": "v1",
       "kind": "deploy-backstop",
       "tx": "0xf960a3ee1d0710bf59caf2a845e03963bde5190568cd22a27f9b30b7e29c0746",
       "block": 16365855,
@@ -165,7 +372,7 @@
     },
     {
       "chainId": 31611,
-      "area": "liquidations",
+      "area": "v1",
       "kind": "deploy-flash-liquidator",
       "tx": "0x0c31794424f9897d99895b405d8b70056e4af43389e7830b1bfc7c4f6ada317c",
       "block": 16365856,
@@ -174,7 +381,7 @@
     },
     {
       "chainId": 31611,
-      "area": "liquidations",
+      "area": "v1",
       "kind": "backstop-seed",
       "tx": "0x1c13a1feb9fbb3a7c85d4761d7492594725b3de268be5ef286944429583c0bc3",
       "block": 16365858,
@@ -183,7 +390,7 @@
     },
     {
       "chainId": 31611,
-      "area": "liquidations",
+      "area": "v1",
       "kind": "canary-open",
       "tx": "0x3b4bf6885e6d708fcba59ba8b3469e52ab5375f3887e7e3b2ee18d20f8cd1a34",
       "block": 16365903,
@@ -192,7 +399,7 @@
     },
     {
       "chainId": 31611,
-      "area": "fees",
+      "area": "v1",
       "kind": "deploy-fee-router",
       "tx": "0x212946af67ad29cc5853b296da13532972ecf9baef5335a1f8addb6a98c1e7dd",
       "block": 16365872,
@@ -201,7 +408,7 @@
     },
     {
       "chainId": 31611,
-      "area": "fees",
+      "area": "v1",
       "kind": "fee-switch-submit",
       "tx": "0xeedbd310e90a95d9c3d6ecf6223c26b870b53d8ca33f7cb347e21b960fc37575",
       "block": 16365880,
@@ -210,7 +417,7 @@
     },
     {
       "chainId": 31611,
-      "area": "fees",
+      "area": "v1",
       "kind": "fee-distribution",
       "tx": "0x76fe18e5b6df88d0e7c081d9387882788941691a19a91a1f6c0dcf5b5f8b130a",
       "block": 16365890,
@@ -219,7 +426,7 @@
     },
     {
       "chainId": 31611,
-      "area": "risk",
+      "area": "v1",
       "kind": "deploy-risk-lens",
       "tx": "0xe8831351cb771ce905e91dfe494a98f8224c99de3aefe7861fbb6faf914c385c",
       "block": 16365873,
