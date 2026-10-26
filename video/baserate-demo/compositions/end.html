@@ -1,15 +1,28 @@
 <template>
   <style>
     @font-face {
-      font-family: "Iowan";
-      src: local("IowanOldStyle-Roman"), local("Iowan Old Style Roman"), local("Iowan Old Style");
+      font-family: "Bodoni Moda";
+      src: url("assets/fonts/bodoni-moda-latin-opsz-normal.woff2") format("woff2");
+      font-weight: 400 900;
+      font-style: normal;
+    }
+    @font-face {
+      font-family: "Bodoni Moda";
+      src: url("assets/fonts/bodoni-moda-latin-opsz-italic.woff2") format("woff2");
+      font-weight: 400 900;
+      font-style: italic;
+    }
+    @font-face {
+      font-family: "Public Sans";
+      src: url("assets/fonts/public-sans-latin-wght-normal.woff2") format("woff2");
+      font-weight: 100 900;
     }
     #root {
       position: absolute;
       inset: 0;
-      background: #f6f5f1;
-      color: #14181d;
-      font-family: "Inter", sans-serif;
+      background: #0C1512;
+      color: #F2EEE3;
+      font-family: "Public Sans", sans-serif;
     }
     #end-stage {
       position: absolute;
@@ -30,13 +43,15 @@
       display: block;
     }
     #end-wordmark {
-      font-family: "Iowan", serif;
+      font-family: "Bodoni Moda", serif;
+      font-variation-settings: "opsz" 40;
       font-size: 150px;
       line-height: 1;
       letter-spacing: -0.02em;
     }
     #end-tagline {
-      font-family: "Iowan", serif;
+      font-family: "Bodoni Moda", serif;
+      font-variation-settings: "opsz" 28;
       font-size: 64px;
       margin-top: 76px;
     }
@@ -45,11 +60,11 @@
     }
     #end-url {
       font-size: 38px;
-      color: #565d68;
+      color: #A7B3AC;
       margin-top: 36px;
     }
     #end-url b {
-      color: #0b6e5f;
+      color: #7FB8A6;
       font-weight: 700;
     }
   </style>
@@ -57,13 +72,13 @@
     <div id="end-stage" class="clip" data-start="0" data-duration="6" data-track-index="1">
       <div id="end-lockup">
         <svg id="end-mark" viewBox="0 0 32 32" aria-hidden="true">
-          <rect id="end-mark-fill" width="32" height="32" rx="9" fill="#0b6e5f" />
-          <path id="end-mark-base" d="M8 23h16" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" />
+          <rect id="end-mark-fill" width="32" height="32" rx="9" fill="#F2EEE3" />
+          <path id="end-mark-base" d="M8 23h16" stroke="#0C1512" stroke-width="2.6" stroke-linecap="round" />
           <path
             id="end-mark-rate"
             d="M8 18.5h6.2l3.6-5h6.2"
             fill="none"
-            stroke="#ffffff"
+            stroke="#0C1512"
             stroke-width="2.6"
             stroke-linecap="round"
             stroke-linejoin="round"
@@ -85,7 +100,7 @@
     tl.fromTo("#end-mark-base", { strokeDasharray: 16, strokeDashoffset: 16 }, { strokeDashoffset: 0, duration: 0.3, ease: "power2.out" }, 0.4);
     tl.fromTo("#end-mark-rate", { strokeDasharray: 19, strokeDashoffset: 19 }, { strokeDashoffset: 0, duration: 0.45, ease: "power2.inOut" }, 0.55);
     tl.fromTo("#end-wordmark", { clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0% 0 0)", duration: 0.5, ease: "power3.out" }, 0.75);
-    tl.fromTo("#end-tagline .word", { color: "#e3e0d7" }, { color: (i, el) => (el.id === "end-market" ? "#0b6e5f" : "#14181d"), duration: 0.12, stagger: 0.09 }, 1.5);
+    tl.fromTo("#end-tagline .word", { color: "#22332C" }, { color: (i, el) => (el.id === "end-market" ? "#7FB8A6" : "#F2EEE3"), duration: 0.12, stagger: 0.09 }, 1.5);
     tl.fromTo("#end-url", { opacity: 0, filter: "blur(6px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.2, ease: "power4.out" }, 2.6);
     window.__timelines["end"] = tl;
   </script>

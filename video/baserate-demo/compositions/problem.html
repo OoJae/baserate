@@ -1,15 +1,28 @@
 <template>
   <style>
     @font-face {
-      font-family: "Iowan";
-      src: local("IowanOldStyle-Roman"), local("Iowan Old Style Roman"), local("Iowan Old Style");
+      font-family: "Bodoni Moda";
+      src: url("assets/fonts/bodoni-moda-latin-opsz-normal.woff2") format("woff2");
+      font-weight: 400 900;
+      font-style: normal;
+    }
+    @font-face {
+      font-family: "Bodoni Moda";
+      src: url("assets/fonts/bodoni-moda-latin-opsz-italic.woff2") format("woff2");
+      font-weight: 400 900;
+      font-style: italic;
+    }
+    @font-face {
+      font-family: "Public Sans";
+      src: url("assets/fonts/public-sans-latin-wght-normal.woff2") format("woff2");
+      font-weight: 100 900;
     }
     #root {
       position: absolute;
       inset: 0;
-      background: #f6f5f1;
-      color: #14181d;
-      font-family: "Inter", sans-serif;
+      background: #0C1512;
+      color: #F2EEE3;
+      font-family: "Public Sans", sans-serif;
     }
     #root .stage {
       position: absolute;
@@ -24,10 +37,11 @@
     #root .label {
       font-size: 42px;
       line-height: 1.2;
-      color: #565d68;
+      color: #A7B3AC;
     }
     #root .num {
-      font-family: "Iowan", serif;
+      font-family: "Bodoni Moda", serif;
+      font-variation-settings: "opsz" 30;
       font-size: 440px;
       line-height: 0.95;
       letter-spacing: -0.02em;
@@ -37,10 +51,10 @@
       gap: 28px;
     }
     #root .unit {
-      font-family: "Inter", sans-serif;
+      font-family: "Public Sans", sans-serif;
       font-size: 84px;
       letter-spacing: 0;
-      color: #565d68;
+      color: #A7B3AC;
     }
     #root .sub {
       font-size: 42px;
@@ -50,12 +64,19 @@
     #root .word {
       display: inline-block;
     }
+    #problem-flood {
+      position: absolute;
+      inset: 0;
+      background: #F2EEE3;
+      opacity: 0;
+      z-index: 5;
+    }
     #problem-source {
       position: absolute;
       left: 192px;
       bottom: 108px;
       font-size: 28px;
-      color: #676e78;
+      color: #8B9891;
     }
   </style>
   <div id="root" data-composition-id="problem" data-width="1920" data-height="1080">
@@ -82,6 +103,7 @@
       <p id="problem-morpho-num" class="num">0<span class="unit">MUSD</span></p>
       <p id="problem-morpho-sub" class="sub">Nothing lends MUSD on Mezo today.</p>
     </div>
+    <div id="problem-flood"></div>
     <p id="problem-source" class="clip" data-start="0" data-duration="18" data-track-index="2">
       Mezo mainnet, on-chain reads, 23–24 Oct 2026
     </p>
@@ -101,7 +123,7 @@
     tl.eventCallback("onUpdate", () => {
       trovesEl.textContent = String(Math.round(troves.n));
     });
-    tl.fromTo("#problem-troves-count", { color: "#14181d" }, { color: "#b42318", duration: 0.3 }, 4.9);
+    tl.fromTo("#problem-troves-count", { color: "#F2EEE3" }, { color: "#C9533D", duration: 0.3 }, 4.9);
     tl.fromTo("#problem-troves-sub", { opacity: 0, filter: "blur(6px)" }, { ...blurIn, duration: 0.2 }, 5.2);
     out("#problem-troves .label, #problem-troves .num, #problem-troves .sub", 6.55);
 
@@ -110,8 +132,8 @@
     tl.fromTo("#problem-price-num", { opacity: 0, filter: "blur(10px)" }, { ...blurIn, duration: 0.2 }, 6.85);
     tl.fromTo(
       "#problem-price-sub .word",
-      { color: "#cfcbc0" },
-      { color: "#14181d", duration: 0.12, stagger: 0.08 },
+      { color: "#2E3D37" },
+      { color: "#F2EEE3", duration: 0.12, stagger: 0.08 },
       7.6,
     );
     out("#problem-price .label, #problem-price .num, #problem-price .sub", 9.75);
@@ -129,6 +151,8 @@
     tl.fromTo("#problem-source", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 0.6);
     out("#problem-morpho .label, #problem-morpho .num, #problem-morpho .sub, #problem-source", 17.7);
 
+    // Colour flood: the Intaglio ground turns to paper as the app footage takes over.
+    tl.fromTo("#problem-flood", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power2.inOut" }, 17.55);
     window.__timelines["problem"] = tl;
   </script>
 </template>

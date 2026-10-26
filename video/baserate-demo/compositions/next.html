@@ -1,15 +1,28 @@
 <template>
   <style>
     @font-face {
-      font-family: "Iowan";
-      src: local("IowanOldStyle-Roman"), local("Iowan Old Style Roman"), local("Iowan Old Style");
+      font-family: "Bodoni Moda";
+      src: url("assets/fonts/bodoni-moda-latin-opsz-normal.woff2") format("woff2");
+      font-weight: 400 900;
+      font-style: normal;
+    }
+    @font-face {
+      font-family: "Bodoni Moda";
+      src: url("assets/fonts/bodoni-moda-latin-opsz-italic.woff2") format("woff2");
+      font-weight: 400 900;
+      font-style: italic;
+    }
+    @font-face {
+      font-family: "Public Sans";
+      src: url("assets/fonts/public-sans-latin-wght-normal.woff2") format("woff2");
+      font-weight: 100 900;
     }
     #root {
       position: absolute;
       inset: 0;
-      background: #f6f5f1;
-      color: #14181d;
-      font-family: "Inter", sans-serif;
+      background: #0C1512;
+      color: #F2EEE3;
+      font-family: "Public Sans", sans-serif;
     }
     #next-stage {
       position: absolute;
@@ -23,25 +36,33 @@
     }
     #next-label {
       font-size: 42px;
-      color: #565d68;
+      color: #A7B3AC;
       margin-bottom: 44px;
     }
+    #next-flood {
+      position: absolute;
+      inset: 0;
+      background: #F2EEE3;
+      z-index: 5;
+    }
     #root .line {
-      font-family: "Iowan", serif;
+      font-family: "Bodoni Moda", serif;
+      font-variation-settings: "opsz" 28;
       font-size: 92px;
       line-height: 1.15;
       letter-spacing: -0.015em;
       padding: 10px 0;
-      border-top: 1px solid #e3e0d7;
+      border-top: 1px solid #22332C;
     }
     #root .word {
       display: inline-block;
     }
     #root .accent {
-      color: #0b6e5f;
+      color: #7FB8A6;
     }
   </style>
   <div id="root" data-composition-id="next" data-width="1920" data-height="1080">
+    <div id="next-flood"></div>
     <div id="next-stage" class="clip" data-start="0" data-duration="7" data-track-index="1">
       <p id="next-label">Next</p>
       <p id="next-credit" class="line">
@@ -60,6 +81,8 @@
   </div>
   <script>
     const tl = gsap.timeline({ paused: true });
+    // Colour flood: the paper of the last footage gives way to the Intaglio ground.
+    tl.fromTo("#next-flood", { opacity: 1 }, { opacity: 0, duration: 0.4, ease: "power2.inOut" }, 0);
     tl.fromTo("#next-label", { opacity: 0, filter: "blur(8px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.2, ease: "power4.out" }, 0.1);
     // Each line prints word by word (light grey to ink) on the words the voice says.
     const lines = [
@@ -68,8 +91,8 @@
       ["#next-mainnet", 4.4],
     ];
     for (const [sel, at] of lines) {
-      tl.fromTo(`${sel}`, { borderTopColor: "rgba(227,224,215,0)" }, { borderTopColor: "rgba(227,224,215,1)", duration: 0.3 }, at - 0.1);
-      tl.fromTo(`${sel} .word`, { color: "#e3e0d7" }, { color: (i, el) => (el.classList.contains("accent") ? "#0b6e5f" : "#14181d"), duration: 0.12, stagger: 0.08 }, at);
+      tl.fromTo(`${sel}`, { borderTopColor: "rgba(34,51,44,0)" }, { borderTopColor: "rgba(34,51,44,1)", duration: 0.3 }, at - 0.1);
+      tl.fromTo(`${sel} .word`, { color: "#22332C" }, { color: (i, el) => (el.classList.contains("accent") ? "#7FB8A6" : "#F2EEE3"), duration: 0.12, stagger: 0.08 }, at);
     }
     tl.to("#next-stage > *", { opacity: 0, filter: "blur(8px)", duration: 0.2, ease: "power3.in" }, 6.75);
     window.__timelines["next"] = tl;
