@@ -13,31 +13,31 @@ Four independent reviewers each took one area, working from the code, the spec (
 | C · liquidations | FlashLiquidator, Backstop, TigrisVenues | `LiquidationAudit.t.sol` |
 | D · fees, lens, governance | FeeRouter, RiskLens, deploy scripts, roles and timelocks | `FeesGovAudit.t.sol` |
 
-No Critical or High findings. Status: **Open** (confirmed, fix in progress) → **Fixed** (code changed, regression test passing) → **Deployed** (live on testnet). Round-1 fixes landed in commit `af6eace`; each PoC became a `test_fix_*` regression test in the same file.
+No Critical or High findings. Status: **Open** (confirmed, fix in progress) → **Fixed** (code changed, regression test passing) → **Deployed** (live on testnet). Round-1 fixes landed in commit `af6eace`; each PoC became a `test_fix_*` regression test in the same file. Round-1 and round-2 fixes went live together in the v2 testnet stack on 26 Oct (`b4fb980`), all 14 contracts verified on Sourcify.
 
 | ID | Severity | Title | Location | Status |
 |---|---|---|---|---|
-| A-1 / D-1 | Medium | The position cap blocks BTC top-ups, and a cap or ceiling cut blocks top-ups and partial withdrawals | `BorrowAccount.sol` `_supply`, `_withdrawAndUnwrap` | Fixed |
-| B-1 | Medium | Same-block state lets anyone invert the allocator's move and pull M1 below its buffer for free | `BaserateAllocator.sol` `rebalance`, `_snapshot` | Fixed |
-| B-2 | Medium | vMUSD has no in-kind escape: a broken sMUSD `withdraw` freezes its wsMUSD position and the penalty-free exit out of M1 | `WsMusdLiquidityAdapter.sol`, `BaserateAllocator.sol` | Fixed |
-| C-1 | Medium | Backstop deposits are priced without unvested gains, so late depositors capture realised liquidation premiums | `Backstop.sol` deposit/mint, `_checkpoint` | Partially fixed: deposits made after a sale now pay for unvested gains; a deposit between a purchase and its sale was still open (R2V-1) |
-| D-2 | Medium | An sMUSD change that makes the yield leg revert freezes every fee in the ownerless FeeRouter | `FeeRouter.sol` `distribute` | Fixed |
-| A-2 / D-4 | Low | Queued raises survive instant cuts and stale entries stay executable | `BorrowAccountFactory.sol` timelock | Fixed |
-| A-3 | Low | A revoked canary operator can still raise LTV to the canary ceiling by withdrawing | `BorrowAccount.sol` `_withdrawAndUnwrap` | Fixed |
-| A-4 | Low | MUSD sent or borrowed to a clone is stranded | `BorrowAccount.sol` | Fixed |
-| B-3 | Low | A failed or short sMUSD `claimYield` lowers wsMUSD's share price; previews over-promise | `WsMUSD.sol` `_sync`, `_previewSync` | Fixed |
-| C-2 | Low | 1 wei of donated BTC makes `liquidate` revert for contract callers that cannot receive BTC | `FlashLiquidator.sol` `liquidate` | Fixed |
-| C-3 | Low | Exits are all-or-nothing in cash, and dust inventory ties every exit to the oracle | `Backstop.sol` `claimRedeem`, `_payOut` | Fixed |
-| D-3 | Low | `distribute()` has no on-chain guard against the epoch's last hour | `FeeRouter.sol` | Fixed |
-| D-5 | Low | RiskLens counts the backstop's reserved exit cash as free | `RiskLens.sol` | Fixed |
-| D-7 | Low | Granting a canary operator is an instant ceiling raise | `BorrowAccountFactory.sol` `setCanaryOperator` | Fixed |
-| A-5 | Info | Pause stops new borrowing but not collateral-only positions (docs said "new positions") | docs | Fixed |
-| B-I1 | Info | A same-block sMUSD protocol-yield donation moves wsMUSD's `totalAssets` | `WsMUSD.sol`, docs | Fixed |
-| D-6 | Info | `RiskLens.snapshot` panics on an implausibly large Skip answer | `RiskLens.sol` | Fixed |
-| D-8 | Info | The trove queue counts troves below 110% that redemptions skip | `RiskLens.sol` `troveQueue` | Fixed |
-| S-1 | Low | `Deploy.s.sol` writes the registry even on a dry run | `script/Deploy.s.sol` | Fixed |
-| S-2 | Low | `DeployLiquidation.s.sol` defaults the immutable Backstop sentinel to the deployer on every chain | `script/DeployLiquidation.s.sol` | Fixed |
-| S-3 | Low | No mainnet core deploy path with a Safe governor and the FeeRouter as fee recipient | `script/` | Fixed |
+| A-1 / D-1 | Medium | The position cap blocks BTC top-ups, and a cap or ceiling cut blocks top-ups and partial withdrawals | `BorrowAccount.sol` `_supply`, `_withdrawAndUnwrap` | Deployed |
+| B-1 | Medium | Same-block state lets anyone invert the allocator's move and pull M1 below its buffer for free | `BaserateAllocator.sol` `rebalance`, `_snapshot` | Deployed |
+| B-2 | Medium | vMUSD has no in-kind escape: a broken sMUSD `withdraw` freezes its wsMUSD position and the penalty-free exit out of M1 | `WsMusdLiquidityAdapter.sol`, `BaserateAllocator.sol` | Deployed |
+| C-1 | Medium | Backstop deposits are priced without unvested gains, so late depositors capture realised liquidation premiums | `Backstop.sol` deposit/mint, `_checkpoint` | Deployed; completed in round 2 (R2V-1): deposits also close between a purchase and its sale |
+| D-2 | Medium | An sMUSD change that makes the yield leg revert freezes every fee in the ownerless FeeRouter | `FeeRouter.sol` `distribute` | Deployed |
+| A-2 / D-4 | Low | Queued raises survive instant cuts and stale entries stay executable | `BorrowAccountFactory.sol` timelock | Deployed |
+| A-3 | Low | A revoked canary operator can still raise LTV to the canary ceiling by withdrawing | `BorrowAccount.sol` `_withdrawAndUnwrap` | Deployed |
+| A-4 | Low | MUSD sent or borrowed to a clone is stranded | `BorrowAccount.sol` | Deployed |
+| B-3 | Low | A failed or short sMUSD `claimYield` lowers wsMUSD's share price; previews over-promise | `WsMUSD.sol` `_sync`, `_previewSync` | Deployed |
+| C-2 | Low | 1 wei of donated BTC makes `liquidate` revert for contract callers that cannot receive BTC | `FlashLiquidator.sol` `liquidate` | Deployed |
+| C-3 | Low | Exits are all-or-nothing in cash, and dust inventory ties every exit to the oracle | `Backstop.sol` `claimRedeem`, `_payOut` | Deployed |
+| D-3 | Low | `distribute()` has no on-chain guard against the epoch's last hour | `FeeRouter.sol` | Deployed |
+| D-5 | Low | RiskLens counts the backstop's reserved exit cash as free | `RiskLens.sol` | Deployed |
+| D-7 | Low | Granting a canary operator is an instant ceiling raise | `BorrowAccountFactory.sol` `setCanaryOperator` | Deployed |
+| A-5 | Info | Pause stops new borrowing but not collateral-only positions (docs said "new positions") | docs | Deployed |
+| B-I1 | Info | A same-block sMUSD protocol-yield donation moves wsMUSD's `totalAssets` | `WsMUSD.sol`, docs | Deployed |
+| D-6 | Info | `RiskLens.snapshot` panics on an implausibly large Skip answer | `RiskLens.sol` | Deployed |
+| D-8 | Info | The trove queue counts troves below 110% that redemptions skip | `RiskLens.sol` `troveQueue` | Deployed |
+| S-1 | Low | `Deploy.s.sol` writes the registry even on a dry run | `script/Deploy.s.sol` | Deployed |
+| S-2 | Low | `DeployLiquidation.s.sol` defaults the immutable Backstop sentinel to the deployer on every chain | `script/DeployLiquidation.s.sol` | Deployed |
+| S-3 | Low | No mainnet core deploy path with a Safe governor and the FeeRouter as fee recipient | `script/` | Deployed |
 | K-1 | Low | The keeper's liquidation gas (×1.4 of Mezo's estimate) ran out on-chain; Mezo's `eth_estimateGas` leaves out precompile cost | `apps/keeper` | Fixed and deployed: gas = max(2 × estimate, 2M). The canary was then liquidated in [0x61cd8945…](https://explorer.test.mezo.org/tx/0x61cd894541a3c40d22a3c88800216af1f3363cd65551e3b2eeaab4e32f5cae3c) (749k gas against an estimate of 477k) |
 
 Design notes the reviewers raised but did not file as findings:
@@ -65,26 +65,41 @@ Design notes the reviewers raised but did not file as findings:
 
 ## Round 2 (26 Oct 2026)
 
-Two fresh reviewers worked on the fixed code (`af6eace`): one verified every round-1 fix and hunted for regressions in the new code paths (`Round2Verify.t.sol`), the other attacked across contracts — compositions, economics, liveness, and Mezo's limits, measured (`Round2Cross.t.sol`). Every round-1 fix was confirmed except C-1, which was only partly fixed.
+Two fresh reviewers worked on the fixed code (`af6eace`): one verified every round-1 fix and hunted for regressions in the new code paths (`Round2Verify.t.sol`), the other attacked across contracts — compositions, economics, liveness, and Mezo's limits, measured (`Round2Cross.t.sol`). Every round-1 fix was confirmed except C-1, which was only partly fixed. Round-2 fixes landed in `16dbaf0` (547 non-fork and 188 fork tests passing) and are live in the v2 stack; known limitations are tested as `test_known_*` and documented.
 
 **Mezo limits, measured** (state-diff counting, reverted frames included): no on-chain flow uses more than 7 of the 20 precompile calls a transaction may make (a vAMM liquidation: 5 BTC-precompile + 2 Skip); `RiskLens.snapshot` (an `eth_call`) uses 10; the worst on-chain flow costs about 1M gas against the 10M block limit.
 
 | ID | Severity | Title | Location | Status |
 |---|---|---|---|---|
-| R2V-1 / R2X-9 | Medium | A backstop deposit placed between a liquidation buy and its sale buys in at the 0.95 mark and takes most of the mark-up | `Backstop.sol` deposit pricing | Open |
-| R2V-7 / R2X-1 | Medium | A broken sMUSD `withdraw` freezes backstop exits and the backstop liquidation venue (it pays through wsMUSD) | `Backstop.sol` `_payOut`, `_park` | Open |
-| R2X-4 | Medium | Anyone can force-deallocate vMUSD's wsMUSD position for free and strip its share of wsMUSD's vesting yield | `WsMusdLiquidityAdapter.sol`, vault config | Open |
-| R2X-2 | Medium (conditional) | With Pyth up to 65 min stale, the ±10% band can block every liquidation in a fast crash; bad debt lands on vMUSD | `BtcMusdOracle.sol` | Open |
-| R2V-3 | Low | A borrow–checkpoint–repay in one transaction blocks the allocator's move to wsMUSD for 24 h | `BaserateAllocator.sol` `_checkpoint` | Open |
-| R2X-3 | Low | Buffer top-ups can be looped within one transaction to push vMUSD into M1 against policy | `BaserateAllocator.sol` | Open |
-| R2X-6 | Medium (keeper) | Spam accounts slow the keeper's liquidation scan (two reads per account) | `apps/keeper` | Fixed: one multicall per 200 accounts |
-| R2X-7 | Low (keeper) | A 1-wei bribe made the keeper skip the epoch's fee flush | `apps/keeper` | Fixed: the keeper's own once-per-epoch record |
-| R2X-8 | Low (keeper) | One skewed block could zero the depth sample behind cap cuts | `apps/keeper` | Fixed: 24 h median, never below current borrows |
-| R2X-10 | Low (web) | The app's 1.3× gas headroom is too little for precompile-heavy transactions on Mezo | `apps/web` | Fixed: max(2 × estimate, 1.5M) |
-| R2V-2 | Info | An unseeded backstop prices deposits off a donation again | `DeployLiquidation.s.sol` | Open |
-| R2V-4 | Info | A free `accrueInterest` front-run vetoes a block's rate-driven allocator move | `BaserateAllocator.sol` | Open |
-| R2V-5 / R2X-5 | Info / Low | Lump yield vesting in wsMUSD is shared with late depositors; a flash-funded deposit around `FeeRouter.distribute` captures part of the sMUSD share | `WsMUSD.sol`, `FeeRouter.sol` | Open |
-| R2V-6 | Info | A core-only redeploy leaves dependent keys in the merged registry | `Deploy.s.sol` | Documented: the redeploy runs every script |
+| R2V-1 / R2X-9 | Medium | A backstop deposit placed between a liquidation buy and its sale buys in at the 0.95 mark and takes most of the mark-up | `Backstop.sol` deposit pricing | Deployed: deposits close while the backstop holds BTC (`HoldingInventory`). `test_fix_R2V1_*`, `test_fix_R2X9_*` |
+| R2V-7 / R2X-1 | Medium | A broken sMUSD `withdraw` freezes backstop exits and the backstop liquidation venue (it pays through wsMUSD) | `Backstop.sol` `_payOut`, `_park` | Deployed: when sMUSD's `withdraw` fails, exits pay what cash allows and the rest in kind (`PaidInKind`), and the venue runs on idle cash. `test_fix_R2V7_*`, `test_fix_R2X1_*` |
+| R2X-4 | Medium | Anyone can force-deallocate vMUSD's wsMUSD position for free and strip its share of wsMUSD's vesting yield | `WsMusdLiquidityAdapter.sol`, vault config | Deployed: the adapter refuses `forceDeallocate` (`ForceDeallocateDisabled`); idle MUSD is parked during the cooldown. `test_fix_R2X4_*` |
+| R2X-2 | Medium (conditional) | With Pyth up to 65 min stale, the ±10% band can block every liquidation in a fast crash; bad debt lands on vMUSD | `BtcMusdOracle.sol` | Deployed: the band gates only while Pyth is under 600 s old (`PYTH_BTC_BAND_MAX_AGE`). `test_fix_R2X2_*` |
+| R2V-3 | Low | A borrow–checkpoint–repay in one transaction blocks the allocator's move to wsMUSD for 24 h | `BaserateAllocator.sol` `_checkpoint` | Deployed: the checkpoint carries the last reading forward, so a borrow repaid in the same transaction is not recorded. `test_fix_R2V3_*` |
+| R2X-3 | Low | Buffer top-ups can be looped within one transaction to push vMUSD into M1 against policy | `BaserateAllocator.sol` | Deployed: one buffer top-up per block (`lastTopUpAt`). `test_fix_R2X3_*` |
+| R2X-6 | Medium (keeper) | Spam accounts slow the keeper's liquidation scan (two reads per account) | `apps/keeper` | Deployed: one multicall per 200 accounts |
+| R2X-7 | Low (keeper) | A 1-wei bribe made the keeper skip the epoch's fee flush | `apps/keeper` | Deployed: the keeper's own once-per-epoch record, per FeeRouter |
+| R2X-8 | Low (keeper) | One skewed block could zero the depth sample behind cap cuts | `apps/keeper` | Deployed: 24 h median, never below current borrows |
+| R2X-10 | Low (web) | The app's 1.3× gas headroom is too little for precompile-heavy transactions on Mezo | `apps/web` | Deployed: max(2 × estimate, 1.5M) |
+| R2V-2 | Info | An unseeded backstop prices deposits off a donation again | `DeployLiquidation.s.sol` | Deployed: `DeployLiquidation` seeds the backstop in the same broadcast and refuses to run without it. `test_fix_R2V2_*` |
+| R2V-4 | Info | A free `accrueInterest` front-run vetoes a block's rate-driven allocator move | `BaserateAllocator.sol` | Known limitation, documented in [SECURITY.md](../SECURITY.md). `test_known_R2V4_*` |
+| R2V-5 / R2X-5 | Info / Low | Lump yield vesting in wsMUSD is shared with late depositors; a flash-funded deposit around `FeeRouter.distribute` captures part of the sMUSD share | `WsMUSD.sol`, `FeeRouter.sol` | Known limitation, documented in [SECURITY.md](../SECURITY.md). `test_known_R2V5_*`, `test_known_R2X5_*` |
+| R2V-6 | Info | A core-only redeploy leaves dependent keys in the merged registry | `Deploy.s.sol` | Documented: the redeploy runs every script (as the v2 redeploy did) |
+
+## Round 3 (26 Oct 2026)
+
+Three fresh reviewers attacked the round-2 diff (`524b0f1..16dbaf0`) through three lenses: is each fix correct and complete, what regressed in the new code paths, and what the new behaviour enables economically. Every finding has a passing PoC in `contracts/test/audit/Round3_{fixes,regressions,economics}.t.sol` (19 tests). **No Critical, High or Medium findings**, so the v2 stack stands; the fixes below are scheduled for Wave 2 with regression tests, and the oracle pair gets a keeper-side mitigation first.
+
+| ID | Severity | Title | Location | Status |
+|---|---|---|---|---|
+| R3-1 / R3E-1 / R3F-B | Low | The backstop's parking pause ends on a timer, or on any successful wsMUSD withdraw (even one wsMUSD pays from its own idle MUSD), while sMUSD's withdraw is still broken; the next deposit or sale re-parks the venue's cash and quotes still show the venue as open | `Backstop.sol` `_payOut`, `_park`, `quoteBuy` | Open: the pause will follow wsMUSD's health (a probe withdraw that must reach sMUSD), not a timer, and quotes stay capped at idle cash while paused |
+| R3-3 | Info | During the pause, an exit paid in kind spends the venue's idle MUSD first, even when the backstop's wsMUSD could pay it | `Backstop.sol` `_payOut` | Open: pay in kind from the wsMUSD position first |
+| R3-2 | Low | A 1 MUSD top-up (supply, rebalance, withdraw in one transaction) takes the block's only buffer top-up and throttles restoration to 1 MUSD per block | `BaserateAllocator.sol` `_planBufferTopUp` | Open: limit top-ups by amount per block, not by count |
+| R3E-2 | Low | One touched checkpoint an hour can carry a recorded liquidity low forward indefinitely, blocking the move to wsMUSD | `BaserateAllocator.sol` `_checkpoint` | Open: a touched checkpoint records share prices but no liquidity observation, so a low ages out 24 h after it was seen |
+| R3E-3 / R3F-C | Low | The 600 s Pyth band cuts both ways: between Mezo's hourly Pyth pushes it is off, so a Skip misprint above 10% gets through; and anyone can keep it on with genuine but lagged Pyth prints, stretching a crash-time freeze past 10 minutes | `BtcMusdOracle.sol` `price()` | Open: the keeper will push the latest Pyth BTC/USD update every few minutes and before each liquidation (permissionless, no fee on Mezo), which keeps the band on and makes Pyth reject older prints; then the band age can rise again |
+| R3F-A | Low | MUSD sent to the backstop's predictable address before the seed deposit lands voids or blocks the dead-share seed | `DeployLiquidation.s.sol` `_seed` | Open: mint the dead shares in the constructor. Not hit on v2: `balanceOf(0x…dEaD)` = 1e18 = total supply |
+
+What round 3 confirmed sound, with `test_R3_verify_*` tests where noted: deposits stay closed while the backstop holds BTC and no path reopens them; the in-kind fallback cannot be forced by a gas limit or triggered on a healthy wsMUSD; in-kind and partial claims never pay above the request's NAV and reserved assets always match open requests (512-run fuzz); vMUSD's `forceDeallocate` on the market adapter still works with sMUSD broken, and the allocator's M1-first exit stays reachable; the checkpoint carry-forward never raises the 24 h minimum; the 600 s band only removes reverts; and every flow stays at 7 precompile calls or fewer.
 
 ## Static analysis: Slither 0.11 (`contracts/src`, dependencies excluded)
 
