@@ -31,7 +31,7 @@ LIVE ON TESTNET (14 contracts, audited internally, all source-verified on Sourci
 - Lend: vMUSD, a Morpho Vault V2 from Mezo's VaultV2Factory; idle MUSD earns sMUSD, an allocator lends into M1 only when it pays more.
 - Liquidate: zero-capital FlashLiquidator (Tigris vAMM/CL200) + Backstop pool.
 - Fees: FeeRouter sends 40% to sMUSD and 40% as MUSD bribes to veBTC voters on the BTC/MUSD gauge. RiskLens: oracle, depth, caps and trove queue in one call.
-- Web app (Borrow, Lend, Save, Liquidate, Risk, Fees, Evidence), SDK, subgraph, judge dispenser.
+- Web app (Borrow, Lend, Save, Liquidate, Risk, Fees, Evidence), SDK on npm (@baserate/sdk), subgraph on Goldsky, judge dispenser.
 - Keeper on Railway, 10 jobs: 12 s liquidation scan, allocator, wsMUSD sync, backstop upkeep, fee flush, canary upkeep, sMUSD watcher. On the first deployment it liquidated its own canary unattended (0x44fc007a…a6f43a). Status: keeper-production-be8a.up.railway.app/status.
 
 SECURITY. Three AI audit rounds with a public ledger (docs/audit/FINDINGS.md); every contract finding is proven by a Foundry PoC. Rounds 1–2: 10 Medium and 23 Low/Info findings fixed, 3 documented as known limits; the whole stack was redeployed with the fixes on 26 Oct. Round 3: no Medium or worse; 8 Lows scheduled. Morpho does the accounting; immutable core; exits never pause; 48 h timelock on raises.
@@ -50,7 +50,7 @@ BTC holders on Mezo who want dollars without selling BTC and without redemption 
 Solidity 0.8.28, Foundry, OpenZeppelin v5, Morpho Blue + AdaptiveCurveIrm, Morpho Vault V2, Pyth, Mezo Skip precompile, Tigris pools and gauges; React 19, Vite, wagmi 2, viem 2, RainbowKit, TanStack Router and Query, Tailwind 4, Playwright; Node keeper on Railway; Vercel; Sourcify.
 
 ## Future milestones
-1. Wave 2 (by Nov 15, 2026): credit lines with an x402 agent, come-back flow for redeemed borrowers, SDK on npm; mainnet proof deployment with caps ≤2,000 MUSD.
+1. Wave 2 (by Nov 15, 2026): credit lines with an x402 agent, come-back flow for redeemed borrowers; mainnet proof deployment with caps ≤2,000 MUSD.
 2. Dec 2026: third-party audit; ask Mezo for a vMUSD vault gauge and the Morpho fee switch on M1 paid to sMUSD.
 3. Q1 2027: grow caps with measured liquidation depth; Base phase (MUSD-collateral USDC credit on Base Morpho).
 

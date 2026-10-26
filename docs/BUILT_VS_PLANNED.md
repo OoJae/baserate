@@ -34,7 +34,7 @@ Judges told us to separate what works today from what is coming. Everything unde
 |---|---|---|
 | Web app | Borrow, Save, Lend, Liquidate (with the backstop), Risk, Fees and Evidence pages; get-test-funds card | `apps/web/` |
 | e2e harness | Playwright drives the deployed UI with a real signing wallet: the judge journey, a vMUSD deposit and withdrawal, and live checks of Liquidate, Risk and Fees, each confirmed from the RPC (and `cast`) | `apps/web/e2e/` |
-| SDK | Typed chains and registry, ABIs generated from the contracts, Morpho math, MUSD permit signing, plain-language revert decoding, vault/liquidation/fee/RiskLens helpers | `packages/sdk/` |
+| SDK | Typed chains and registry, ABIs generated from the contracts, Morpho math, MUSD permit signing, plain-language revert decoding, vault/liquidation/fee/RiskLens helpers. Published as [`@baserate/sdk`](https://www.npmjs.com/package/@baserate/sdk) (`npm i @baserate/sdk viem`) | `packages/sdk/` |
 | Keeper | Runs on Railway with separate keys per role and a Postgres action log. Ten jobs: a liquidation scan of every M1 account every 12 s (one multicall per 200 accounts, gas sized for Mezo's precompiles), the allocator and wsMUSD upkeep, a testnet yield simulator, backstop inventory sales and sync, a once-per-epoch fee flush, canary upkeep, depth-linked caps (a dry run on testnet), an sMUSD upgrade watcher and health checks. Alerts go to Telegram. Status at [/status](https://keeper-production-be8a.up.railway.app/status), JSON at `/v1/status` and `/v1/evidence` | `apps/keeper/` |
 | Subgraph | A Goldsky indexer on Mezo testnet for history: accounts, M1 positions and liquidations, vault flows, allocator moves, backstop exits and fee distributions. The app reads history from it and falls back to log reads. [Endpoint](https://api.goldsky.com/api/public/project_clts5z9ypl0nf01uv385l1oui/subgraphs/baserate-mezo-testnet/prod/gn) | `packages/subgraph/` |
 | Audit ledger | Three AI audit rounds, every contract finding proven by a Foundry PoC; rounds 1 and 2 fixed and live in the v2 stack, round 3 found no Medium or worse | `docs/audit/FINDINGS.md` |
@@ -46,5 +46,4 @@ Judges told us to separate what works today from what is coming. Everything unde
 | `CreditLineModule` | Capped, revocable MUSD credit lines for apps and AI agents, with an x402 agent demo |
 | Come-back flow | Lets borrowers whose troves were redeemed reclaim stranded BTC straight into a redemption-free position |
 | Round-3 fixes | The round-3 Lows in the contracts: the backstop's parking pause follows wsMUSD's health, per-block top-up budgets, liquidity lows that age out, a seed minted in the constructor. The keeper's Pyth pusher for the oracle pair is built but off, because Pyth's Hermes now needs a paid plan |
-| SDK release | `@baserate/sdk` published to npm |
 | Mainnet proof mode | The same contracts on Mezo mainnet with caps of at most 2,000 MUSD, plus recorded evidence transactions |
