@@ -842,8 +842,9 @@ test.describe('judge journey on Mezo testnet', () => {
     })
     for (const bad of ['Not found', 'Transaction failed', 'Block mismatch', 'Explorer unreachable'])
       await expect(list.getByText(bad, { exact: true })).toHaveCount(0)
-    // Calls into Baserate contracts show method names, not bare selectors Blockscout could not decode.
-    await expect(list.getByText('method openAndBorrow', { exact: true })).toBeVisible()
+    // Calls into Baserate contracts show method names, not bare selectors Blockscout could not decode. The v1 area
+    // keeps the first deployment's borrow too, so there is more than one.
+    await expect(list.getByText('method openAndBorrow', { exact: true }).first()).toBeVisible()
     await expect(list.getByText(/^method 0x[0-9a-fA-F]{8}$/)).toHaveCount(0)
     // Every Baserate contract shows a source-verified badge (Sourcify exact match or Blockscout).
     const ours = page
